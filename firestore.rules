@@ -1,0 +1,284 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : {};
+    }
+
+    function isUserRole(role) {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             ('role' in getUserData()) && 
+             getUserData().role == role;
+    }
+
+    function isAdmin() {
+      return isUserRole('Administrator');
+    }
+
+    function isTeacher() {
+      return isUserRole('Teacher') || isAdmin();
+    }
+
+    function isValidUser(data) {
+      return data.uid is string && data.uid.size() <= 128 &&
+             data.email is string && data.email.size() <= 128 &&
+             data.role is string && (data.role == 'Teacher' || data.role == 'Student' || data.role == 'Parent' || data.role == 'Administrator') &&
+             (!('suspended' in data) || data.suspended is bool);
+    }
+
+    function isValidDocument(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.title is string && data.title.size() <= 256 &&
+             data.docType is string && data.docType.size() <= 64;
+    }
+
+    function isValidFeedback(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.docId is string && data.docId.size() <= 128 &&
+             data.rating is number && data.rating >= 1 && data.rating <= 5 &&
+             data.relevanceRating is number && data.relevanceRating >= 1 && data.relevanceRating <= 5;
+    }
+
+    function isValidAnnotation(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.docId is string && data.docId.size() <= 128 &&
+             data.note is string && data.note.size() <= 5000 &&
+             data.selectedText is string && data.selectedText.size() <= 10000;
+    }
+
+    function isValidPilotFeedback(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userUid is string && data.userUid.size() <= 128 &&
+             data.userEmail is string && data.userEmail.size() <= 128 &&
+             data.easeOfUse is number && data.easeOfUse >= 1 && data.easeOfUse <= 5 &&
+             data.qualityOfAI is number && data.qualityOfAI >= 1 && data.qualityOfAI <= 5 &&
+             data.standardsRelevance is number && data.standardsRelevance >= 1 && data.standardsRelevance <= 5 &&
+             data.recommendationLikelihood is number && data.recommendationLikelihood >= 1 && data.recommendationLikelihood <= 5;
+    }
+
+    function isValidVoiceNote(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.title is string && data.title.size() <= 256 &&
+             data.transcript is string && data.transcript.size() <= 100000;
+    }
+
+    function isValidVoiceNoteTask(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.noteId is string && data.noteId.size() <= 128 &&
+             data.text is string && data.text.size() <= 512 &&
+             data.completed is bool;
+    }
+
+    function isValidLearningPath(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.subject is string && data.subject.size() <= 128 &&
+             data.title is string && data.title.size() <= 512 &&
+             data.description is string && data.description.size() <= 10000;
+    }
+
+    function isValidParentTeacherMessage(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.senderUid is string && data.senderUid == request.auth.uid &&
+             data.senderName is string && data.senderName.size() <= 256 &&
+             data.senderRole is string &&
+             data.recipientUid is string && data.recipientUid.size() <= 128 &&
+             data.recipientName is string && data.recipientName.size() <= 256 &&
+             data.recipientRole is string &&
+             (!('docId' in data) || (data.docId is string && data.docId.size() <= 128)) &&
+             (!('docTitle' in data) || (data.docTitle is string && data.docTitle.size() <= 256)) &&
+             data.text is string && data.text.size() <= 5000 &&
+             (!('read' in data) || data.read is bool);
+    }
+
+    // Users Collection rules
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (request.auth.uid == userId) && isValidUser(request.resource.data) && (
+        request.resource.data.role != 'Administrator' || 
+        request.auth.token.email == 'ojiambo.godfrey@gmail.com' || 
+        request.auth.token.email == 'godfrey@stemscholar.space' ||
+        request.auth.token.email == 'ojiambo.godfry@gmail.com' ||
+        request.auth.token.email == 'godfreynexused@gmail.com'
+      );
+      allow update: if isSignedIn() && (request.auth.uid == userId || isAdmin()) && isValidUser(request.resource.data) && (
+        request.resource.data.role == resource.data.role || isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Documents Collection rules
+    match /documents/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidDocument(request.resource.data);
+      allow update: if isSignedIn() && isValidDocument(request.resource.data);
+      allow delete: if isSignedIn();
+
+      match /imageChunks/{chunkId} {
+        allow read, write: if isSignedIn();
+      }
+
+      match /versions/{versionId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn();
+        allow delete: if isAdmin();
+      }
+
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create, update: if isTeacher() && request.auth.uid == request.resource.data.authorUid;
+        allow delete: if isTeacher() && (request.auth.uid == resource.data.authorUid || isAdmin());
+      }
+
+      match /reactions/{reactionId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && request.auth.uid == request.resource.data.userUid;
+        allow update: if false;
+        allow delete: if isSignedIn() && (request.auth.uid == resource.data.userUid || isAdmin());
+      }
+
+      match /annotations/{annotationId} {
+        allow read: if isSignedIn() && request.auth.uid == resource.data.authorUid;
+        allow create, update: if isSignedIn() && request.auth.uid == request.resource.data.authorUid && isValidAnnotation(request.resource.data);
+        allow delete: if isSignedIn() && (request.auth.uid == resource.data.authorUid || isAdmin());
+      }
+    }
+
+    // Feedbacks Collection rules
+    match /feedbacks/{feedbackId} {
+      allow read: if isSignedIn();
+      allow create, update: if isTeacher() && request.auth.uid == request.resource.data.authorUid && isValidFeedback(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Peer Feedbacks Collection rules (Colleague peer-to-peer reviews)
+    match /peer_feedbacks/{feedbackId} {
+      allow read: if isSignedIn();
+      allow create, update: if isTeacher() && request.auth.uid == request.resource.data.authorUid &&
+                            request.resource.data.rating is number && request.resource.data.rating >= 1 && request.resource.data.rating <= 5 &&
+                            request.resource.data.comment is string && request.resource.data.comment.size() <= 2000;
+      allow delete: if isTeacher() && (request.auth.uid == resource.data.authorUid || isAdmin());
+    }
+
+    // Drafts Collection rules
+    match /drafts/{draftId} {
+      allow read, write: if isTeacher() && request.auth.uid == (resource == null ? request.resource.data.userId : resource.data.userId);
+    }
+
+    // Saved Prompt Templates Collection rules
+    match /promptTemplates/{templateId} {
+      allow read, write: if isTeacher() && request.auth.uid == (resource == null ? request.resource.data.userId : resource.data.userId);
+    }
+
+    // Active Sessions Collection rules
+    match /active-sessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && request.auth.uid == request.resource.data.userId;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Question Bank Collection rules
+    match /questionBank/{questionId} {
+      allow read: if isSignedIn();
+      allow create, update: if isTeacher() && request.auth.uid == request.resource.data.userId;
+      allow delete: if isTeacher() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Pilot Feedbacks Collection rules
+    match /pilotFeedbacks/{feedbackId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn() && request.auth.uid == request.resource.data.userUid && isValidPilotFeedback(request.resource.data);
+      allow update, delete: if false;
+    }
+
+    // Activity Logs Collection rules
+    match /activity-logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    // Admin Notifications Collection rules
+    match /admin-notifications/{notificationId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // VoiceNotes and parsed tasks Collection rules
+    match /voiceNotes/{noteId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidVoiceNote(request.resource.data);
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && isValidVoiceNote(request.resource.data);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      match /tasks/{taskId} {
+        allow read: if isSignedIn() && get(/databases/$(database)/documents/voiceNotes/$(noteId)).data.userId == request.auth.uid;
+        allow create, update: if isSignedIn() && 
+                              get(/databases/$(database)/documents/voiceNotes/$(noteId)).data.userId == request.auth.uid &&
+                              isValidVoiceNoteTask(request.resource.data);
+        allow delete: if isSignedIn() && get(/databases/$(database)/documents/voiceNotes/$(noteId)).data.userId == request.auth.uid;
+      }
+    }
+
+    // Uploaded Resources Collection rules
+    match /uploadedResources/{resourceId} {
+      allow read: if isSignedIn();
+      allow create, update: if isTeacher() && request.auth.uid == request.resource.data.userId;
+      allow delete: if isTeacher() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Uploaded Folders Collection rules
+    match /uploadedFolders/{folderId} {
+      allow read: if isSignedIn();
+      allow create, update: if isTeacher() && request.auth.uid == request.resource.data.userId;
+      allow delete: if isTeacher() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Personalized Learning Paths Collection rules
+    match /personalizedLearningPaths/{pathId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidLearningPath(request.resource.data);
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && isValidLearningPath(request.resource.data);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Parent-Teacher direct messaging rules
+    match /parent_teacher_messages/{messageId} {
+      allow read: if isSignedIn() && (request.auth.uid == resource.data.senderUid || request.auth.uid == resource.data.recipientUid);
+      allow create: if isSignedIn() && (request.auth.uid == request.resource.data.senderUid) && isValidParentTeacherMessage(request.resource.data);
+      allow update: if isSignedIn() && (request.auth.uid == resource.data.recipientUid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']) && request.resource.data.read is bool;
+      allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == resource.data.senderUid);
+    }
+
+    // System Config Collection rules
+    match /system-config/{configId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Peer Tutoring Connections Collection rules
+    match /peerTutoringConnections/{connId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Health / Connection Test Collection rules
+    match /test/{docId} {
+      allow read: if true;
+    }
+  }
+}

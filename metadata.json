@@ -1,0 +1,6 @@
+{
+  "name": "EduNexus",
+  "description": "An AI-powered assistant for teachers to generate curriculum-aligned lesson plans, schemes of work, worksheets, notes, and rubrics with a rich interactive editor.",
+  "requestFramePermissions": ["microphone", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

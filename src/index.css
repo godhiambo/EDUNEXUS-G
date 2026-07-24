@@ -1,0 +1,980 @@
+@import url('https://fonts.googleapis.com/css2?family=Architects+Daughter&family=Kalam:wght@300;400;700&family=Patrick+Hand&family=Schoolbell&family=Inter:wght@400;500;600;700&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-handwritten: "Kalam", "Schoolbell", "Patrick Hand", cursive;
+  --font-sketch: "Architects Daughter", cursive;
+  --font-sans: "Inter", sans-serif;
+  --font-serif: "Merriweather", serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+:root {
+  --ux-accent: #5f6f52;
+  --ux-accent-soft: rgba(95, 111, 82, 0.2);
+  --ux-focus-ring: 0 0 0 3px var(--ux-accent-soft);
+  --ux-card-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+a,
+button,
+input,
+select,
+textarea {
+  transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  transform: translateY(0);
+}
+
+button:not(:disabled):hover,
+[role="button"]:not([aria-disabled="true"]):hover {
+  transform: translateY(-1px);
+}
+
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active {
+  transform: translateY(0);
+}
+
+input,
+select,
+textarea {
+  border-radius: 0.75rem;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible {
+  outline: none;
+  box-shadow: var(--ux-focus-ring);
+}
+
+.bg-white,
+.bg-white\/50 {
+  box-shadow: var(--ux-card-shadow);
+}
+
+.dark {
+  --ux-card-shadow: 0 12px 36px rgba(2, 6, 23, 0.42);
+}
+
+/* Notebook paper effect */
+.notebook-paper {
+  background-color: #faf6ee; /* Warm antique notebook paper color */
+  background-image: 
+    linear-gradient(#c5d1e0 1px, transparent 1px);
+  background-size: 100% 1.85rem;
+  position: relative;
+  padding-left: 4.5rem !important;
+  padding-right: 2rem !important;
+  line-height: 1.85rem;
+  box-shadow: inset 0 0 40px rgba(0,0,0,0.03), 0 10px 25px rgba(0,0,0,0.05);
+  border-radius: 16px;
+  border: 1px solid #eadecd;
+}
+
+@media (max-width: 640px) {
+  .notebook-paper {
+    padding-left: 1.5rem !important;
+    padding-right: 1rem !important;
+  }
+}
+
+.notebook-paper::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3.5rem;
+  width: 2px;
+  background-color: rgba(239, 68, 68, 0.4); /* Left red margin line */
+}
+
+@media (max-width: 640px) {
+  .notebook-paper::before {
+    left: 1rem !important;
+  }
+}
+
+/* Notebook binding holes on the very left */
+.notebook-paper::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 1rem;
+  width: 1.5rem;
+  background-image: radial-gradient(circle, #eadecd 6px, transparent 7px);
+  background-size: 100% 3rem;
+  opacity: 0.7;
+}
+
+@media (max-width: 640px) {
+  .notebook-paper::after {
+    display: none !important;
+  }
+}
+
+/* Lined handwriting content styles */
+.handwritten-content {
+  font-family: var(--font-handwritten);
+  color: #1e293b;
+  font-size: 1.1rem;
+}
+
+.handwritten-content h1,
+.handwritten-content h2,
+.handwritten-content h3,
+.handwritten-content h4 {
+  font-family: var(--font-sketch);
+  color: #3b5e2b; /* organic green chalk/pencil feel */
+  line-height: 2rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  font-weight: bold;
+}
+
+.handwritten-content h1 {
+  font-size: 1.8rem;
+  border-bottom: 2px dashed rgba(95, 111, 82, 0.3);
+  padding-bottom: 4px;
+}
+
+.handwritten-content h2 {
+  font-size: 1.45rem;
+}
+
+.handwritten-content h3 {
+  font-size: 1.25rem;
+}
+
+.handwritten-content p {
+  margin-bottom: 1.2rem;
+  text-indent: 0.5rem;
+}
+
+.handwritten-content ul, 
+.handwritten-content ol {
+  margin-left: 1rem;
+  margin-bottom: 1rem;
+}
+
+.handwritten-content li {
+  list-style-type: square;
+  margin-bottom: 0.4rem;
+}
+
+/* Keep code and mathematical equations clean but readable */
+.handwritten-content code {
+  font-family: monospace;
+  background-color: rgba(0, 0, 0, 0.04);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.handwritten-content blockquote {
+  border-left: 4px solid #d4a373;
+  padding-left: 1rem;
+  margin-left: 1rem;
+  font-style: italic;
+  color: #475569;
+  background: rgba(212, 163, 115, 0.05);
+}
+
+/* Modern Minimalist effect */
+.modern-minimalist {
+  background-color: #ffffff; /* Pure white background */
+  position: relative;
+  padding-left: 3rem !important;
+  padding-right: 3rem !important;
+  padding-top: 2.5rem !important;
+  padding-bottom: 2.5rem !important;
+  line-height: 1.85rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
+  border: 2px solid #0f172a; /* High contrast dark border */
+}
+
+@media (max-width: 640px) {
+  .modern-minimalist {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+    padding-top: 1.5rem !important;
+    padding-bottom: 1.5rem !important;
+  }
+}
+
+.minimalist-content {
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  color: #0f172a; /* deep slate/black text */
+  font-size: 1rem;
+}
+
+.minimalist-content h1,
+.minimalist-content h2,
+.minimalist-content h3,
+.minimalist-content h4 {
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  color: #0f172a;
+  line-height: 1.5;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  font-weight: 800; /* Extra bold for high-contrast heading distinction */
+}
+
+.minimalist-content h1 {
+  font-size: 2rem;
+  border-bottom: 3px solid #0f172a; /* Solid high-contrast line */
+  padding-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: -0.025em;
+}
+
+.minimalist-content h2 {
+  font-size: 1.5rem;
+  border-bottom: 2px solid #334155;
+  padding-bottom: 4px;
+}
+
+.minimalist-content h3 {
+  font-size: 1.25rem;
+}
+
+.minimalist-content p {
+  margin-bottom: 1.2rem;
+}
+
+.minimalist-content ul, 
+.minimalist-content ol {
+  margin-left: 1.5rem;
+  margin-bottom: 1.2rem;
+}
+
+.minimalist-content li {
+  list-style-type: disc;
+  margin-bottom: 0.5rem;
+}
+
+.minimalist-content code {
+  font-family: monospace;
+  background-color: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+.minimalist-content blockquote {
+  border-left: 4px solid #0f172a;
+  padding-left: 1.25rem;
+  margin-left: 0;
+  font-style: italic;
+  color: #334155;
+  background: #f8fafc;
+}
+
+/* ==========================================================
+   DEDICATED PRINT STYLESHEET FOR PHYSICAL CLASSROOM DISTRIBUTION
+   ========================================================== */
+@media print {
+  /* Set standard layout and page margins */
+  @page {
+    size: A4 portrait;
+    margin: 15mm 15mm 20mm 15mm;
+  }
+
+  /* Reset standard layout for printing */
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 11pt !important;
+    line-height: 1.5 !important;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  }
+
+  /* Hide interactive web components, headers, footers, buttons, sidebars, and speech/dictation tools */
+  .no-print,
+  button,
+  nav,
+  aside,
+  header:not(.print-header),
+  footer:not(.print-footer),
+  .action-header,
+  .sidebar,
+  .toolbar,
+  .mic-button,
+  .fixed-action-btn,
+  #whiteboard-modal {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    width: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    opacity: 0 !important;
+  }
+
+  /* Expand main printable container to take full page width */
+  .print-full-width,
+  main,
+  .main-content {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    float: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  /* Enhance headings, margins, and typography for maximum physical legibility */
+  h1, h2, h3, h4, h5, h6 {
+    color: #000000 !important;
+    font-weight: bold !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+    margin-top: 1.5em !important;
+    margin-bottom: 0.5em !important;
+  }
+
+  h1 {
+    font-size: 20pt !important;
+    border-bottom: 2px solid #000000 !important;
+    padding-bottom: 4pt !important;
+    margin-top: 0 !important;
+  }
+
+  h2 {
+    font-size: 15pt !important;
+    border-bottom: 1px solid #333333 !important;
+    padding-bottom: 2pt !important;
+  }
+
+  h3 {
+    font-size: 12.5pt !important;
+  }
+
+  p {
+    margin-bottom: 1em !important;
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* Formatted lists */
+  ul, ol {
+    margin-left: 20pt !important;
+    margin-bottom: 1em !important;
+  }
+
+  li {
+    margin-bottom: 0.25em !important;
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* Classroom evaluation rubrics, schemes, and data tables */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin-top: 1.2em !important;
+    margin-bottom: 1.2em !important;
+    font-size: 10pt !important;
+    page-break-inside: auto !important;
+  }
+
+  table, th, td {
+    border: 1px solid #000000 !important;
+  }
+
+  th {
+    background-color: #f3f4f6 !important;
+    color: #000000 !important;
+    font-weight: bold !important;
+    padding: 6pt 8pt !important;
+    text-align: left !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  td {
+    padding: 5pt 8pt !important;
+    vertical-align: top !important;
+  }
+
+  /* Prevent splitting items across separate page breaks awkwardly */
+  tr, img, pre, blockquote, .diagram-card, .rubric-table, .quiz-question, .lesson-stage-card {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* Instructional breakout sections, quote calls, blockquotes, and notices */
+  blockquote, .instructional-box, .notice-box {
+    border-left: 3.5pt solid #000000 !important;
+    background: #f9fafb !important;
+    padding: 8pt 12pt !important;
+    margin: 12pt 0 !important;
+    color: #111111 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Format hyperlinks to display their destinations when printed */
+  a {
+    color: #000000 !important;
+    text-decoration: underline !important;
+  }
+  
+  a[href^="http"]:after {
+    content: " (" attr(href) ")" !important;
+    font-size: 8.5pt !important;
+    color: #555555 !important;
+  }
+
+  /* Adapt interactive notebook/lined paper layout elements to print cleanly */
+  .notebook-paper {
+    background: #ffffff !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+  }
+
+  .notebook-paper::before,
+  .notebook-paper::after {
+    display: none !important;
+  }
+
+  .handwritten-content {
+    font-family: "Inter", -apple-system, sans-serif !important;
+    font-size: 11pt !important;
+    line-height: 1.5 !important;
+    color: #000000 !important;
+  }
+
+  .handwritten-content h1,
+  .handwritten-content h2,
+  .handwritten-content h3,
+  .handwritten-content h4 {
+    font-family: "Inter", -apple-system, sans-serif !important;
+    color: #000000 !important;
+    border-bottom: 1.5pt solid #000000 !important;
+  }
+
+  /* Adapt modern minimalist document containers to simple print layouts */
+  .modern-minimalist {
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+  }
+
+  /* ==========================================================
+     AUTOMATIC TABLE OF CONTENTS & PHYSICAL PRINT NAVIGATION
+     ========================================================== */
+  .print-toc-container {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    page-break-after: auto !important;
+    margin-top: 1rem !important;
+    margin-bottom: 2rem !important;
+    padding: 12pt 16pt !important;
+    border: 1.5pt solid #1e293b !important;
+    background-color: #f8fafc !important;
+    border-radius: 6pt !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .print-toc-header {
+    font-size: 11pt !important;
+    font-weight: 800 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+    color: #0f172a !important;
+    border-bottom: 1pt solid #cbd5e1 !important;
+    padding-bottom: 6pt !important;
+    margin-bottom: 10pt !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+  }
+
+  .print-toc-list {
+    list-style: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .print-toc-item {
+    display: flex !important;
+    align-items: baseline !important;
+    justify-content: space-between !important;
+    margin-bottom: 5pt !important;
+    font-size: 10pt !important;
+    line-height: 1.4 !important;
+  }
+
+  .print-toc-item-h1 {
+    font-weight: 700 !important;
+    color: #0f172a !important;
+    margin-top: 6pt !important;
+  }
+
+  .print-toc-item-h2 {
+    font-weight: 600 !important;
+    color: #334155 !important;
+    padding-left: 12pt !important;
+  }
+
+  .print-toc-item-h3 {
+    font-weight: 400 !important;
+    color: #475569 !important;
+    padding-left: 24pt !important;
+  }
+
+  .print-toc-title {
+    text-decoration: none !important;
+    color: #000000 !important;
+    max-width: 70% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .print-toc-leader {
+    flex-grow: 1 !important;
+    border-bottom: 1pt dotted #94a3b8 !important;
+    margin: 0 6pt !important;
+    height: 0.8em !important;
+  }
+
+  /* Target page number generator via CSS Paged Media target-counter */
+  .print-toc-page-num {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+    font-weight: 700 !important;
+    color: #0f172a !important;
+    font-size: 9.5pt !important;
+    text-decoration: none !important;
+    shrink: 0 !important;
+  }
+
+  .print-toc-page-num::after {
+    content: "p. " target-counter(attr(href), page) !important;
+  }
+}
+
+/* ==========================================================
+   GLOBAL DARK THEME DEFINITION AND ADAPTIVE STYLING OVERRIDES
+   ========================================================== */
+
+/* Define dark theme variable overrides */
+.dark {
+  --theme-bg-app: #0f172a;       /* Slate 900 */
+  --theme-bg-card: #1e293b;      /* Slate 800 */
+  --theme-bg-sidebar: #090d16;   /* Deep charcoal dark slate */
+  --theme-bg-active: #1e293b;
+  --theme-border: #334155;       /* Slate 700 */
+  --theme-text-main: #f8fafc;    /* Slate 50 */
+  --theme-text-muted: #94a3b8;   /* Slate 400 */
+  --theme-text-dark: #f1f5f9;    /* Slate 100 */
+  --theme-input-bg: #1e293b;     /* Slate 800 */
+}
+
+/* Base adaptive structural rules under dark mode class */
+.dark body,
+.dark html,
+.dark .min-h-screen {
+  background-color: var(--theme-bg-app) !important;
+  color: var(--theme-text-main) !important;
+}
+
+/* Nav & header containers */
+.dark nav {
+  background-color: var(--theme-bg-card) !important;
+  border-color: var(--theme-border) !important;
+}
+
+.dark nav .text-slate-800 {
+  color: var(--theme-text-dark) !important;
+}
+
+/* Sidebar & Library panels */
+.dark aside,
+.dark .bg-\[\#f4f1ea\],
+.dark .bg-\[\#fcfbf9\] {
+  background-color: var(--theme-bg-sidebar) !important;
+  border-color: var(--theme-border) !important;
+}
+
+/* Cards & Containers */
+.dark .bg-white {
+  background-color: var(--theme-bg-card) !important;
+  border-color: var(--theme-border) !important;
+  color: var(--theme-text-main) !important;
+}
+
+.dark .bg-white\/50 {
+  background-color: rgba(30, 41, 59, 0.4) !important;
+  border-color: var(--theme-border) !important;
+}
+
+.dark .bg-slate-50 {
+  background-color: #0f172a !important;
+}
+
+.dark .bg-slate-50\/50 {
+  background-color: rgba(15, 23, 42, 0.5) !important;
+}
+
+.dark .border-slate-100,
+.dark .border-slate-200,
+.dark .border-slate-250,
+.dark .border-\[\#e5e1da\] {
+  border-color: var(--theme-border) !important;
+}
+
+/* Interactive elements & inputs */
+.dark input[type="text"],
+.dark input[type="password"],
+.dark input[type="email"],
+.dark input[type="number"],
+.dark select,
+.dark textarea {
+  background-color: var(--theme-input-bg) !important;
+  border-color: var(--theme-border) !important;
+  color: var(--theme-text-dark) !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* Hover effects and list entries */
+.dark .hover\:bg-slate-50:hover {
+  background-color: #1e293b !important;
+}
+
+.dark .hover\:bg-white\/50:hover {
+  background-color: rgba(30, 41, 59, 0.6) !important;
+}
+
+.dark .hover\:bg-\[\#e9e5db\]:hover {
+  background-color: rgba(95, 111, 82, 0.15) !important;
+}
+
+.dark .bg-emerald-50,
+.dark .bg-blue-50,
+.dark .bg-amber-50,
+.dark .bg-rose-50,
+.dark .bg-purple-50 {
+  background-color: rgba(30, 41, 59, 0.7) !important;
+  border-color: var(--theme-border) !important;
+}
+
+/* Standard typographic slate colors */
+.dark .text-slate-800,
+.dark .text-slate-700,
+.dark .text-slate-900 {
+  color: var(--theme-text-dark) !important;
+}
+
+.dark .text-slate-600,
+.dark .text-slate-500 {
+  color: var(--theme-text-muted) !important;
+}
+
+.dark .text-slate-400 {
+  color: #64748b !important;
+}
+
+/* Classic Notebook / Lined Paper Adaptation in Dark Mode */
+.dark .notebook-paper {
+  background-color: #131c2e !important; /* Dark blue-grey slate */
+  background-image: linear-gradient(#1e293b 1px, transparent 1px) !important;
+  border-color: #334155 !important;
+  box-shadow: inset 0 0 40px rgba(0,0,0,0.3), 0 10px 25px rgba(0,0,0,0.2) !important;
+}
+
+.dark .notebook-paper::before {
+  background-color: rgba(239, 68, 68, 0.3) !important; /* Muted red vertical margin line */
+}
+
+.dark .notebook-paper::after {
+  background-image: radial-gradient(circle, #334155 6px, transparent 7px) !important;
+}
+
+.dark .handwritten-content {
+  color: #e2e8f0 !important;
+}
+
+.dark .handwritten-content h1,
+.dark .handwritten-content h2,
+.dark .handwritten-content h3,
+.dark .handwritten-content h4 {
+  color: #86efac !important; /* Glowing organic green chalk in dark mode */
+}
+
+.dark .handwritten-content code {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #f1f5f9 !important;
+}
+
+/* Modern Minimalist Document Container in Dark Mode */
+.dark .modern-minimalist {
+  background-color: #1e293b !important;
+  border-color: #64748b !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3) !important;
+}
+
+.dark .minimalist-content {
+  color: #f1f5f9 !important;
+}
+
+.dark .minimalist-content h1,
+.dark .minimalist-content h2,
+.dark .minimalist-content h3,
+.dark .minimalist-content h4 {
+  color: #f8fafc !important;
+}
+
+.dark .minimalist-content h1 {
+  border-bottom-color: #64748b !important;
+}
+
+.dark .minimalist-content h2 {
+  border-bottom-color: #475569 !important;
+}
+
+.dark .minimalist-content code {
+  background-color: #111827 !important;
+  border-color: #374151 !important;
+  color: #f3f4f6 !important;
+}
+
+.dark .minimalist-content blockquote {
+  border-left-color: #86efac !important;
+  background-color: #111827 !important;
+  color: #cbd5e1 !important;
+}
+
+/* ==========================================================
+   DOCUMENT CONTENT AREA OPTIMIZATION (STANDARD/MODERN VIEWS)
+   ========================================================== */
+
+/* Overall container and raw text line-height */
+.markdown-body {
+  line-height: 1.5 !important;
+}
+
+/* Paragraph blocks override */
+.markdown-body .group\/para {
+  margin-top: 0.35rem !important;
+  margin-bottom: 0.35rem !important;
+  padding-top: 0.15rem !important;
+  padding-bottom: 0.15rem !important;
+}
+
+/* Standard paragraph styles (in case of raw p) */
+.markdown-body p {
+  line-height: 1.5 !important;
+  margin-top: 0.35rem !important;
+  margin-bottom: 0.35rem !important;
+}
+
+/* Inner paragraph text wrapper */
+.markdown-body .group\/para .text-slate-700 {
+  line-height: 1.5 !important;
+}
+
+/* Lists and list spacing */
+.markdown-body ul,
+.markdown-body ol {
+  margin-top: 0.45rem !important;
+  margin-bottom: 0.45rem !important;
+}
+
+.markdown-body li {
+  line-height: 1.45 !important;
+  margin-top: 0.2rem !important;
+  margin-bottom: 0.2rem !important;
+}
+
+/* Remove or reduce spacing utility overrides from Tailwind on items */
+.markdown-body ul > * + *,
+.markdown-body ol > * + * {
+  margin-top: 0.2rem !important;
+}
+
+/* Headings optimization - tight margins to optimize space */
+.markdown-body h1 {
+  margin-top: 1.25rem !important;
+  margin-bottom: 0.5rem !important;
+  line-height: 1.3 !important;
+}
+
+.markdown-body h2 {
+  margin-top: 1.1rem !important;
+  margin-bottom: 0.4rem !important;
+  line-height: 1.3 !important;
+}
+
+.markdown-body h3 {
+  margin-top: 0.95rem !important;
+  margin-bottom: 0.35rem !important;
+  line-height: 1.3 !important;
+}
+
+.markdown-body h4 {
+  margin-top: 0.8rem !important;
+  margin-bottom: 0.3rem !important;
+  line-height: 1.3 !important;
+}
+
+/* Tables spacing optimization */
+.markdown-body table {
+  margin-top: 0.6rem !important;
+  margin-bottom: 0.6rem !important;
+}
+
+.markdown-body th,
+.markdown-body td {
+  padding: 0.4rem 0.6rem !important; /* compact yet highly legible padding */
+  line-height: 1.4 !important;
+}
+
+/* Blockquotes & Code Blocks spacing */
+.markdown-body blockquote {
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+  padding-top: 0.35rem !important;
+  padding-bottom: 0.35rem !important;
+  line-height: 1.45 !important;
+}
+
+.markdown-body pre {
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+  padding: 0.5rem 0.75rem !important;
+}
+
+/* Custom visual diagram containers, image boxes & inline layouts */
+.markdown-body .my-6 {
+  margin-top: 0.75rem !important;
+  margin-bottom: 0.75rem !important;
+}
+
+/* Dark mode for Markdown rendering body */
+.dark .markdown-body {
+  color: #e2e8f0 !important;
+}
+.dark .markdown-body h1,
+.dark .markdown-body h2,
+.dark .markdown-body h3,
+.dark .markdown-body h4 {
+  color: #f8fafc !important;
+}
+.dark .markdown-body p,
+.dark .markdown-body li {
+  color: #e2e8f0 !important;
+}
+.dark .markdown-body strong {
+  color: #ffffff !important;
+}
+
+/* Specific text areas, inputs, and modals in other widgets */
+.dark .bg-[#fcfbf9],
+.dark .bg-[#faf6ee] {
+  background-color: #1e293b !important;
+  color: #f8fafc !important;
+}
+
+/* ==========================================================
+   GLOBAL ACCESSIBILITY ENHANCEMENTS & UTILITIES
+   ========================================================== */
+
+/* Dyslexic-Friendly Typography & Letter Spacing Override */
+.use-dyslexic,
+.use-dyslexic * {
+  font-family: "Comic Neue", "Comic Sans MS", "Chalkboard SE", sans-serif !important;
+  letter-spacing: 0.12em !important;
+  word-spacing: 0.22em !important;
+  line-height: 2.1 !important;
+}
+
+/* Custom Spacing Enhancements */
+.spacing-normal p, .spacing-normal li {
+  line-height: 1.5 !important;
+  margin-bottom: 1rem !important;
+}
+.spacing-relaxed p, .spacing-relaxed li {
+  line-height: 1.85 !important;
+  margin-bottom: 1.5rem !important;
+}
+.spacing-loose p, .spacing-loose li {
+  line-height: 2.25 !important;
+  margin-bottom: 2rem !important;
+}
+
+/* High Contrast Accessibility Mode Overrides */
+.high-contrast {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+}
+.high-contrast .bg-white,
+.high-contrast .bg-[#faf6ee],
+.high-contrast .bg-slate-50,
+.high-contrast .bg-[#fcfbf9] {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border: 3px solid #000000 !important;
+}
+.high-contrast text,
+.high-contrast p,
+.high-contrast span,
+.high-contrast h1,
+.high-contrast h2,
+.high-contrast h3,
+.high-contrast h4,
+.high-contrast li,
+.high-contrast strong {
+  color: #000000 !important;
+}
+.high-contrast a,
+.high-contrast button {
+  border: 3px solid #000000 !important;
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  font-weight: 900 !important;
+}
+.high-contrast a:hover,
+.high-contrast button:hover {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+

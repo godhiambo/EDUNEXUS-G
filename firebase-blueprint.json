@@ -1,0 +1,472 @@
+{
+  "entities": {
+    "user": {
+      "title": "User Profile",
+      "description": "User profile with role-based access control.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["Teacher", "Administrator", "Student"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "suspended": { "type": "boolean" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "imageChunk": {
+      "title": "Image Chunk",
+      "description": "Base64 image chunk data payload for documents containing embedded AI diagrams or classic notes images.",
+      "type": "object",
+      "properties": {
+        "idx": { "type": "integer" },
+        "data": { "type": "string" },
+        "total": { "type": "integer" }
+      },
+      "required": ["idx", "data", "total"]
+    },
+    "document": {
+      "title": "Pedagogical Document",
+      "description": "A lesson plan, notes, worksheet, or other teacher-admin document.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "docType": { "type": "string" },
+        "curriculum": { "type": "string" },
+        "subject": { "type": "string" },
+        "classLevel": { "type": "string" },
+        "topic": { "type": "string" },
+        "subTopic": { "type": "string" },
+        "duration": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastModified": { "type": "string", "format": "date-time" },
+        "isArchived": { "type": "boolean" },
+        "isPinned": { "type": "boolean" },
+        "reflectionWorked": { "type": "string" },
+        "reflectionDidntWork": { "type": "string" },
+        "reflectionAdjustments": { "type": "string" },
+        "scheduledDate": { "type": "string", "format": "date" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "isSharedWithColleagues": { "type": "boolean" },
+        "sharedByUid": { "type": "string" },
+        "sharedByName": { "type": "string" },
+        "sharedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "docType", "content"]
+    },
+    "feedback": {
+      "title": "Document Feedback",
+      "description": "User feedback and rating regarding generated document quality and relevance.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "docId": { "type": "string" },
+        "docTitle": { "type": "string" },
+        "docType": { "type": "string" },
+        "curriculum": { "type": "string" },
+        "subject": { "type": "string" },
+        "topic": { "type": "string" },
+        "rating": { "type": "integer" },
+        "relevanceRating": { "type": "integer" },
+        "writtenFeedback": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "docId", "rating", "relevanceRating", "authorUid", "createdAt"]
+    },
+    "documentVersion": {
+      "title": "Document Version",
+      "description": "Historical saved versions of educational documents.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "docId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "lastModified": { "type": "string", "format": "date-time" },
+        "modifiedByUid": { "type": "string" },
+        "modifiedByName": { "type": "string" },
+        "modifiedByEmail": { "type": "string" },
+        "versionNumber": { "type": "integer" }
+      },
+      "required": ["id", "docId", "content", "lastModified", "modifiedByUid", "versionNumber"]
+    },
+    "documentDraft": {
+      "title": "Document Draft",
+      "description": "Saved parameters/progress of educational document creations.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "curriculum": { "type": "string" },
+        "docType": { "type": "string" },
+        "subject": { "type": "string" },
+        "customSubject": { "type": "string" },
+        "classLevel": { "type": "string" },
+        "topic": { "type": "string" },
+        "subTopic": { "type": "string" },
+        "duration": { "type": "string" },
+        "extraPrompt": { "type": "string" },
+        "explainLikeMasterTeacher": { "type": "boolean" },
+        "askMentor": { "type": "boolean" },
+        "lessonsPerWeek": { "type": "integer" },
+        "weeksPerTerm": { "type": "integer" },
+        "lastSaved": { "type": "string", "format": "date-time" },
+        "draftName": { "type": "string" }
+      },
+      "required": ["id", "userId", "curriculum", "docType", "subject", "topic", "lastSaved", "draftName"]
+    },
+    "promptTemplate": {
+      "title": "Saved Prompt Template",
+      "description": "Custom reusable prompt templates saved by teachers to configure the generator.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "templateName": { "type": "string" },
+        "description": { "type": "string" },
+        "docType": { "type": "string" },
+        "curriculum": { "type": "string" },
+        "extraPrompt": { "type": "string" },
+        "explainLikeMasterTeacher": { "type": "boolean" },
+        "askMentor": { "type": "boolean" },
+        "lastSaved": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "templateName", "docType", "curriculum", "extraPrompt", "lastSaved"]
+    },
+    "activeSession": {
+      "title": "Active Document Session",
+      "description": "Represents an active presence of a user viewing a document.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "docId": { "type": "string" },
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "lastActive": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "docId", "userId", "displayName", "email", "lastActive"]
+    },
+    "inlineComment": {
+      "title": "Document Inline Comment",
+      "description": "An inline comment left on a specific selected text segment of the document content.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "docId": { "type": "string" },
+        "selectedText": { "type": "string" },
+        "comment": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "docId", "comment", "authorUid", "createdAt"]
+    },
+    "paragraphReaction": {
+      "title": "Document Paragraph Reaction",
+      "description": "An emoji reaction left on a specific paragraph of the document content.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "docId": { "type": "string" },
+        "paragraphText": { "type": "string" },
+        "emoji": { "type": "string" },
+        "userUid": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "docId", "paragraphText", "emoji", "userUid", "createdAt"]
+    },
+    "peerFeedback": {
+      "title": "Colleague Peer Feedback",
+      "description": "Peer reviews, ratings, and feedback left by other teachers on shared documents.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "docId": { "type": "string" },
+        "docTitle": { "type": "string" },
+        "docType": { "type": "string" },
+        "rating": { "type": "integer" },
+        "comment": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "authorEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "docId", "rating", "comment", "authorUid", "createdAt"]
+    },
+    "documentAnnotation": {
+      "title": "Document Annotation",
+      "description": "Private, internal-only notes or reminders left on highlighted paragraphs or sections.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "docId": { "type": "string" },
+        "selectedText": { "type": "string" },
+        "note": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "docId", "note", "authorUid", "createdAt"]
+    },
+    "pilotFeedback": {
+      "title": "Pilot Feedback Response",
+      "description": "Comprehensive pilot program evaluation form filled by teachers upon exiting the app.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userUid": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userRole": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "easeOfUse": { "type": "integer" },
+        "qualityOfAI": { "type": "integer" },
+        "standardsRelevance": { "type": "integer" },
+        "recommendationLikelihood": { "type": "integer" },
+        "whatWorkedWell": { "type": "string" },
+        "areasOfImprovement": { "type": "string" },
+        "futureFeaturesRequested": { "type": "string" },
+        "freeTextFeedback": { "type": "string" }
+      },
+      "required": ["id", "userUid", "userEmail", "createdAt", "easeOfUse", "qualityOfAI", "standardsRelevance", "recommendationLikelihood"]
+    },
+    "questionBankItem": {
+      "title": "Question Bank Item",
+      "description": "Individual assessment questions saved by teachers in their Question Bank.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["multiple-choice", "true-false", "fill-in-blanks", "short-answer"] },
+        "questionText": { "type": "string" },
+        "options": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "correctAnswerIndex": { "type": "integer" },
+        "correctAnswer": { "type": "string" },
+        "explanation": { "type": "string" },
+        "gradeLevel": { "type": "string" },
+        "subject": { "type": "string" },
+        "topic": { "type": "string" },
+        "curriculum": { "type": "string", "enum": ["cbc", "standard"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "type", "questionText", "gradeLevel", "subject", "createdAt"]
+    },
+    "voiceNote": {
+      "title": "Voice Lecture Note",
+      "description": "An audio lecture note or transcription containing AI-generated summaries and mermaid charts.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "transcript": { "type": "string" },
+        "summary": { "type": "string" },
+        "mermaidChart": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "title", "transcript", "createdAt"]
+    },
+    "voiceNoteTask": {
+      "title": "Voice Note To-Do Action Item",
+      "description": "An action item or task parsed from a voice lecture note.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "noteId": { "type": "string" },
+        "text": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "noteId", "text", "completed", "createdAt"]
+    },
+    "uploadedResource": {
+      "title": "Uploaded Curriculum Resource",
+      "description": "A teacher-uploaded curriculum guide or teaching resource PDF/DOCX file.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileType": { "type": "string" },
+        "storagePath": { "type": "string" },
+        "downloadUrl": { "type": "string" },
+        "extractedText": { "type": "string" },
+        "uploadedAt": { "type": "string", "format": "date-time" },
+        "subject": { "type": "string" },
+        "topic": { "type": "string" },
+        "folderId": { "type": "string" },
+        "fileSize": { "type": "number" }
+      },
+      "required": ["id", "userId", "fileName", "fileType", "storagePath", "extractedText", "uploadedAt"]
+    },
+    "uploadedFolder": {
+      "title": "Curriculum Folder",
+      "description": "A folder created by teachers to group resources by subject, grade, or term.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "subject": { "type": "string" },
+        "term": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "name", "createdAt"]
+    },
+    "personalizedLearningPath": {
+      "title": "Personalized Learning Path",
+      "description": "Custom-generated personal learning paths for specific subjects and levels with dynamic resources and activity suggestions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "subject": { "type": "string" },
+        "knowledgeLevel": { "type": "string" },
+        "objectives": { "type": "string" },
+        "additionalInfo": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "estimatedDuration": { "type": "string" },
+        "skillsTargeted": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "topics": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "recommendedResources": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "activities": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "subtopicConfidence": { "type": "object" }
+      },
+      "required": ["id", "userId", "subject", "title", "description"]
+    },
+    "parentTeacherMessage": {
+      "title": "Parent Teacher Message",
+      "description": "Direct, real-time message or study feedback between a parent and a teacher regarding a document.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "senderUid": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string" },
+        "recipientUid": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "recipientRole": { "type": "string" },
+        "docId": { "type": "string" },
+        "docTitle": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["id", "senderUid", "senderName", "senderRole", "recipientUid", "recipientName", "recipientRole", "text", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/parent_teacher_messages/{messageId}": {
+      "schema": "parentTeacherMessage",
+      "description": "Direct chat messages and educational feedback between parents and teachers."
+    },
+    "/voiceNotes/{noteId}": {
+      "schema": "voiceNote",
+      "description": "Store recorded or dictated lecture note transcriptions and AI mindmap results."
+    },
+    "/voiceNotes/{noteId}/tasks/{taskId}": {
+      "schema": "voiceNoteTask",
+      "description": "Store classroom task lists and to-do actions automatically parsed from notes."
+    },
+    "/users/{userId}": {
+      "schema": "user",
+      "description": "Individual user accounts with their RBAC roles."
+    },
+    "/questionBank/{questionId}": {
+      "schema": "questionBankItem",
+      "description": "Teachers' custom saved questions for building and dragging into assessments."
+    },
+    "/documents/{docId}": {
+      "schema": "document",
+      "description": "Real-time educational materials and plans sync table."
+    },
+    "/documents/{docId}/imageChunks/{chunkId}": {
+      "schema": "imageChunk",
+      "description": "Base64 image chunk data for classic notes and generated diagrams."
+    },
+    "/documents/{docId}/versions/{versionId}": {
+      "schema": "documentVersion",
+      "description": "Historical versions of a specific educational document."
+    },
+    "/documents/{docId}/comments/{commentId}": {
+      "schema": "inlineComment",
+      "description": "Inline comments and notes left on specific parts of a document."
+    },
+    "/documents/{docId}/reactions/{reactionId}": {
+      "schema": "paragraphReaction",
+      "description": "Emoji reactions left on specific paragraphs of the document."
+    },
+    "/documents/{docId}/annotations/{annotationId}": {
+      "schema": "documentAnnotation",
+      "description": "Private, internal-only teacher annotations and reminders."
+    },
+    "/feedbacks/{feedbackId}": {
+      "schema": "feedback",
+      "description": "Store overall quality and curriculum alignment evaluations for generated resources."
+    },
+    "/drafts/{draftId}": {
+      "schema": "documentDraft",
+      "description": "Unfinished planning form values and settings saved as drafts."
+    },
+    "/promptTemplates/{templateId}": {
+      "schema": "promptTemplate",
+      "description": "Teachers' custom saved prompt instructions and templates for quick re-use."
+    },
+    "/active-sessions/{sessionId}": {
+      "schema": "activeSession",
+      "description": "Real-time list of users actively looking at specific educational documents."
+    },
+    "/peer_feedbacks/{feedbackId}": {
+      "schema": "peerFeedback",
+      "description": "Peer feedback ratings and reviews for shared teacher-created lesson materials."
+    },
+    "/pilotFeedbacks/{feedbackId}": {
+      "schema": "pilotFeedback",
+      "description": "Feedback provided by pilot participants upon app sign out."
+    },
+    "/uploadedResources/{resourceId}": {
+      "schema": "uploadedResource",
+      "description": "Custom curriculum guides and resources uploaded by teachers."
+    },
+    "/uploadedFolders/{folderId}": {
+      "schema": "uploadedFolder",
+      "description": "Folders created by teachers to group resources by subject or term."
+    },
+    "/personalizedLearningPaths/{pathId}": {
+      "schema": "personalizedLearningPath",
+      "description": "Store custom generated personal learning paths for teachers and students."
+    }
+  }
+}

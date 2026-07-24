@@ -1,0 +1,25 @@
+{
+  "name": "EduNexus",
+  "short_name": "EduNexus",
+  "description": "An AI-powered assistant for teachers to generate curriculum-aligned lesson plans, schemes of work, worksheets, notes, and rubrics.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fcfbf9",
+  "theme_color": "#5f6f52",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
