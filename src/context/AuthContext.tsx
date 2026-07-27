@@ -134,27 +134,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
 
           const emailLower = (firebaseUser.email || '').toLowerCase().trim();
-          const preCreatedRef = doc(db, 'users', emailLower);
-          const preCreatedSnap = await getDoc(preCreatedRef);
           const userSnap = await getDoc(userRef);
           
-          if (preCreatedSnap.exists()) {
-            const preCreatedData = preCreatedSnap.data() as UserAccount;
-            const resolvedName = resolveDisplayName(preCreatedData.displayName, firebaseUser.email, firebaseUser.displayName);
-            const migratedProfile: UserAccount = {
-              ...preCreatedData,
-              uid: firebaseUser.uid,
-              displayName: resolvedName,
-              createdAt: preCreatedData.createdAt || new Date().toISOString()
-            };
-            await setDoc(userRef, cleanUndefined(migratedProfile));
-            try {
-              await deleteDoc(preCreatedRef);
-            } catch (err) {
-              console.warn("Could not delete email-keyed doc:", err);
-            }
-            setProfile(migratedProfile);
-          } else if (userSnap.exists()) {
+          if (userSnap.exists()) {
             const existingData = userSnap.data() as UserAccount;
             const isBootstrappedAdmin = emailLower === 'ojiambo.godfry@gmail.com' || emailLower === 'godfreynexused@gmail.com';
             
@@ -189,6 +171,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setProfile(existingData);
             }
           } else {
+            const preCreatedRef = doc(db, 'users', emailLower);
+            const preCreatedSnap = await getDoc(preCreatedRef);
+
+            if (preCreatedSnap.exists()) {
+              const preCreatedData = preCreatedSnap.data() as UserAccount;
+              const resolvedName = resolveDisplayName(preCreatedData.displayName, firebaseUser.email, firebaseUser.displayName);
+              const migratedProfile: UserAccount = {
+                ...preCreatedData,
+                uid: firebaseUser.uid,
+                displayName: resolvedName,
+                createdAt: preCreatedData.createdAt || new Date().toISOString()
+              };
+              await setDoc(userRef, cleanUndefined(migratedProfile));
+              try {
+                await deleteDoc(preCreatedRef);
+              } catch (err) {
+                console.warn("Could not delete email-keyed doc:", err);
+              }
+              setProfile(migratedProfile);
+            } else {
             // User profile does not exist in Firestore. Check if this is an explicit signup or whitelisted/demo account.
             const emailLower = (firebaseUser.email || '').toLowerCase().trim();
             const googleRegName = sessionStorage.getItem('pending_google_reg_name');
@@ -255,6 +257,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setUser(null);
             }
           }
+        }
         } catch (err) {
           console.error('Error fetching user profile from Firestore (network request failed or transient issue):', err);
           const resolvedName = resolveDisplayName(null, firebaseUser.email, firebaseUser.displayName);
@@ -407,7 +410,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         provider = googleProvider;
       }
       await signInWithPopup(auth, provider);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
+        console.log('Google Sign-In popup closed by user');
+        return;
+      }
       throw err;
     }
   };
@@ -425,9 +432,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         provider = googleProvider;
       }
       await signInWithPopup(auth, provider);
-    } catch (err) {
+    } catch (err: any) {
       sessionStorage.removeItem('pending_google_reg_name');
       sessionStorage.removeItem('pending_google_reg_role');
+      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
+        console.log('Google Registration popup closed by user');
+        return;
+      }
       throw err;
     }
   };

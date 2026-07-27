@@ -38,22 +38,30 @@ import {
   Compass,
   Award,
   ListTodo,
+  Gauge,
   ArrowRight,
   ThumbsUp,
   ThumbsDown,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Search,
+  Cloud,
+  CloudOff,
+  Upload,
+  Loader2,
+  Paperclip,
+  FileUp,
+  Check
 } from 'lucide-react';
 import { SavedDocument, PersonalizedLearningPath, FlashcardDeck } from '../types';
 import { LearningPathWorkspace } from './LearningPathWorkspace';
 import FlashcardDeckModal from './FlashcardDeckModal';
 import { cbcSubjectsData } from '../data/cbcData';
 import { EditableSelect } from './EditableSelect';
-import { db, auth, storage } from '../firebase';
+import { db, auth, storage, handleFirestoreError, OperationType, cleanUndefined } from '../firebase';
 import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { useAuth } from '../context/AuthContext';
-import { Upload, Loader2, Paperclip, FileUp, Check } from 'lucide-react';
 import { SetupForm } from './SetupForm';
 import { handleResponseJson } from '../utils/api';
 
@@ -110,6 +118,7 @@ interface ChatSession {
   topic: string;
   persona: 'Socratic Questioner' | 'Encouraging Mentor' | 'Critical Examiner';
   scaffoldingLevel: 'low' | 'medium' | 'high';
+  difficultyLevel?: 'beginner' | 'intermediate' | 'advanced';
   messages: Message[];
   activeStep: string;
   misconceptions: string[];
@@ -213,6 +222,10 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
     const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
     return active ? active.scaffoldingLevel : 'medium';
   });
+  const [difficultyLevel, setDifficultyLevel] = useState<'beginner' | 'intermediate' | 'advanced'>(() => {
+    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
+    return active && active.difficultyLevel ? active.difficultyLevel : 'intermediate';
+  });
   const [selectedDocId, setSelectedDocId] = useState<string>('');
   const [persona, setPersona] = useState<'Socratic Questioner' | 'Encouraging Mentor' | 'Critical Examiner'>(() => {
     const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
@@ -273,13 +286,21 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
   });
 
   // Custom uploaded resources state & handlers
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
+  const [sessionSearchQuery, setSessionSearchQuery] = useState<string>('');
+  const [isSyncingWithFirestore, setIsSyncingWithFirestore] = useState<boolean>(false);
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState<boolean>(false);
+  const [isClearingChat, setIsClearingChat] = useState<boolean>(false);
   const [uploadedResources, setUploadedResources] = useState<UploadedResource[]>([]);
   const [selectedResourceId, setSelectedResourceId] = useState<string>(initialSelectedResourceId || '');
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Organized Panel Tab States
+  const [leftSidebarTab, setLeftSidebarTab] = useState<'config' | 'materials' | 'voice'>('config');
+  const [rightSidebarTab, setRightSidebarTab] = useState<'all' | 'concept' | 'pedagogy' | 'resources'>('all');
 
   // Flashcards state in Socratic AI Sidebar
   const [activeFlashcardDeck, setActiveFlashcardDeck] = useState<FlashcardDeck | null>(null);
@@ -562,6 +583,7 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
     setSubject(session.subject);
     setTopic(session.topic);
     setScaffoldingLevel(session.scaffoldingLevel);
+    setDifficultyLevel(session.difficultyLevel || 'intermediate');
     setPersona(session.persona);
     setMessages(session.messages);
     setActiveStep(session.activeStep);
@@ -591,6 +613,66 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
     }, 100);
   };
 
+  // Real-time Firestore listener for user Socratic Tutor Sessions
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    setIsSyncingWithFirestore(true);
+    const q = query(
+      collection(db, 'tutorSessions'),
+      where('userId', '==', user.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (snapshot.empty) {
+        setIsSyncingWithFirestore(false);
+        return;
+      }
+
+      const remoteSessions: ChatSession[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        remoteSessions.push({
+          id: data.id || docSnap.id,
+          title: data.title || 'Untitled Session',
+          subject: data.subject || 'General Education',
+          topic: data.topic || 'General Topic',
+          persona: data.persona || 'Socratic Questioner',
+          scaffoldingLevel: data.scaffoldingLevel || 'medium',
+          difficultyLevel: data.difficultyLevel || 'intermediate',
+          messages: data.messages || [],
+          activeStep: data.activeStep || 'Active Discussion',
+          misconceptions: data.misconceptions || [],
+          suggestedResources: data.suggestedResources || [],
+          conceptMap: data.conceptMap || { title: 'Concept Map', nodes: [], edges: [] },
+          createdAt: data.createdAt || new Date().toISOString(),
+          isCbcMode: !!data.isCbcMode,
+          cbcSubject: data.cbcSubject || '',
+          cbcStrand: data.cbcStrand || '',
+          cbcSubStrand: data.cbcSubStrand || '',
+          cbcConcept: data.cbcConcept || '',
+          cbcSocraticMode: data.cbcSocraticMode || 'guided',
+        } as any);
+      });
+
+      // Sort descending by createdAt
+      remoteSessions.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+      if (remoteSessions.length > 0) {
+        setSessions(remoteSessions);
+        try {
+          localStorage.setItem('ai_tutor_sessions_v1', JSON.stringify(remoteSessions));
+        } catch (e) {}
+      }
+      setIsSyncingWithFirestore(false);
+    }, (err) => {
+      console.warn("[Firestore Tutor Sessions Listener Notice]", err);
+      setIsSyncingWithFirestore(false);
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
+
   const handleCreateNewSession = () => {
     const newId = `session-${Date.now()}`;
     const newSession: ChatSession = {
@@ -600,6 +682,7 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
       topic: 'Velocity and Acceleration',
       persona: 'Socratic Questioner',
       scaffoldingLevel: 'medium',
+      difficultyLevel,
       messages: [
         {
           role: 'model',
@@ -630,6 +713,18 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
       createdAt: new Date().toISOString()
     };
 
+    if (user?.uid) {
+      (newSession as any).userId = user.uid;
+      const payload = cleanUndefined({
+        ...newSession,
+        userId: user.uid,
+        updatedAt: new Date().toISOString()
+      });
+      setDoc(doc(db, 'tutorSessions', newId), payload).catch(err => {
+        console.warn("[Firestore Save New Session Warning]", err);
+      });
+    }
+
     setSessions(prev => [newSession, ...prev]);
     loadSession(newSession);
   };
@@ -645,6 +740,7 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
       topic: `${strandName} (${subStrandName})`,
       persona: 'Socratic Questioner',
       scaffoldingLevel: 'medium',
+      difficultyLevel,
       messages: [],
       activeStep: 'Foundational Assessment',
       misconceptions: [],
@@ -690,6 +786,18 @@ ${dialogueStyleInstruction}`;
     (newSession as any).cbcConcept = conceptName;
     (newSession as any).cbcSystemPrompt = customSystemPrompt;
     (newSession as any).cbcSocraticMode = socraticMode;
+
+    if (user?.uid) {
+      (newSession as any).userId = user.uid;
+      const payload = cleanUndefined({
+        ...newSession,
+        userId: user.uid,
+        updatedAt: new Date().toISOString()
+      });
+      setDoc(doc(db, 'tutorSessions', newId), payload).catch(err => {
+        console.warn("[Firestore Save New CBC Session Warning]", err);
+      });
+    }
 
     setSessions(prev => [newSession, ...prev]);
     
@@ -741,7 +849,7 @@ ${dialogueStyleInstruction}`;
     setTutorMode('cbc-tutor');
   };
 
-  const handleDeleteSession = (id: string, e: React.MouseEvent) => {
+  const handleDeleteSession = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (sessions.length <= 1) {
       alert("You must keep at least one chat session.");
@@ -752,12 +860,21 @@ ${dialogueStyleInstruction}`;
     if (activeSessionId === id) {
       loadSession(filtered[0]);
     }
+
+    if (user?.uid) {
+      try {
+        await deleteDoc(doc(db, 'tutorSessions', id));
+      } catch (err) {
+        console.warn("[Firestore Delete Session Warning]", err);
+      }
+    }
   };
 
   const handleExportChatLog = () => {
     const formatSessionLog = () => {
       let logText = `# EduNexus AI Tutor Session: ${subject} - ${topic}\n`;
       logText += `*Persona:* ${persona}\n`;
+      logText += `*Difficulty Level:* ${difficultyLevel}\n`;
       logText += `*Scaffolding:* ${scaffoldingLevel}\n`;
       logText += `*Date:* ${new Date().toLocaleDateString()}\n\n`;
       logText += `--- \n\n`;
@@ -789,19 +906,22 @@ ${dialogueStyleInstruction}`;
     document.body.removeChild(link);
   };
 
-  // Sync effect to save session details back to sessions list & localStorage
+  // Sync effect to save session details back to sessions list, localStorage, and Firestore
   useEffect(() => {
     if (isSwitchingSessionRef.current) return;
+    
     setSessions(prev => {
+      let activeSessToSave: ChatSession | null = null;
       const updated = prev.map(s => {
         if (s.id === activeSessionId) {
           const derivedTitle = messages.length > 1 && topic ? `${subject} - ${topic}` : s.title;
-          return {
+          const updatedSession = {
             ...s,
             title: derivedTitle,
             subject,
             topic,
             scaffoldingLevel,
+            difficultyLevel,
             persona,
             messages,
             activeStep,
@@ -815,13 +935,46 @@ ${dialogueStyleInstruction}`;
             cbcConcept,
             cbcSocraticMode
           };
+          activeSessToSave = updatedSession;
+          return updatedSession;
         }
         return s;
       });
       localStorage.setItem('ai_tutor_sessions_v1', JSON.stringify(updated));
+
+      // Asynchronously sync to Firestore if user is logged in
+      if (user?.uid && activeSessToSave) {
+        const payload = cleanUndefined({
+          id: (activeSessToSave as ChatSession).id,
+          userId: user.uid,
+          title: (activeSessToSave as ChatSession).title,
+          subject: (activeSessToSave as ChatSession).subject,
+          topic: (activeSessToSave as ChatSession).topic,
+          persona: (activeSessToSave as ChatSession).persona,
+          scaffoldingLevel: (activeSessToSave as ChatSession).scaffoldingLevel,
+          difficultyLevel: (activeSessToSave as ChatSession).difficultyLevel || 'intermediate',
+          messages: (activeSessToSave as ChatSession).messages,
+          activeStep: (activeSessToSave as ChatSession).activeStep,
+          misconceptions: (activeSessToSave as ChatSession).misconceptions,
+          suggestedResources: (activeSessToSave as ChatSession).suggestedResources,
+          conceptMap: (activeSessToSave as ChatSession).conceptMap,
+          createdAt: (activeSessToSave as ChatSession).createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          isCbcMode: !!(activeSessToSave as any).isCbcMode,
+          cbcSubject: (activeSessToSave as any).cbcSubject || '',
+          cbcStrand: (activeSessToSave as any).cbcStrand || '',
+          cbcSubStrand: (activeSessToSave as any).cbcSubStrand || '',
+          cbcConcept: (activeSessToSave as any).cbcConcept || '',
+          cbcSocraticMode: (activeSessToSave as any).cbcSocraticMode || 'guided'
+        });
+
+        setDoc(doc(db, 'tutorSessions', (activeSessToSave as ChatSession).id), payload)
+          .catch(err => console.warn('[Firestore Auto-save Session Warning]', err));
+      }
+
       return updated;
     });
-  }, [activeSessionId, subject, topic, scaffoldingLevel, persona, messages, activeStep, misconceptions, suggestedResources, conceptMap, isCbcSession, cbcSubject, cbcStrand, cbcSubStrand, cbcConcept, cbcSocraticMode]);
+  }, [activeSessionId, subject, topic, scaffoldingLevel, difficultyLevel, persona, messages, activeStep, misconceptions, suggestedResources, conceptMap, isCbcSession, cbcSubject, cbcStrand, cbcSubStrand, cbcConcept, cbcSocraticMode, user?.uid]);
 
   // Voice & Hands-free dialogue states
   const [isVoiceEnabled, setIsVoiceEnabled] = useState<boolean>(false);
@@ -1128,6 +1281,7 @@ ${dialogueStyleInstruction}`;
           subject: isCbcSession ? cbcSubject : subject,
           topic: isCbcSession ? `${cbcStrand} - ${cbcSubStrand}` : topic,
           scaffoldingLevel,
+          difficultyLevel,
           documentContext: docContext,
           persona,
           isCbcMode: isCbcSession,
@@ -1191,21 +1345,62 @@ ${dialogueStyleInstruction}`;
     }
   };
 
-  const clearChat = () => {
-    if (window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
-    stopListening();
-    setIsSpeaking(false);
-
-    setMessages([
-      {
-        role: 'model',
-        text: `Tutor reset. Let's start fresh with a clean slate! We are focusing on ${subject} - ${topic}. What concept should we break down first?`
+  const confirmClearChat = async () => {
+    setIsClearingChat(true);
+    try {
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
       }
-    ]);
-    setActiveStep('Exploratory onboarding');
-    setMisconceptions([]);
+      stopListening();
+      setIsSpeaking(false);
+
+      const resetMessage = {
+        role: 'model' as const,
+        text: `Tutor reset. Let's start fresh with a clean slate! We are focusing on ${subject} - ${topic}. What concept should we break down first?`
+      };
+
+      setMessages([resetMessage]);
+      setActiveStep('Exploratory onboarding');
+      setMisconceptions([]);
+
+      if (user?.uid && activeSessionId) {
+        const activeSess = sessions.find(s => s.id === activeSessionId);
+        const payload = cleanUndefined({
+          id: activeSessionId,
+          userId: user.uid,
+          title: activeSess?.title || `${subject} - ${topic}`,
+          subject: subject,
+          topic: topic,
+          persona: persona,
+          scaffoldingLevel: scaffoldingLevel,
+          difficultyLevel: difficultyLevel,
+          messages: [resetMessage],
+          activeStep: 'Exploratory onboarding',
+          misconceptions: [],
+          suggestedResources: suggestedResources || [],
+          conceptMap: conceptMap || { title: 'Concept Map', nodes: [], edges: [] },
+          createdAt: activeSess?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          isCbcMode: isCbcSession,
+          cbcSubject: cbcSubject || '',
+          cbcStrand: cbcStrand || '',
+          cbcSubStrand: cbcSubStrand || '',
+          cbcConcept: cbcConcept || '',
+          cbcSocraticMode: cbcSocraticMode || 'guided'
+        });
+
+        await setDoc(doc(db, 'tutorSessions', activeSessionId), payload);
+      }
+    } catch (err) {
+      console.warn('[Firestore Clear Chat Error]', err);
+    } finally {
+      setIsClearingChat(false);
+      setShowClearConfirmModal(false);
+    }
+  };
+
+  const clearChat = () => {
+    setShowClearConfirmModal(true);
   };
 
   // Fallback links for standard simulation libraries
@@ -1301,557 +1496,718 @@ ${dialogueStyleInstruction}`;
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 flex-1 min-h-0 overflow-hidden">
       
       {/* Configuration & Document Import Sidebar - 3 Columns */}
-      <div className="xl:col-span-3 flex flex-col gap-4 bg-white border border-[#e5e1da] rounded-2xl p-4 shadow-xs overflow-y-auto max-h-full">
-        {/* Tutor Sessions section */}
-        <div className={`flex flex-col gap-2 ${
-          fullscreenWidget === 'sessions' 
-            ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn' 
-            : ''
-        }`}>
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
-              <History className="w-3.5 h-3.5 text-[#a9b388]" />
-              Pedagogical Sessions
-            </span>
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={handleCreateNewSession}
-                className="text-[#5f6f52] hover:bg-[#5f6f52]/10 px-2 py-0.5 rounded-lg transition cursor-pointer flex items-center gap-1 text-[10px] font-bold border border-[#5f6f52]/20"
-                title="Start New Tutor Chat"
-              >
-                <Plus className="w-3 h-3" />
-                New
-              </button>
-              <button
-                type="button"
-                onClick={() => setFullscreenWidget(fullscreenWidget === 'sessions' ? null : 'sessions')}
-                className="text-slate-400 hover:text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
-                title={fullscreenWidget === 'sessions' ? "Minimize Window" : "Maximize to Full Screen"}
-              >
-                {fullscreenWidget === 'sessions' ? (
-                  <Minimize2 className="w-3.5 h-3.5" />
-                ) : (
-                  <Maximize2 className="w-3.5 h-3.5" />
-                )}
-              </button>
-            </div>
-          </div>
-
-          <div className={`space-y-1.5 overflow-y-auto pr-1 ${
-            fullscreenWidget === 'sessions' 
-              ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 space-y-0 mt-4' 
-              : 'max-h-[140px]'
-          }`}>
-            {sessions.map((sess) => (
-              <div
-                key={sess.id}
-                onClick={() => {
-                  loadSession(sess);
-                  if (fullscreenWidget === 'sessions') setFullscreenWidget(null);
-                }}
-                className={`group w-full p-3 rounded-xl text-left border transition text-[11px] flex items-center justify-between cursor-pointer ${
-                  activeSessionId === sess.id
-                    ? 'border-[#5f6f52] bg-[#5f6f52]/5 text-[#5f6f52]'
-                    : 'border-slate-150 bg-slate-50/50 hover:bg-slate-50 hover:border-slate-300 text-slate-600'
-                } ${fullscreenWidget === 'sessions' ? 'shadow-xs hover:shadow-md hover:-translate-y-0.5 duration-300' : ''}`}
-              >
-                <div className="flex flex-col min-w-0 flex-1">
-                  <span className="font-bold truncate pr-1 text-xs md:text-sm">{sess.title}</span>
-                  <span className="text-[10px] text-slate-400 mt-1 capitalize">
-                    {sess.persona.replace('Socratic ', '')} • {sess.messages.length} msgs
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={(e) => handleDeleteSession(sess.id, e)}
-                  className="opacity-0 group-hover:opacity-100 hover:text-red-500 p-1.5 transition rounded-md hover:bg-red-50 cursor-pointer shrink-0"
-                  title="Delete Session"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <hr className="border-slate-100" />
-
-        <div className={
-          fullscreenWidget === 'configurations'
-            ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn'
-            : ''
-        }>
-          <div className="flex items-center justify-between mb-3 border-b border-slate-50 pb-2">
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
-              <Settings className="w-3.5 h-3.5 text-[#a9b388]" />
-              Tutor Configurations
-            </span>
-            <button
-              type="button"
-              onClick={() => setFullscreenWidget(fullscreenWidget === 'configurations' ? null : 'configurations')}
-              className="text-slate-400 hover:text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
-              title={fullscreenWidget === 'configurations' ? "Minimize Window" : "Maximize to Full Screen"}
-            >
-              {fullscreenWidget === 'configurations' ? (
-                <Minimize2 className="w-3.5 h-3.5" />
-              ) : (
-                <Maximize2 className="w-3.5 h-3.5" />
-              )}
-            </button>
-          </div>
-          <div className={`space-y-3 text-xs ${
-            fullscreenWidget === 'configurations' 
-              ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 space-y-0 mt-6' 
-              : ''
-          }`}>
-            
-            {isCbcSession && (
-              <div className={`bg-amber-50/70 border border-amber-200/60 rounded-xl p-3 space-y-2 animate-fadeIn mb-4 ${
-                fullscreenWidget === 'configurations' ? 'md:col-span-2 lg:col-span-3 mb-0' : ''
-              }`}>
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-800 flex items-center gap-1">
-                  <GraduationCap className="w-3.5 h-3.5 text-amber-600" />
-                  Active CBC Pathway
-                </span>
-                <div className="text-[11px] space-y-1 text-slate-700 bg-white/65 p-2 rounded-lg border border-amber-100">
-                  <div><span className="text-slate-400 font-medium block text-[9px] uppercase">Subject</span> <span className="font-bold">{cbcSubject}</span></div>
-                  <div><span className="text-slate-400 font-medium block text-[9px] uppercase">Strand / Topic</span> <span className="font-bold">{cbcStrand}</span></div>
-                  <div><span className="text-slate-400 font-medium block text-[9px] uppercase">Substrand / Subtopic</span> <span className="font-bold">{cbcSubStrand}</span></div>
-                  <div><span className="text-slate-400 font-medium block text-[9px] uppercase">Concept</span> <span className="font-bold">{cbcConcept}</span></div>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleChangeTopic}
-                  className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[10px] tracking-wider uppercase rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-sm"
-                >
-                  <BookOpen className="w-3.5 h-3.5" />
-                  Change Topic
-                </button>
-              </div>
-            )}
-
-            {/* Subject selector */}
-            <div className="flex flex-col justify-between">
-              <label className="block text-slate-500 font-bold mb-1">Subject</label>
-              <EditableSelect
-                value={subject}
-                onChange={setSubject}
-                options={[
-                  "Physics",
-                  "Mathematics",
-                  "Chemistry",
-                  "Biology",
-                  "General Science",
-                  "History & Geography",
-                  "Languages & Literature"
-                ]}
-                placeholder=""
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52]"
-              />
-            </div>
-
-            {/* Topic textbox */}
-            <div className="flex flex-col justify-between">
-              <label className="block text-slate-500 font-bold mb-1">Active Topic of Inquiry</label>
-              <input
-                type="text"
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                placeholder="e.g. Newton's Second Law"
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52]"
-              />
-            </div>
-
-            {/* Pedagogical Persona */}
-            <div className="flex flex-col justify-between">
-              <div>
-                <label className="block text-slate-500 font-bold mb-1">Pedagogical Persona</label>
-                <EditableSelect
-                  value={persona}
-                  onChange={(val) => setPersona(val as any)}
-                  options={["Socratic Questioner", "Encouraging Mentor", "Critical Examiner"]}
-                  placeholder=""
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52]"
-                />
-              </div>
-              <p className="text-[9px] text-slate-400 mt-1 leading-normal">
-                {persona === 'Socratic Questioner' && "Warm, inquisitive Socratic dialogue that probes your assumptions."}
-                {persona === 'Encouraging Mentor' && "Highly reinforcing, supportive guide that celebrates your growth."}
-                {persona === 'Critical Examiner' && "Rigorous, analytical challenger that details proofs and tests logic."}
-                {persona !== 'Socratic Questioner' && persona !== 'Encouraging Mentor' && persona !== 'Critical Examiner' && `Custom tutor personality: "${persona}"`}
-              </p>
-            </div>
-
-            {/* Scaffolding level */}
-            <div className="flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-slate-500 font-bold">Scaffolding Scape</label>
-                  <span className="text-[10px] font-extrabold uppercase bg-[#5f6f52]/10 text-[#5f6f52] px-1.5 py-0.5 rounded">
-                    {scaffoldingLevel}
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-lg">
-                  {(['low', 'medium', 'high'] as const).map((level) => (
-                    <button
-                      key={level}
-                      type="button"
-                      onClick={() => setScaffoldingLevel(level)}
-                      className={`py-1 text-[10px] font-extrabold rounded text-center transition capitalize cursor-pointer ${
-                        scaffoldingLevel === level
-                          ? 'bg-[#5f6f52] text-white'
-                          : 'text-slate-500 hover:text-slate-700'
-                      }`}
-                    >
-                      {level}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="text-[9px] text-slate-400 mt-1 leading-normal">
-                {scaffoldingLevel === 'high' && "Breaks reasoning down into extremely small, bite-sized questions."}
-                {scaffoldingLevel === 'medium' && "Guides step-by-step, helping locate mistakes incrementally."}
-                {scaffoldingLevel === 'low' && "Relies on conceptual hints and higher-level questions."}
-              </p>
-            </div>
-
-          </div>
-        </div>
-
-        <hr className="border-slate-100" />
-
-        {/* Voice Dialogue Configurations */}
-        <div className="space-y-3 bg-[#5f6f52]/5 border border-[#5f6f52]/10 p-3 rounded-xl">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#5f6f52] flex items-center gap-1.5">
-              <Headphones className="w-3.5 h-3.5" />
-              Dialogue Speech
-            </span>
-            <button
-              onClick={() => setShowVoiceSettings(!showVoiceSettings)}
-              className="text-[#5f6f52] hover:text-[#4d5a42] p-0.5 transition cursor-pointer"
-              title="Voice Customization Settings"
-            >
-              <Settings className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div className="space-y-2 text-xs">
-            {/* Auto Voice Output Toggle */}
-            <label className="flex items-center justify-between cursor-pointer p-1 hover:bg-slate-50 rounded-md transition">
-              <span className="text-slate-600 font-semibold">Tutor Audio Output</span>
-              <div className="relative inline-flex items-center">
-                <input
-                  type="checkbox"
-                  checked={isVoiceEnabled}
-                  onChange={(e) => {
-                    const val = e.target.checked;
-                    setIsVoiceEnabled(val);
-                    if (!val && window.speechSynthesis) {
-                      window.speechSynthesis.cancel();
-                      setIsSpeaking(false);
-                    } else if (val && messages.length > 0) {
-                      // Speak the last message
-                      speakText(messages[messages.length - 1].text);
-                    }
-                  }}
-                  className="sr-only peer"
-                />
-                <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3.5 after:transition-all peer-checked:bg-[#5f6f52]"></div>
-              </div>
-            </label>
-
-            {/* Hands-free auto voice sequence toggle */}
-            <label className="flex items-center justify-between cursor-pointer p-1 hover:bg-slate-50 rounded-md transition">
-              <div className="flex flex-col">
-                <span className="text-slate-600 font-semibold leading-none">Hands-Free Mode</span>
-                <span className="text-[9px] text-slate-400 mt-0.5 leading-tight">Auto-listen after tutor speaks</span>
-              </div>
-              <div className="relative inline-flex items-center">
-                <input
-                  type="checkbox"
-                  checked={isHandsFree}
-                  onChange={(e) => {
-                    setIsHandsFree(e.target.checked);
-                    if (e.target.checked) {
-                      setIsVoiceEnabled(true); // hands-free requires output voice to loop
-                    }
-                  }}
-                  className="sr-only peer"
-                />
-                <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3.5 after:transition-all peer-checked:bg-[#5f6f52]"></div>
-              </div>
-            </label>
-
-            {/* Always Visible Dropdown Selectors for Browser Voices & Playback Speed */}
-            <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-slate-500 font-semibold mb-1 text-[10px] uppercase tracking-wider">Tutor Voice</label>
-                <div className="relative">
-                  <select
-                    value={selectedVoiceName}
-                    onChange={(e) => setSelectedVoiceName(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-lg p-2 pr-8 text-xs text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52] appearance-none cursor-pointer truncate"
-                  >
-                    {voices.length === 0 ? (
-                      <option value="">Default voice</option>
-                    ) : (
-                      voices.map((v, i) => (
-                        <option key={i} value={v.name}>
-                          {v.name.replace('Microsoft', '').replace('Google', '').trim()}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-500 font-semibold mb-1 text-[10px] uppercase tracking-wider">Playback Speed</label>
-                <div className="relative">
-                  <select
-                    value={voiceRate}
-                    onChange={(e) => setVoiceRate(parseFloat(e.target.value))}
-                    className="w-full bg-white border border-slate-200 rounded-lg p-2 pr-8 text-xs text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52] appearance-none cursor-pointer"
-                  >
-                    <option value="0.5">0.5x (Slow)</option>
-                    <option value="0.75">0.75x</option>
-                    <option value="1">1.0x (Normal)</option>
-                    <option value="1.25">1.25x</option>
-                    <option value="1.5">1.5x (Fast)</option>
-                    <option value="1.75">1.75x</option>
-                    <option value="2">2.0x (Very Fast)</option>
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Advanced synthesis settings */}
-            <AnimatePresence>
-              {showVoiceSettings && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="space-y-2 pt-2 border-t border-slate-150 overflow-hidden"
-                >
-                  {/* Speech Rate */}
-                  <div>
-                    <div className="flex justify-between text-[10px] text-slate-500 font-semibold">
-                      <span>Speaking Speed</span>
-                      <span>{voiceRate}x</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0.5"
-                      max="2"
-                      step="0.1"
-                      value={voiceRate}
-                      onChange={(e) => setVoiceRate(parseFloat(e.target.value))}
-                      className="w-full accent-[#5f6f52]"
-                    />
-                  </div>
-
-                  {/* Speech Pitch */}
-                  <div>
-                    <div className="flex justify-between text-[10px] text-slate-500 font-semibold">
-                      <span>Tone Pitch</span>
-                      <span>{voicePitch}x</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0.5"
-                      max="1.5"
-                      step="0.1"
-                      value={voicePitch}
-                      onChange={(e) => setVoicePitch(parseFloat(e.target.value))}
-                      className="w-full accent-[#5f6f52]"
-                    />
-                  </div>
-
-                  {/* Speech Volume */}
-                  <div>
-                    <div className="flex justify-between items-center text-[10px] text-slate-500 font-semibold">
-                      <span className="flex items-center gap-1">
-                        {voiceVolume === 0 ? (
-                          <VolumeX className="w-3 h-3 text-slate-400" />
-                        ) : voiceVolume < 0.5 ? (
-                          <Volume1 className="w-3 h-3 text-[#5f6f52]" />
-                        ) : (
-                          <Volume2 className="w-3 h-3 text-[#5f6f52]" />
-                        )}
-                        Voice Volume
-                      </span>
-                      <span>{Math.round(voiceVolume * 100)}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={voiceVolume}
-                      onChange={(e) => setVoiceVolume(parseFloat(e.target.value))}
-                      className="w-full accent-[#5f6f52]"
-                    />
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </div>
-
-        <hr className="border-slate-100" />
-
-        {/* Lesson Material Importer */}
-        <div className="flex-1 flex flex-col min-h-[150px]">
-          <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] block mb-2">Import Lesson Context</span>
-          <p className="text-[10px] text-slate-400 leading-normal mb-2">
-            Ground the tutor conversation in any of your custom generated lesson documents.
-          </p>
-
-          <div className="flex-1 overflow-y-auto space-y-1.5 max-h-[180px] pr-1">
-            {documents.length === 0 ? (
-              <div className="p-3 border border-dashed border-slate-200 rounded-xl text-center text-slate-400 text-[10px]">
-                No generated materials found to import. Create a lesson plan first!
-              </div>
-            ) : (
-              documents.map((doc) => (
-                <button
-                  key={doc.id}
-                  onClick={() => handleImportDocument(doc.id)}
-                  className={`w-full p-2 rounded-xl text-left border transition text-xs flex flex-col gap-0.5 cursor-pointer ${
-                    selectedDocId === doc.id
-                      ? 'border-[#5f6f52] bg-[#5f6f52]/5 text-[#5f6f52]'
-                      : 'border-slate-150 bg-slate-50/50 hover:bg-slate-50 hover:border-slate-300 text-slate-600'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <FileText className="w-3.5 h-3.5 shrink-0" />
-                    <span className="font-bold truncate">{doc.topic}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-[9px] text-slate-400 mt-0.5">
-                    <span>{doc.classLevel}</span>
-                    <span>{doc.subject}</span>
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-
-        <hr className="border-slate-100" />
-
-        {/* Uploaded Curriculum Resources */}
-        <div className="flex flex-col gap-2 min-h-[180px]">
-          <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] block">Curriculum Guides & Uploads</span>
-          <p className="text-[10px] text-slate-400 leading-normal mb-1">
-            Upload PDF or DOCX files to ground EduNexus AI Tutor in real curriculum guides or teaching materials.
-          </p>
-
-          {/* Drag & Drop zone */}
-          <div
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              handleFileUpload(e);
-            }}
-            onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-[#5f6f52]/30 hover:border-[#5f6f52] bg-slate-50/50 hover:bg-[#5f6f52]/5 transition rounded-xl p-3 text-center cursor-pointer flex flex-col items-center justify-center gap-1.5"
+      <div className="xl:col-span-3 flex flex-col gap-3 bg-white border border-[#e5e1da] rounded-2xl p-4 shadow-xs overflow-y-auto max-h-full">
+        {/* Left Sidebar Sub-Navigation Segmented Control */}
+        <div className="flex bg-slate-100/80 p-1 rounded-xl gap-1 shrink-0 border border-slate-200/60">
+          <button
+            type="button"
+            onClick={() => setLeftSidebarTab('config')}
+            className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
+              leftSidebarTab === 'config'
+                ? 'bg-[#5f6f52] text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            }`}
           >
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              accept=".pdf,.docx"
-              className="hidden"
-            />
-            {isUploading ? (
-              <div className="flex flex-col items-center gap-1.5">
-                <Loader2 className="w-5 h-5 text-[#5f6f52] animate-spin" />
-                <span className="text-[10px] font-bold text-[#5f6f52]">Processing... {uploadProgress}%</span>
-              </div>
-            ) : (
-              <>
-                <Upload className="w-5 h-5 text-slate-400 hover:text-[#5f6f52] transition" />
-                <span className="text-[10px] font-bold text-slate-500">Drag & drop or Click to upload</span>
-                <span className="text-[8px] text-slate-400 uppercase font-extrabold">PDF or DOCX (Max 10MB)</span>
-              </>
+            <Settings className="w-3 h-3" />
+            <span>Config</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setLeftSidebarTab('materials')}
+            className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
+              leftSidebarTab === 'materials'
+                ? 'bg-[#5f6f52] text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            }`}
+          >
+            <FileText className="w-3 h-3" />
+            <span>Docs</span>
+            {(documents.length > 0 || uploadedResources.length > 0) && (
+              <span className={`text-[8px] font-bold px-1 rounded-full ${leftSidebarTab === 'materials' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                {documents.length + uploadedResources.length}
+              </span>
             )}
-          </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setLeftSidebarTab('voice')}
+            className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
+              leftSidebarTab === 'voice'
+                ? 'bg-[#5f6f52] text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            }`}
+          >
+            <Headphones className="w-3 h-3" />
+            <span>Voice</span>
+            {isVoiceEnabled && (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            )}
+          </button>
+        </div>
 
-          {uploadError && (
-            <p className="text-[9px] text-red-500 font-semibold leading-tight mt-1">{uploadError}</p>
-          )}
-
-          {/* Uploaded Resources List */}
-          <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1 mt-1.5">
-            {uploadedResources.length === 0 ? (
-              <div className="p-3 border border-dashed border-slate-100 rounded-xl text-center text-slate-300 text-[10px]">
-                No custom resources uploaded yet.
-              </div>
-            ) : (
-              uploadedResources.map((res) => {
-                const isSelected = selectedResourceId === res.id;
-                return (
-                  <div
-                    key={res.id}
-                    onClick={() => setSelectedResourceId(isSelected ? '' : res.id)}
-                    className={`group w-full p-2.5 rounded-xl border transition text-xs flex items-center justify-between cursor-pointer ${
-                      isSelected
-                        ? 'border-[#5f6f52] bg-[#5f6f52]/5 text-[#5f6f52]'
-                        : 'border-slate-150 bg-slate-50/30 hover:bg-slate-50 text-slate-600'
-                    }`}
+        {/* TAB 1: CONFIGURATIONS & SESSIONS */}
+        {leftSidebarTab === 'config' && (
+          <div className="space-y-4 animate-fadeIn">
+            {/* Tutor Sessions section */}
+            <div className={`flex flex-col gap-2 ${
+              fullscreenWidget === 'sessions' 
+                ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn' 
+                : ''
+            }`}>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
+                  <History className="w-3.5 h-3.5 text-[#a9b388]" />
+                  Pedagogical Sessions
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {user?.uid ? (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60" title="Sessions automatically persisted to Firestore">
+                      <Cloud className="w-3 h-3 text-emerald-600 animate-pulse" />
+                      <span>{isSyncingWithFirestore ? 'Syncing...' : 'Cloud Synced'}</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-50 text-amber-700 border border-amber-200/60" title="Local Storage persistence">
+                      <CloudOff className="w-3 h-3 text-amber-600" />
+                      <span>Local</span>
+                    </span>
+                  )}
+                  <button
+                    onClick={handleCreateNewSession}
+                    className="text-[#5f6f52] hover:bg-[#5f6f52]/10 px-2 py-0.5 rounded-lg transition cursor-pointer flex items-center gap-1 text-[10px] font-bold border border-[#5f6f52]/20"
+                    title="Start New Tutor Chat"
                   >
-                    <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
-                      <div className={`p-1.5 rounded-lg shrink-0 ${isSelected ? 'bg-[#5f6f52]/10 text-[#5f6f52]' : 'bg-slate-100 text-slate-400'}`}>
-                        {res.fileType === 'pdf' ? (
-                          <Paperclip className="w-3.5 h-3.5" />
-                        ) : (
-                          <FileUp className="w-3.5 h-3.5" />
-                        )}
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <span className="font-bold truncate text-[11px] leading-tight">{res.fileName}</span>
-                        <span className="text-[8px] text-slate-400 mt-0.5">
-                          {new Date(res.uploadedAt).toLocaleDateString()}
-                        </span>
-                      </div>
-                    </div>
+                    <Plus className="w-3 h-3" />
+                    New
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFullscreenWidget(fullscreenWidget === 'sessions' ? null : 'sessions')}
+                    className="text-slate-400 hover:text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
+                    title={fullscreenWidget === 'sessions' ? "Minimize Window" : "Maximize to Full Screen"}
+                  >
+                    {fullscreenWidget === 'sessions' ? (
+                      <Minimize2 className="w-3.5 h-3.5" />
+                    ) : (
+                      <Maximize2 className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
+              </div>
 
-                    <div className="flex items-center gap-1 shrink-0">
-                      {isSelected && (
-                        <span className="p-0.5 bg-emerald-500 text-white rounded-full">
-                          <Check className="w-2.5 h-2.5" />
+              {/* Session Search Input */}
+              {sessions.length > 2 && (
+                <div className="relative">
+                  <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={sessionSearchQuery}
+                    onChange={(e) => setSessionSearchQuery(e.target.value)}
+                    placeholder="Search past Socratic chats..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-7 pr-2 py-1 text-[10px] text-slate-700 focus:outline-none focus:border-[#5f6f52]"
+                  />
+                  {sessionSearchQuery && (
+                    <button
+                      onClick={() => setSessionSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-[10px]"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div className={`space-y-1.5 overflow-y-auto pr-1 ${
+                fullscreenWidget === 'sessions' 
+                  ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 space-y-0 mt-4' 
+                  : 'max-h-[170px]'
+              }`}>
+                {sessions
+                  .filter(sess => {
+                    if (!sessionSearchQuery.trim()) return true;
+                    const q = sessionSearchQuery.toLowerCase();
+                    return (
+                      sess.title?.toLowerCase().includes(q) ||
+                      sess.subject?.toLowerCase().includes(q) ||
+                      sess.topic?.toLowerCase().includes(q) ||
+                      (sess as any).cbcConcept?.toLowerCase().includes(q) ||
+                      sess.messages?.some(m => m.text?.toLowerCase().includes(q))
+                    );
+                  })
+                  .map((sess) => (
+                    <div
+                      key={sess.id}
+                      onClick={() => {
+                        loadSession(sess);
+                        if (fullscreenWidget === 'sessions') setFullscreenWidget(null);
+                      }}
+                      className={`group w-full p-2.5 rounded-xl text-left border transition text-[11px] flex items-center justify-between cursor-pointer ${
+                        activeSessionId === sess.id
+                          ? 'border-[#5f6f52] bg-[#5f6f52]/5 text-[#5f6f52] font-semibold'
+                          : 'border-slate-150 bg-slate-50/50 hover:bg-slate-50 hover:border-slate-300 text-slate-600'
+                      } ${fullscreenWidget === 'sessions' ? 'shadow-xs hover:shadow-md hover:-translate-y-0.5 duration-300' : ''}`}
+                    >
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <div className="flex items-center gap-1">
+                          <span className="font-bold truncate pr-1 text-xs">{sess.title}</span>
+                          {(sess as any).isCbcMode && (
+                            <span className="text-[8px] font-extrabold uppercase bg-amber-100 text-amber-800 px-1 rounded shrink-0">
+                              CBC
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-400 mt-0.5 capitalize flex items-center gap-1 truncate">
+                          <span>{sess.subject || 'General'}</span>
+                          <span>•</span>
+                          <span>{sess.messages?.length || 0} msgs</span>
+                          {sess.difficultyLevel && (
+                            <>
+                              <span>•</span>
+                              <span className="uppercase text-[8px] font-bold tracking-tight">{sess.difficultyLevel}</span>
+                            </>
+                          )}
                         </span>
-                      )}
+                      </div>
                       <button
                         type="button"
-                        onClick={(e) => handleDeleteResource(res, e)}
-                        className="opacity-0 group-hover:opacity-100 hover:text-red-500 p-1 transition rounded-md hover:bg-red-50 cursor-pointer"
-                        title="Delete resource context"
+                        onClick={(e) => handleDeleteSession(sess.id, e)}
+                        className="opacity-0 group-hover:opacity-100 hover:text-red-500 p-1 transition rounded-md hover:bg-red-50 cursor-pointer shrink-0"
+                        title="Delete Session"
                       >
                         <Trash2 className="w-3 h-3" />
                       </button>
                     </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
+                  ))}
+              </div>
+            </div>
 
-        <button
-          onClick={clearChat}
-          className="w-full py-1.5 border border-slate-200 hover:bg-red-50 hover:border-red-100 text-slate-500 hover:text-red-600 rounded-xl text-[10px] font-extrabold tracking-wider transition uppercase cursor-pointer"
-        >
-          Clear Chat Log
-        </button>
+            <hr className="border-slate-100" />
+
+            {/* Configurations section */}
+            <div className={
+              fullscreenWidget === 'configurations'
+                ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn'
+                : 'space-y-3'
+            }>
+              <div className="flex items-center justify-between border-b border-slate-50 pb-2">
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5 text-[#a9b388]" />
+                  Tutor Parameters
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setFullscreenWidget(fullscreenWidget === 'configurations' ? null : 'configurations')}
+                  className="text-slate-400 hover:text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
+                  title={fullscreenWidget === 'configurations' ? "Minimize Window" : "Maximize to Full Screen"}
+                >
+                  {fullscreenWidget === 'configurations' ? (
+                    <Minimize2 className="w-3.5 h-3.5" />
+                  ) : (
+                    <Maximize2 className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
+
+              <div className={`space-y-3 text-xs ${
+                fullscreenWidget === 'configurations' 
+                  ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 space-y-0 mt-6' 
+                  : ''
+              }`}>
+                {isCbcSession && (
+                  <div className={`bg-amber-50/70 border border-amber-200/60 rounded-xl p-3 space-y-2 animate-fadeIn mb-2 ${
+                    fullscreenWidget === 'configurations' ? 'md:col-span-2 lg:col-span-3 mb-0' : ''
+                  }`}>
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-800 flex items-center gap-1">
+                      <GraduationCap className="w-3.5 h-3.5 text-amber-600" />
+                      Active CBC Pathway
+                    </span>
+                    <div className="text-[11px] space-y-1 text-slate-700 bg-white/65 p-2 rounded-lg border border-amber-100">
+                      <div><span className="text-slate-400 font-medium block text-[9px] uppercase">Subject</span> <span className="font-bold">{cbcSubject}</span></div>
+                      <div><span className="text-slate-400 font-medium block text-[9px] uppercase">Strand / Topic</span> <span className="font-bold">{cbcStrand}</span></div>
+                      <div><span className="text-slate-400 font-medium block text-[9px] uppercase">Substrand / Subtopic</span> <span className="font-bold">{cbcSubStrand}</span></div>
+                      <div><span className="text-slate-400 font-medium block text-[9px] uppercase">Concept</span> <span className="font-bold">{cbcConcept}</span></div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleChangeTopic}
+                      className="w-full py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[10px] tracking-wider uppercase rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-xs"
+                    >
+                      <BookOpen className="w-3.5 h-3.5" />
+                      Change Topic
+                    </button>
+                  </div>
+                )}
+
+                {/* Subject selector */}
+                <div className="flex flex-col justify-between">
+                  <label className="block text-slate-500 font-bold mb-1">Subject</label>
+                  <EditableSelect
+                    value={subject}
+                    onChange={setSubject}
+                    options={[
+                      "Physics",
+                      "Mathematics",
+                      "Chemistry",
+                      "Biology",
+                      "General Science",
+                      "History & Geography",
+                      "Languages & Literature"
+                    ]}
+                    placeholder=""
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52]"
+                  />
+                </div>
+
+                {/* Topic textbox */}
+                <div className="flex flex-col justify-between">
+                  <label className="block text-slate-500 font-bold mb-1">Active Topic of Inquiry</label>
+                  <input
+                    type="text"
+                    value={topic}
+                    onChange={(e) => setTopic(e.target.value)}
+                    placeholder="e.g. Newton's Second Law"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52]"
+                  />
+                </div>
+
+                {/* Pedagogical Persona */}
+                <div className="flex flex-col justify-between">
+                  <div>
+                    <label className="block text-slate-500 font-bold mb-1">Pedagogical Persona</label>
+                    <EditableSelect
+                      value={persona}
+                      onChange={(val) => setPersona(val as any)}
+                      options={["Socratic Questioner", "Encouraging Mentor", "Critical Examiner"]}
+                      placeholder=""
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52]"
+                    />
+                  </div>
+                  <p className="text-[9px] text-slate-400 mt-1 leading-normal">
+                    {persona === 'Socratic Questioner' && "Warm, inquisitive Socratic dialogue probing your assumptions."}
+                    {persona === 'Encouraging Mentor' && "Highly reinforcing, supportive guide celebrating your growth."}
+                    {persona === 'Critical Examiner' && "Rigorous, analytical challenger testing proofs and logic."}
+                    {persona !== 'Socratic Questioner' && persona !== 'Encouraging Mentor' && persona !== 'Critical Examiner' && `Custom tutor personality: "${persona}"`}
+                  </p>
+                </div>
+
+                {/* Difficulty Level selector */}
+                <div className="flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-slate-500 font-bold flex items-center gap-1">
+                        <Gauge className="w-3.5 h-3.5 text-[#5f6f52]" />
+                        Difficulty Level
+                      </label>
+                      <span className={`text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${
+                        difficultyLevel === 'beginner' 
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-200' 
+                          : difficultyLevel === 'intermediate'
+                          ? 'bg-amber-100 text-amber-800 border-amber-200'
+                          : 'bg-rose-100 text-rose-800 border-rose-200'
+                      }`}>
+                        {difficultyLevel}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-lg">
+                      {(['beginner', 'intermediate', 'advanced'] as const).map((level) => (
+                        <button
+                          key={level}
+                          type="button"
+                          onClick={() => setDifficultyLevel(level)}
+                          className={`py-1 text-[10px] font-extrabold rounded text-center transition capitalize cursor-pointer ${
+                            difficultyLevel === level
+                              ? level === 'beginner' 
+                                ? 'bg-emerald-600 text-white shadow-2xs'
+                                : level === 'intermediate'
+                                ? 'bg-amber-600 text-white shadow-2xs'
+                                : 'bg-rose-600 text-white shadow-2xs'
+                              : 'text-slate-500 hover:text-slate-700'
+                          }`}
+                        >
+                          {level}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-slate-400 mt-1 leading-normal">
+                    {difficultyLevel === 'beginner' && "Simplifies vocabulary, uses relatable analogies & gentle single-step prompts."}
+                    {difficultyLevel === 'intermediate' && "Balanced Socratic questioning with standard curriculum terminology & structured hints."}
+                    {difficultyLevel === 'advanced' && "High-rigor academic depth, multi-variable logic puzzles, counter-examples & proofs."}
+                  </p>
+                </div>
+
+                {/* Scaffolding level */}
+                <div className="flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-slate-500 font-bold">Scaffolding Granularity</label>
+                      <span className="text-[10px] font-extrabold uppercase bg-[#5f6f52]/10 text-[#5f6f52] px-1.5 py-0.5 rounded">
+                        {scaffoldingLevel}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-lg">
+                      {(['low', 'medium', 'high'] as const).map((level) => (
+                        <button
+                          key={level}
+                          type="button"
+                          onClick={() => setScaffoldingLevel(level)}
+                          className={`py-1 text-[10px] font-extrabold rounded text-center transition capitalize cursor-pointer ${
+                            scaffoldingLevel === level
+                              ? 'bg-[#5f6f52] text-white shadow-2xs'
+                              : 'text-slate-500 hover:text-slate-700'
+                          }`}
+                        >
+                          {level}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-slate-400 mt-1 leading-normal">
+                    {scaffoldingLevel === 'high' && "Breaks reasoning into small, bite-sized questions."}
+                    {scaffoldingLevel === 'medium' && "Guides step-by-step, helping locate mistakes incrementally."}
+                    {scaffoldingLevel === 'low' && "Relies on conceptual hints and higher-level questions."}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: MATERIALS & CONTEXT UPLOADS */}
+        {leftSidebarTab === 'materials' && (
+          <div className="space-y-4 animate-fadeIn">
+            {/* Lesson Material Importer */}
+            <div className="flex flex-col">
+              <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] block mb-1">Import Lesson Context</span>
+              <p className="text-[10px] text-slate-400 leading-normal mb-2">
+                Ground the tutor conversation in any generated lesson materials.
+              </p>
+
+              <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                {documents.length === 0 ? (
+                  <div className="p-3 border border-dashed border-slate-200 rounded-xl text-center text-slate-400 text-[10px]">
+                    No generated materials found to import.
+                  </div>
+                ) : (
+                  documents.map((doc) => (
+                    <button
+                      key={doc.id}
+                      onClick={() => handleImportDocument(doc.id)}
+                      className={`w-full p-2 rounded-xl text-left border transition text-xs flex flex-col gap-0.5 cursor-pointer ${
+                        selectedDocId === doc.id
+                          ? 'border-[#5f6f52] bg-[#5f6f52]/5 text-[#5f6f52] font-semibold'
+                          : 'border-slate-150 bg-slate-50/50 hover:bg-slate-50 hover:border-slate-300 text-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 shrink-0" />
+                        <span className="font-bold truncate">{doc.topic}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-[9px] text-slate-400 mt-0.5">
+                        <span>{doc.classLevel}</span>
+                        <span>{doc.subject}</span>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <hr className="border-slate-100" />
+
+            {/* Uploaded Curriculum Resources */}
+            <div className="flex flex-col gap-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] block">Curriculum Guides & Uploads</span>
+              <p className="text-[10px] text-slate-400 leading-normal mb-1">
+                Upload PDF or DOCX files to ground EduNexus AI Tutor in curriculum guides.
+              </p>
+
+              {/* Drag & Drop zone */}
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  handleFileUpload(e);
+                }}
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-[#5f6f52]/30 hover:border-[#5f6f52] bg-slate-50/50 hover:bg-[#5f6f52]/5 transition rounded-xl p-3 text-center cursor-pointer flex flex-col items-center justify-center gap-1.5"
+              >
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileUpload}
+                  accept=".pdf,.docx"
+                  className="hidden"
+                />
+                {isUploading ? (
+                  <div className="flex flex-col items-center gap-1.5">
+                    <Loader2 className="w-5 h-5 text-[#5f6f52] animate-spin" />
+                    <span className="text-[10px] font-bold text-[#5f6f52]">Processing... {uploadProgress}%</span>
+                  </div>
+                ) : (
+                  <>
+                    <Upload className="w-5 h-5 text-slate-400 hover:text-[#5f6f52] transition" />
+                    <span className="text-[10px] font-bold text-slate-500">Drag & drop or Click to upload</span>
+                    <span className="text-[8px] text-slate-400 uppercase font-extrabold">PDF or DOCX (Max 10MB)</span>
+                  </>
+                )}
+              </div>
+
+              {uploadError && (
+                <p className="text-[9px] text-red-500 font-semibold leading-tight mt-1">{uploadError}</p>
+              )}
+
+              {/* Uploaded Resources List */}
+              <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1 mt-1.5">
+                {uploadedResources.length === 0 ? (
+                  <div className="p-3 border border-dashed border-slate-100 rounded-xl text-center text-slate-300 text-[10px]">
+                    No custom resources uploaded yet.
+                  </div>
+                ) : (
+                  uploadedResources.map((res) => {
+                    const isSelected = selectedResourceId === res.id;
+                    return (
+                      <div
+                        key={res.id}
+                        onClick={() => setSelectedResourceId(isSelected ? '' : res.id)}
+                        className={`group w-full p-2.5 rounded-xl border transition text-xs flex items-center justify-between cursor-pointer ${
+                          isSelected
+                            ? 'border-[#5f6f52] bg-[#5f6f52]/5 text-[#5f6f52]'
+                            : 'border-slate-150 bg-slate-50/30 hover:bg-slate-50 text-slate-600'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
+                          <div className={`p-1.5 rounded-lg shrink-0 ${isSelected ? 'bg-[#5f6f52]/10 text-[#5f6f52]' : 'bg-slate-100 text-slate-400'}`}>
+                            {res.fileType === 'pdf' ? (
+                              <Paperclip className="w-3.5 h-3.5" />
+                            ) : (
+                              <FileUp className="w-3.5 h-3.5" />
+                            )}
+                          </div>
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-bold truncate text-[11px] leading-tight">{res.fileName}</span>
+                            <span className="text-[8px] text-slate-400 mt-0.5">
+                              {new Date(res.uploadedAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          {isSelected && (
+                            <span className="p-0.5 bg-emerald-500 text-white rounded-full">
+                              <Check className="w-2.5 h-2.5" />
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteResource(res, e)}
+                            className="opacity-0 group-hover:opacity-100 hover:text-red-500 p-1 transition rounded-md hover:bg-red-50 cursor-pointer"
+                            title="Delete resource context"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: VOICE & AUDIO SETTINGS */}
+        {leftSidebarTab === 'voice' && (
+          <div className="space-y-3 bg-[#5f6f52]/5 border border-[#5f6f52]/10 p-3 rounded.xl animate-fadeIn">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#5f6f52] flex items-center gap-1.5">
+                <Headphones className="w-3.5 h-3.5" />
+                Dialogue Speech Controls
+              </span>
+              <button
+                onClick={() => setShowVoiceSettings(!showVoiceSettings)}
+                className="text-[#5f6f52] hover:text-[#4d5a42] p-0.5 transition cursor-pointer"
+                title="Voice Customization Settings"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 text-xs">
+              {/* Auto Voice Output Toggle */}
+              <label className="flex items-center justify-between cursor-pointer p-1.5 bg-white border border-slate-200/80 rounded-xl transition">
+                <span className="text-slate-700 font-semibold text-[11px]">Tutor Audio Output</span>
+                <div className="relative inline-flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={isVoiceEnabled}
+                    onChange={(e) => {
+                      const val = e.target.checked;
+                      setIsVoiceEnabled(val);
+                      if (!val && window.speechSynthesis) {
+                        window.speechSynthesis.cancel();
+                        setIsSpeaking(false);
+                      } else if (val && messages.length > 0) {
+                        speakText(messages[messages.length - 1].text);
+                      }
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3.5 after:transition-all peer-checked:bg-[#5f6f52]"></div>
+                </div>
+              </label>
+
+              {/* Hands-free auto voice sequence toggle */}
+              <label className="flex items-center justify-between cursor-pointer p-1.5 bg-white border border-slate-200/80 rounded-xl transition">
+                <div className="flex flex-col">
+                  <span className="text-slate-700 font-semibold text-[11px]">Hands-Free Mode</span>
+                  <span className="text-[9px] text-slate-400 leading-tight">Auto-listen after tutor speaks</span>
+                </div>
+                <div className="relative inline-flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={isHandsFree}
+                    onChange={(e) => {
+                      setIsHandsFree(e.target.checked);
+                      if (e.target.checked) {
+                        setIsVoiceEnabled(true);
+                      }
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3.5 after:transition-all peer-checked:bg-[#5f6f52]"></div>
+                </div>
+              </label>
+
+              {/* Dropdowns for Browser Voices & Playback Speed */}
+              <div className="pt-2 border-t border-slate-200/60 grid grid-cols-1 gap-2">
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1 text-[10px] uppercase tracking-wider">Tutor Voice</label>
+                  <div className="relative">
+                    <select
+                      value={selectedVoiceName}
+                      onChange={(e) => setSelectedVoiceName(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg p-2 pr-8 text-xs text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52] appearance-none cursor-pointer truncate"
+                    >
+                      {voices.length === 0 ? (
+                        <option value="">Default voice</option>
+                      ) : (
+                        voices.map((v, i) => (
+                          <option key={i} value={v.name}>
+                            {v.name.replace('Microsoft', '').replace('Google', '').trim()}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 font-semibold mb-1 text-[10px] uppercase tracking-wider">Playback Speed</label>
+                  <div className="relative">
+                    <select
+                      value={voiceRate}
+                      onChange={(e) => setVoiceRate(parseFloat(e.target.value))}
+                      className="w-full bg-white border border-slate-200 rounded-lg p-2 pr-8 text-xs text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52] appearance-none cursor-pointer"
+                    >
+                      <option value="0.5">0.5x (Slow)</option>
+                      <option value="0.75">0.75x</option>
+                      <option value="1">1.0x (Normal)</option>
+                      <option value="1.25">1.25x</option>
+                      <option value="1.5">1.5x (Fast)</option>
+                      <option value="1.75">1.75x</option>
+                      <option value="2">2.0x (Very Fast)</option>
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Advanced synthesis settings */}
+              <AnimatePresence>
+                {showVoiceSettings && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="space-y-2 pt-2 border-t border-slate-150 overflow-hidden"
+                  >
+                    <div>
+                      <div className="flex justify-between text-[10px] text-slate-500 font-semibold">
+                        <span>Speaking Speed</span>
+                        <span>{voiceRate}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="2"
+                        step="0.1"
+                        value={voiceRate}
+                        onChange={(e) => setVoiceRate(parseFloat(e.target.value))}
+                        className="w-full accent-[#5f6f52]"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-[10px] text-slate-500 font-semibold">
+                        <span>Tone Pitch</span>
+                        <span>{voicePitch}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="1.5"
+                        step="0.1"
+                        value={voicePitch}
+                        onChange={(e) => setVoicePitch(parseFloat(e.target.value))}
+                        className="w-full accent-[#5f6f52]"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center text-[10px] text-slate-500 font-semibold">
+                        <span className="flex items-center gap-1">
+                          {voiceVolume === 0 ? (
+                            <VolumeX className="w-3 h-3 text-slate-400" />
+                          ) : voiceVolume < 0.5 ? (
+                            <Volume1 className="w-3 h-3 text-[#5f6f52]" />
+                          ) : (
+                            <Volume2 className="w-3 h-3 text-[#5f6f52]" />
+                          )}
+                          Voice Volume
+                        </span>
+                        <span>{Math.round(voiceVolume * 100)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={voiceVolume}
+                        onChange={(e) => setVoiceVolume(parseFloat(e.target.value))}
+                        className="w-full accent-[#5f6f52]"
+                      />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-auto pt-2">
+          <button
+            onClick={clearChat}
+            className="w-full py-2 border border-slate-200 hover:bg-red-50 hover:border-red-200 text-slate-500 hover:text-red-600 rounded-xl text-[10px] font-extrabold tracking-wider transition uppercase cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <Trash2 className="w-3 h-3" />
+            Clear Chat Log
+          </button>
+        </div>
       </div>
 
       {/* Main Interactive Chat Panel - 6 Columns */}
@@ -1906,6 +2262,16 @@ ${dialogueStyleInstruction}`;
                         <Volume2 className="w-2.5 h-2.5 animate-bounce" /> Voice Mode
                       </span>
                     )}
+                    <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 border ${
+                      difficultyLevel === 'beginner' 
+                        ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/30' 
+                        : difficultyLevel === 'intermediate'
+                        ? 'bg-amber-500/20 text-amber-200 border-amber-400/30'
+                        : 'bg-rose-500/20 text-rose-200 border-rose-400/30'
+                    }`}>
+                      <Gauge className="w-2.5 h-2.5" />
+                      {difficultyLevel}
+                    </span>
                   </div>
                   <span className="text-[10px] text-white/80 block mt-0.5">
                     {isCbcSession ? "Learning Design Specialist | St. Mary's Girls Secondary School Persona" : (
@@ -1950,6 +2316,15 @@ ${dialogueStyleInstruction}`;
                       <span>Generate Flashcards</span>
                     </>
                   )}
+                </button>
+                <button
+                  type="button"
+                  onClick={clearChat}
+                  className="px-2.5 py-1 text-[10px] font-extrabold tracking-wider uppercase bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/30 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-rose-100 hover:text-white shrink-0"
+                  title="Clear Active Chat History (With Confirmation)"
+                >
+                  <Trash2 className="w-3 h-3 text-rose-200" />
+                  Clear Chat
                 </button>
                 <button
                   onClick={handleExportChatLog}
@@ -2286,13 +2661,71 @@ ${dialogueStyleInstruction}`;
       </div>
 
       {/* State Diagnostics & Resource Mapping Panel - 3 Columns */}
-      <div className="xl:col-span-3 flex flex-col gap-4 max-h-full overflow-y-auto">
+      <div className="xl:col-span-3 flex flex-col gap-3 bg-white border border-[#e5e1da] rounded-2xl p-4 shadow-xs max-h-full overflow-y-auto">
         
+        {/* Right Sidebar Sub-Navigation Segmented Control */}
+        <div className="flex bg-slate-100/80 p-1 rounded-xl gap-1 shrink-0 border border-slate-200/60 mb-1">
+          <button
+            type="button"
+            onClick={() => setRightSidebarTab('all')}
+            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
+              rightSidebarTab === 'all'
+                ? 'bg-[#5f6f52] text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            }`}
+            title="Show all diagnostic widgets"
+          >
+            <span>All</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setRightSidebarTab('concept')}
+            className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
+              rightSidebarTab === 'concept'
+                ? 'bg-[#5f6f52] text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            }`}
+          >
+            <Activity className="w-3 h-3" />
+            <span className="truncate">Concept</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setRightSidebarTab('pedagogy')}
+            className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
+              rightSidebarTab === 'pedagogy'
+                ? 'bg-[#5f6f52] text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            }`}
+          >
+            <Layers className="w-3 h-3" />
+            <span className="truncate">Diagnostics</span>
+            {misconceptions.length > 0 && (
+              <span className="bg-rose-500 text-white text-[8px] font-extrabold px-1 rounded-full shrink-0">
+                {misconceptions.length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setRightSidebarTab('resources')}
+            className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
+              rightSidebarTab === 'resources'
+                ? 'bg-[#5f6f52] text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            }`}
+          >
+            <ExternalLink className="w-3 h-3" />
+            <span className="truncate">Resources</span>
+          </button>
+        </div>
+
         {/* Dynamic Concept Map Visualization Card */}
+        {(rightSidebarTab === 'all' || rightSidebarTab === 'concept') && (
         <div className={
           fullscreenWidget === 'visualizer'
             ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn'
-            : 'bg-white border border-[#e5e1da] rounded-2xl p-4 shadow-xs flex flex-col'
+            : 'bg-white border border-[#e5e1da] rounded-2xl p-3.5 shadow-2xs flex flex-col animate-fadeIn'
         }>
           <div className="flex items-center justify-between mb-2 border-b border-slate-50 pb-2">
             <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
@@ -2542,153 +2975,159 @@ ${dialogueStyleInstruction}`;
             )}
           </AnimatePresence>
         </div>
+        )}
         
-        {/* Scaffolding Progress Indicator */}
-        <div className={
-          fullscreenWidget === 'pedagogicalState'
-            ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn'
-            : 'bg-white border border-[#e5e1da] rounded-2xl p-4 shadow-xs'
-        }>
-          <div className="flex items-center justify-between mb-3 border-b border-slate-50 pb-2">
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-[#a9b388]" />
-              AI Pedagogical State
-            </span>
-            <button
-              type="button"
-              onClick={() => setFullscreenWidget(fullscreenWidget === 'pedagogicalState' ? null : 'pedagogicalState')}
-              className="text-slate-400 hover:text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
-              title={fullscreenWidget === 'pedagogicalState' ? "Minimize Window" : "Maximize to Full Screen"}
-            >
-              {fullscreenWidget === 'pedagogicalState' ? (
-                <Minimize2 className="w-3.5 h-3.5" />
-              ) : (
-                <Maximize2 className="w-3.5 h-3.5" />
-              )}
-            </button>
-          </div>
-          <div className="space-y-4">
-            <div className="p-3 bg-[#5f6f52]/5 border border-[#5f6f52]/20 rounded-xl flex items-center gap-2.5">
-              <Layers className="w-5 h-5 text-[#5f6f52]" />
-              <div className="min-w-0">
-                <span className="text-[9px] font-bold text-slate-400 block uppercase">Active Scaffolding Step</span>
-                <span className="text-xs font-bold text-slate-700 truncate block capitalize">{activeStep}</span>
-              </div>
+        {/* Scaffolding Progress & Misconception Diagnostics */}
+        {(rightSidebarTab === 'all' || rightSidebarTab === 'pedagogy') && (
+        <>
+          <div className={
+            fullscreenWidget === 'pedagogicalState'
+              ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn'
+              : 'bg-white border border-[#e5e1da] rounded-2xl p-3.5 shadow-2xs animate-fadeIn'
+          }>
+            <div className="flex items-center justify-between mb-3 border-b border-slate-50 pb-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-[#a9b388]" />
+                AI Pedagogical State
+              </span>
+              <button
+                type="button"
+                onClick={() => setFullscreenWidget(fullscreenWidget === 'pedagogicalState' ? null : 'pedagogicalState')}
+                className="text-slate-400 hover:text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
+                title={fullscreenWidget === 'pedagogicalState' ? "Minimize Window" : "Maximize to Full Screen"}
+              >
+                {fullscreenWidget === 'pedagogicalState' ? (
+                  <Minimize2 className="w-3.5 h-3.5" />
+                ) : (
+                  <Maximize2 className="w-3.5 h-3.5" />
+                )}
+              </button>
             </div>
-            
-            {fullscreenWidget === 'pedagogicalState' ? (
-              <div className="mt-8 space-y-6 flex-1">
-                <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider border-b pb-2">Socratic Scaffolding Progress Timeline</h4>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4 relative">
-                  {[
-                    { name: 'Exploratory onboarding', title: '1. Onboarding', desc: 'Orientation, baseline context setting, and initial subject exploration.' },
-                    { name: 'Foundational Assessment', title: '2. Diagnostic', desc: 'Socratic probes testing prior understanding and identifying initial knowledge gaps.' },
-                    { name: 'Cognitive challenge', title: '3. Cognitive Inquiry', desc: 'Active guiding prompts that prompt cognitive dissonance to dismantle misconceptions.' },
-                    { name: 'Guided synthesis', title: '4. Consolidation', desc: 'Concept mastery confirmation, guided summary, and real-world synthesis application.' }
-                  ].map((step, idx, arr) => {
-                    const isActive = activeStep.toLowerCase().includes(step.name.toLowerCase().split(' ')[0]) || 
-                                     (step.name === 'Cognitive challenge' && activeStep.toLowerCase().includes('inquiry'));
-                    const activeIndex = arr.findIndex(item => activeStep.toLowerCase().includes(item.name.toLowerCase().split(' ')[0]));
-                    const isCompleted = activeIndex !== -1 && idx < activeIndex;
-
-                    return (
-                      <div key={idx} className={`p-5 rounded-2xl border transition-all duration-300 relative ${
-                        isActive 
-                          ? 'bg-[#5f6f52]/10 border-[#5f6f52] shadow-md ring-1 ring-[#5f6f52]' 
-                          : isCompleted 
-                          ? 'bg-emerald-50/40 border-emerald-200 text-slate-600' 
-                          : 'bg-slate-50/50 border-slate-150 text-slate-400'
-                      }`}>
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-extrabold ${
-                            isActive 
-                              ? 'bg-[#5f6f52] text-white' 
-                              : isCompleted 
-                              ? 'bg-emerald-500 text-white' 
-                              : 'bg-slate-200 text-slate-500'
-                          }`}>
-                            {isCompleted ? '✓' : idx + 1}
-                          </span>
-                          <span className={`text-xs font-extrabold tracking-tight ${isActive ? 'text-[#5f6f52]' : isCompleted ? 'text-slate-700' : 'text-slate-500'}`}>
-                            {step.title}
-                          </span>
-                        </div>
-                        <p className="text-[11px] leading-relaxed font-medium text-slate-500">
-                          {step.desc}
-                        </p>
-                        {isActive && (
-                          <span className="absolute -top-2.5 right-4 text-[8px] font-extrabold tracking-wider uppercase bg-[#5f6f52] text-white px-2 py-0.5 rounded-full animate-pulse">
-                            Active Stage
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
+            <div className="space-y-3">
+              <div className="p-2.5 bg-[#5f6f52]/5 border border-[#5f6f52]/20 rounded-xl flex items-center gap-2.5">
+                <Layers className="w-4 h-4 text-[#5f6f52] shrink-0" />
+                <div className="min-w-0">
+                  <span className="text-[9px] font-bold text-slate-400 block uppercase">Active Scaffolding Step</span>
+                  <span className="text-xs font-bold text-slate-700 truncate block capitalize">{activeStep}</span>
                 </div>
               </div>
-            ) : (
-              <p className="text-[10px] text-slate-500 leading-normal">
-                This metric tracks the Socratic level of inquiry. The Sage asks follow-up prompts to guide you forward.
-              </p>
-            )}
-          </div>
-        </div>
+              
+              {fullscreenWidget === 'pedagogicalState' ? (
+                <div className="mt-8 space-y-6 flex-1">
+                  <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider border-b pb-2">Socratic Scaffolding Progress Timeline</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4 relative">
+                    {[
+                      { name: 'Exploratory onboarding', title: '1. Onboarding', desc: 'Orientation, baseline context setting, and initial subject exploration.' },
+                      { name: 'Foundational Assessment', title: '2. Diagnostic', desc: 'Socratic probes testing prior understanding and identifying initial knowledge gaps.' },
+                      { name: 'Cognitive challenge', title: '3. Cognitive Inquiry', desc: 'Active guiding prompts that prompt cognitive dissonance to dismantle misconceptions.' },
+                      { name: 'Guided synthesis', title: '4. Consolidation', desc: 'Concept mastery confirmation, guided summary, and real-world synthesis application.' }
+                    ].map((step, idx, arr) => {
+                      const isActive = activeStep.toLowerCase().includes(step.name.toLowerCase().split(' ')[0]) || 
+                                       (step.name === 'Cognitive challenge' && activeStep.toLowerCase().includes('inquiry'));
+                      const activeIndex = arr.findIndex(item => activeStep.toLowerCase().includes(item.name.toLowerCase().split(' ')[0]));
+                      const isCompleted = activeIndex !== -1 && idx < activeIndex;
 
-        {/* Misconception Triangulator */}
-        <div className={
-          fullscreenWidget === 'misconceptions'
-            ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn'
-            : 'bg-white border border-[#e5e1da] rounded-2xl p-4 shadow-xs flex-1 flex flex-col min-h-[150px]'
-        }>
-          <div className="flex items-center justify-between mb-3 border-b border-slate-50 pb-2">
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
-              <AlertTriangle className="w-3.5 h-3.5 text-[#a9b388]" />
-              Misconception Diagnoses
-            </span>
-            <button
-              type="button"
-              onClick={() => setFullscreenWidget(fullscreenWidget === 'misconceptions' ? null : 'misconceptions')}
-              className="text-slate-400 hover:text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
-              title={fullscreenWidget === 'misconceptions' ? "Minimize Window" : "Maximize to Full Screen"}
-            >
-              {fullscreenWidget === 'misconceptions' ? (
-                <Minimize2 className="w-3.5 h-3.5" />
-              ) : (
-                <Maximize2 className="w-3.5 h-3.5" />
-              )}
-            </button>
-          </div>
-          
-          <div className={`flex-1 overflow-y-auto pr-1 ${fullscreenWidget === 'misconceptions' ? 'mt-4' : 'max-h-[200px]'}`}>
-            {misconceptions.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center p-6 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-                <CheckCircle className="w-9 h-9 text-emerald-500 mb-2.5" />
-                <span className="text-xs font-bold text-slate-700 block">No Gaps Detected Yet</span>
-                <span className="text-[10px] text-slate-400 max-w-sm mx-auto mt-1 leading-relaxed">
-                  Excellent work! Keep explaining your reasoning step-by-step. EduNexus AI Tutor continuously parses your inputs to detect underlying conceptual gaps or errors.
-                </span>
-              </div>
-            ) : (
-              <div className={`grid gap-4 ${fullscreenWidget === 'misconceptions' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
-                {misconceptions.map((mis, idx) => (
-                  <div key={idx} className="p-4 bg-rose-50 border border-rose-100 rounded-2xl text-xs text-rose-800 flex items-start gap-3 animate-fadeIn shadow-xs hover:shadow-md transition-all duration-300">
-                    <AlertTriangle className="w-4 h-4 text-rose-500 mt-0.5 shrink-0" />
-                    <div>
-                      <span className="font-extrabold block uppercase tracking-wider text-[9px] text-rose-700">Detected Gap {idx + 1}</span>
-                      <p className="font-semibold leading-relaxed mt-1 text-rose-900">{mis}</p>
-                    </div>
+                      return (
+                        <div key={idx} className={`p-5 rounded-2xl border transition-all duration-300 relative ${
+                          isActive 
+                            ? 'bg-[#5f6f52]/10 border-[#5f6f52] shadow-md ring-1 ring-[#5f6f52]' 
+                            : isCompleted 
+                            ? 'bg-emerald-50/40 border-emerald-200 text-slate-600' 
+                            : 'bg-slate-50/50 border-slate-150 text-slate-400'
+                        }`}>
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-extrabold ${
+                              isActive 
+                                ? 'bg-[#5f6f52] text-white' 
+                                : isCompleted 
+                                ? 'bg-emerald-500 text-white' 
+                                : 'bg-slate-200 text-slate-500'
+                            }`}>
+                              {isCompleted ? '✓' : idx + 1}
+                            </span>
+                            <span className={`text-xs font-extrabold tracking-tight ${isActive ? 'text-[#5f6f52]' : isCompleted ? 'text-slate-700' : 'text-slate-500'}`}>
+                              {step.title}
+                            </span>
+                          </div>
+                          <p className="text-[11px] leading-relaxed font-medium text-slate-500">
+                            {step.desc}
+                          </p>
+                          {isActive && (
+                            <span className="absolute -top-2.5 right-4 text-[8px] font-extrabold tracking-wider uppercase bg-[#5f6f52] text-white px-2 py-0.5 rounded-full animate-pulse">
+                              Active Stage
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
-            )}
+                </div>
+              ) : (
+                <p className="text-[10px] text-slate-500 leading-normal">
+                  Tracks Socratic inquiry level. The Sage asks targeted prompts to guide concept mastery.
+                </p>
+              )}
+            </div>
           </div>
-        </div>
+
+          {/* Misconception Triangulator */}
+          <div className={
+            fullscreenWidget === 'misconceptions'
+              ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn'
+              : 'bg-white border border-[#e5e1da] rounded-2xl p-3.5 shadow-2xs flex-1 flex flex-col min-h-[140px] animate-fadeIn'
+          }>
+            <div className="flex items-center justify-between mb-2.5 border-b border-slate-50 pb-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-[#a9b388]" />
+                Misconception Diagnoses
+              </span>
+              <button
+                type="button"
+                onClick={() => setFullscreenWidget(fullscreenWidget === 'misconceptions' ? null : 'misconceptions')}
+                className="text-slate-400 hover:text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
+                title={fullscreenWidget === 'misconceptions' ? "Minimize Window" : "Maximize to Full Screen"}
+              >
+                {fullscreenWidget === 'misconceptions' ? (
+                  <Minimize2 className="w-3.5 h-3.5" />
+                ) : (
+                  <Maximize2 className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </div>
+            
+            <div className={`flex-1 overflow-y-auto pr-1 ${fullscreenWidget === 'misconceptions' ? 'mt-4' : 'max-h-[180px]'}`}>
+              {misconceptions.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center p-4 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                  <CheckCircle className="w-7 h-7 text-emerald-500 mb-2" />
+                  <span className="text-xs font-bold text-slate-700 block">No Gaps Detected Yet</span>
+                  <span className="text-[10px] text-slate-400 max-w-sm mx-auto mt-0.5 leading-relaxed">
+                    Explain your reasoning step-by-step. EduNexus AI Tutor continuously parses inputs to pinpoint conceptual gaps.
+                  </span>
+                </div>
+              ) : (
+                <div className={`grid gap-3 ${fullscreenWidget === 'misconceptions' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
+                  {misconceptions.map((mis, idx) => (
+                    <div key={idx} className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-800 flex items-start gap-2.5 animate-fadeIn shadow-2xs hover:shadow-xs transition-all duration-300">
+                      <AlertTriangle className="w-4 h-4 text-rose-500 mt-0.5 shrink-0" />
+                      <div>
+                        <span className="font-extrabold block uppercase tracking-wider text-[9px] text-rose-700">Detected Gap {idx + 1}</span>
+                        <p className="font-semibold leading-relaxed mt-0.5 text-rose-900 text-[11px]">{mis}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+        )}
 
         {/* Resource Mapping - Interactive External Links */}
+        {(rightSidebarTab === 'all' || rightSidebarTab === 'resources') && (
         <div className={
           fullscreenWidget === 'breakthroughMaps'
             ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn'
-            : 'bg-white border border-[#e5e1da] rounded-2xl p-4 shadow-xs'
+            : 'bg-white border border-[#e5e1da] rounded-2xl p-3.5 shadow-2xs animate-fadeIn'
         }>
           <div className="flex items-center justify-between mb-2.5 border-b border-slate-50 pb-2">
             <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
@@ -2710,7 +3149,7 @@ ${dialogueStyleInstruction}`;
           </div>
           
           <div className={fullscreenWidget === 'breakthroughMaps' ? 'grid grid-cols-1 lg:grid-cols-2 gap-8 mt-4' : 'space-y-2.5'}>
-            <div className={fullscreenWidget === 'breakthroughMaps' ? 'space-y-4' : 'space-y-2.5'}>
+            <div className={fullscreenWidget === 'breakthroughMaps' ? 'space-y-4' : 'space-y-2'}>
               <span className="text-[9px] font-bold uppercase text-slate-400 block mb-1">Tailored Breakthrough References</span>
               {suggestedResources.map((res, idx) => (
                 <a
@@ -2718,11 +3157,11 @@ ${dialogueStyleInstruction}`;
                   href={res.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="block p-3 border border-slate-150 rounded-xl bg-slate-50 hover:bg-slate-100 transition group shadow-2xs hover:shadow-sm duration-300"
+                  className="block p-2.5 border border-slate-150 rounded-xl bg-slate-50 hover:bg-slate-100 transition group shadow-2xs hover:shadow-xs duration-200"
                 >
                   <div className="flex items-center justify-between gap-1.5">
-                    <span className="text-xs font-bold text-[#5f6f52] truncate group-hover:underline">{res.title}</span>
-                    <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-[#5f6f52]" />
+                    <span className="text-[11px] font-bold text-[#5f6f52] truncate group-hover:underline">{res.title}</span>
+                    <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-[#5f6f52] shrink-0" />
                   </div>
                   <p className="text-[10px] text-slate-500 leading-normal mt-1 font-medium">
                     {res.reason}
@@ -2740,7 +3179,7 @@ ${dialogueStyleInstruction}`;
                     href={aid.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="p-2.5 border border-slate-150 bg-white rounded-xl text-center hover:border-slate-300 transition block text-[10px] font-bold text-slate-600 truncate shadow-2xs"
+                    className="p-2 border border-slate-150 bg-white hover:bg-slate-50 rounded-xl text-center hover:border-slate-300 transition block text-[10px] font-bold text-slate-600 truncate shadow-2xs"
                   >
                     {aid.name}
                   </a>
@@ -2749,6 +3188,7 @@ ${dialogueStyleInstruction}`;
             </div>
           </div>
         </div>
+        )}
 
       </div>
       </div>
@@ -2763,6 +3203,76 @@ ${dialogueStyleInstruction}`;
         onClose={() => setIsFlashcardModalOpen(false)}
         onSaveToLibrary={handleSaveFlashcardsToLibrary}
       />
+
+      {/* Clear Chat Confirmation Modal */}
+      <AnimatePresence>
+        {showClearConfirmModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white border border-slate-200 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4"
+            >
+              <div className="flex items-start gap-3.5">
+                <div className="w-10 h-10 rounded-full bg-rose-100 border border-rose-200 flex items-center justify-center text-rose-600 shrink-0 mt-0.5">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">Clear Socratic Chat History?</h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    This will permanently delete the current session's chat history from Firestore and reset your discussion. This operation cannot be undone.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 text-[11px] text-slate-600 space-y-1.5">
+                <div className="flex justify-between font-medium">
+                  <span className="text-slate-500">Subject:</span>
+                  <span className="font-bold text-slate-800">{subject}</span>
+                </div>
+                <div className="flex justify-between font-medium">
+                  <span className="text-slate-500">Topic:</span>
+                  <span className="font-bold text-slate-800">{topic}</span>
+                </div>
+                <div className="flex justify-between font-medium">
+                  <span className="text-slate-500">Stored Messages:</span>
+                  <span className="font-bold text-slate-800">{messages.length} messages</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowClearConfirmModal(false)}
+                  disabled={isClearingChat}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition cursor-pointer disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmClearChat}
+                  disabled={isClearingChat}
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                >
+                  {isClearingChat ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Deleting History...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Confirm & Permanently Clear</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

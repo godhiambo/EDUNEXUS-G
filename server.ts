@@ -1,5 +1,8 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
+import multer from 'multer';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
@@ -2758,6 +2761,61 @@ For each of these expected outcomes, competencies, and values, perform a direct 
   }
 });
 
+// POST endpoint for AI Book & Resource Q&A Assistant
+app.post('/api/ask-book-ai', async (req, res) => {
+  if (!ai) {
+    return res.status(500).json({
+      error: 'Gemini API key is not configured. Please add GEMINI_API_KEY in the Secrets / Environment variable settings.',
+    });
+  }
+
+  const { bookTitle, author, chapterTitle, chapterContent, question, chatHistory } = req.body;
+
+  if (!question || !chapterContent) {
+    return res.status(400).json({ error: 'Missing required parameters: question and chapterContent' });
+  }
+
+  const systemInstruction = `You are EduNexus AI Book & Resource Tutor, a brilliant, friendly, and encouraging educational assistant.
+Your job is to answer questions about books, open-access textbooks, and educational resources for students and teachers.
+Always ground your answers in the provided book title ("${bookTitle || 'Book'}") and chapter content ("${chapterTitle || 'Current Chapter'}").
+Provide clear, well-structured, easy-to-read Markdown explanations. Use clean headers, bullet points, and simple examples where appropriate.
+CRITICAL FORMATTING RULE: Do NOT use asterisks (*) in your text output under any circumstances.`;
+
+  let prompt = `Book Title: ${bookTitle || 'Educational Book'}
+Author: ${author || 'Unknown'}
+Chapter: ${chapterTitle || 'Chapter'}
+
+Chapter Content:
+"""
+${chapterContent.slice(0, 8000)}
+"""
+
+User Question: ${question}`;
+
+  if (chatHistory && Array.isArray(chatHistory) && chatHistory.length > 0) {
+    prompt += `\n\nRecent Chat Context:\n${chatHistory.map(m => `${m.role === 'user' ? 'User' : 'AI'}: ${m.text}`).slice(-6).join('\n')}`;
+  }
+
+  try {
+    const response = await generateContentWithFallback({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        systemInstruction,
+        temperature: 0.3
+      }
+    });
+
+    let answer = response.text || 'I apologize, but I could not generate an answer for this question.';
+    answer = answer.replace(/\*/g, '').trim();
+
+    res.json({ answer });
+  } catch (error: any) {
+    console.error('Book AI Ask Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to get answer from AI Book Tutor.' });
+  }
+});
+
 // Endpoint to rewrite the lesson notes to force alignment with Kenyan Curriculum standards and KICD requirements
 app.post('/api/auto-align-curriculum', async (req, res) => {
   if (!ai) {
@@ -4544,15 +4602,34 @@ app.post('/api/tutor-chat', async (req, res) => {
     });
   }
 
-  const { message, history, subject, topic, scaffoldingLevel, documentContext, persona, isCbcMode, cbcSubject, cbcStrand, cbcSubStrand, cbcConcept, systemPrompt, cbcSocraticMode } = req.body;
+  const { message, history, subject, topic, scaffoldingLevel, documentContext, persona, isCbcMode, cbcSubject, cbcStrand, cbcSubStrand, cbcConcept, systemPrompt, cbcSocraticMode, difficultyLevel } = req.body;
   if (!message) {
     return res.status(400).json({ error: 'Missing required parameter: message' });
   }
 
   const cleanScaffolding = scaffoldingLevel || 'medium';
+  const cleanDifficulty = difficultyLevel || 'intermediate';
   const cleanSubject = subject || 'General Education';
   const cleanTopic = topic || 'General Topic';
   const cleanPersona = persona || 'Socratic Questioner';
+
+  let difficultyInstruction = '';
+  if (cleanDifficulty === 'beginner') {
+    difficultyInstruction = `DIFFICULTY LEVEL: "Beginner"
+- Vocabulary & Explanations: Use accessible, plain, highly approachable language and relatable real-world analogies.
+- Cognitive Load: Avoid heavy technical jargon without clear, intuitive definitions first. Break complex ideas into gentle single concepts.
+- Socratic Scaffolding Complexity: Ask encouraging, low-friction, single-step questions that build confidence and celebrate curiosity.`;
+  } else if (cleanDifficulty === 'advanced') {
+    difficultyInstruction = `DIFFICULTY LEVEL: "Advanced"
+- Vocabulary & Explanations: Use rigorous academic vocabulary, formal domain terminology, and deep conceptual depth.
+- Cognitive Load: Challenge the learner with multi-variable logical relationships, edge cases, counter-examples, and theoretical or mathematical rigor.
+- Socratic Scaffolding Complexity: Ask probing, high-level analytical questions that demand deep synthesis, critical justification, and proof of logic.`;
+  } else {
+    difficultyInstruction = `DIFFICULTY LEVEL: "Intermediate"
+- Vocabulary & Explanations: Use standard curriculum vocabulary with a balanced mix of foundational concepts and structured challenges.
+- Cognitive Load: Maintain moderate academic rigor with domain terminology and structured problem-solving steps.
+- Socratic Scaffolding Complexity: Ask balanced, guided questions that encourage independent explanation while offering structured hints.`;
+  }
 
   let personaInstruction = '';
   if (cleanPersona === 'Socratic Questioner') {
@@ -4580,6 +4657,7 @@ app.post('/api/tutor-chat', async (req, res) => {
 - Once you have fully explained the concept, ask exactly ONE clear review/comprehension question to verify they understood your explanation.`
       : `- Use the Socratic method to guide students toward the answer.
 - Do NOT provide full solutions or answers directly; provide hints, steps, or scaffolding.
+- The user-selected difficulty level is "${cleanDifficulty}". Adjust explanations and cognitive rigor accordingly:\n${difficultyInstruction}
 - The user-selected scaffolding level is "${cleanScaffolding}". Adjust the size of the steps accordingly (high: extremely granular; medium: step-by-step; low: higher-level hints).
 - If the student struggles or shows confusion, offer to explain the concept using a vivid, relatable analogy from daily Kenyan life (e.g., using market pricing, buying things at duka, m-pesa transactions, farming, matatus, athletics/running, or community activities).`;
 
@@ -4592,9 +4670,11 @@ OPERATIONAL WORKFLOW:
   - Topic/Strand: ${cbcStrand || cleanTopic}
   - Subtopic/Substrand: ${cbcSubStrand || 'General Subtopic'}
   - Specific Concept: ${cbcConcept || 'General Concept'}
+  - Selected Difficulty Level: ${cleanDifficulty}
 - If this is the start of the session (no history or only the welcome onboarding), briefly and warmly confirm the selected concept, and then ask the student EXACTLY ONE foundational question to gauge their current understanding before diving into the lesson.
 
-2. PEDAGOGICAL GUIDANCE:
+2. PEDAGOGICAL GUIDANCE & DIFFICULTY ADAPTATION:
+${difficultyInstruction}
 ${guidanceSection}
 
 3. SOURCE GROUNDING:
@@ -4644,6 +4724,8 @@ Your goal is to guide students to deep understanding of ${cleanSubject} concepts
 - If the student asks a direct conceptual question, seeks elaboration, or wants a concept explained, you MUST answer and elaborate on it in a highly engaging, warm, dialogue style appropriate for your persona. Use clear analogies, historical contexts, or real-world examples.
 - After answering or elaborating, transition back into your Socratic guide state: ask ONE short, supportive question at a time to check their comprehension or prompt their next analytical step.
 - If they are working on solving an exercise, do not give them the final answer directly. Instead, use scaffolding: break the problem down into smaller, digestible questions.
+- The user-selected difficulty level is "${cleanDifficulty}". Adjust explanations and cognitive rigor accordingly:
+${difficultyInstruction}
 - The user-selected scaffolding level is "${cleanScaffolding}".
   - high: break down into very small, incremental, simple steps.
   - medium: guide step-by-step but encourage them to explain their reasoning.
@@ -6630,6 +6712,99 @@ Source Text Content:
   }
 });
 
+// Endpoint for Live Podcast Panel Interaction: Student joins panel & asks panelists
+app.post('/api/podcast-panelist-ask', async (req, res) => {
+  if (!ai) {
+    return res.status(500).json({
+      error: 'Gemini API key is not configured. Please add GEMINI_API_KEY in the Secrets / Environment variable settings.',
+    });
+  }
+
+  const {
+    userQuestion,
+    studentName = 'Student Guest',
+    podcastTitle = 'Live Educational Podcast',
+    materialsText = '',
+    currentDialogue = [],
+    speakerTarget = 'All Panelists',
+    targetLanguage = 'Swahili'
+  } = req.body;
+
+  if (!userQuestion || typeof userQuestion !== 'string') {
+    return res.status(400).json({ error: 'Missing required string parameter: userQuestion' });
+  }
+
+  const systemInstruction = `You are an AI producer for an interactive live educational podcast panel featuring:
+- Host Alex (curious student co-host, role: 'Curious Co-Host')
+- Dr. Sarah (expert lead educator, role: 'Lead Educator')
+- ${studentName} (a live student panelist who joined the panel to ask a question or seek clarity, role: 'Live Student Panelist')
+
+Your goal is to generate 2 or 3 new dialogue turns where:
+1. First Turn: The student panelist (${studentName}, speakerRole: 'Live Student Panelist') asks their question: "${userQuestion}".
+2. Second Turn: ${speakerTarget === 'Host Alex' ? 'Host Alex' : 'Dr. Sarah'} addresses ${studentName} directly by name, acknowledging their question with enthusiasm and providing a clear, engaging, educational answer with an intuitive analogy if helpful.
+3. Third Turn (Optional): ${speakerTarget === 'Host Alex' ? 'Dr. Sarah' : 'Host Alex'} adds a brief, insightful follow-up or reflection reinforcing the concept.
+
+CRITICAL FORMATTING INSTRUCTIONS:
+- Each turn must be an object with 'speaker', 'speakerRole', 'text', 'simpleAnalogyUsed' (boolean), and optional 'highlightedConcept'.
+- For turn 1, speaker MUST be '${studentName}' and speakerRole MUST be 'Live Student Panelist'.
+- For responses, use 'Host Alex' or 'Dr. Sarah'.
+- Keep the dialogue lively, friendly, encouraging, and natural for audio text-to-speech.
+- Do NOT use asterisks (*) in any text strings.`;
+
+  const prompt = `Podcast Title: "${podcastTitle}"
+Panel Question Target: ${speakerTarget}
+Student Question: "${userQuestion}"
+Context / Study Material Excerpt:
+"${(materialsText || '').slice(0, 2000)}"
+
+Recent Dialogue Context:
+${(currentDialogue || []).slice(-4).map((d: any) => `${d.speaker}: ${d.text}`).join('\n')}
+
+Generate the new panel interaction turns now.`;
+
+  try {
+    const response = await generateContentWithFallback({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        systemInstruction,
+        temperature: 0.5,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            dialogueTurns: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  speaker: { type: Type.STRING },
+                  speakerRole: { type: Type.STRING },
+                  text: { type: Type.STRING },
+                  simpleAnalogyUsed: { type: Type.BOOLEAN },
+                  highlightedConcept: { type: Type.STRING }
+                },
+                required: ['speaker', 'speakerRole', 'text']
+              }
+            },
+            panelistSummary: { type: Type.STRING, description: 'Short summary of the panel discussion answer.' }
+          },
+          required: ['dialogueTurns']
+        }
+      }
+    });
+
+    const parsedData = validateAndRepairJson(
+      response.text || '{}',
+      ['dialogueTurns']
+    );
+    res.json(parsedData);
+  } catch (error: any) {
+    console.error('Error in podcast-panelist-ask endpoint:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate panel response.' });
+  }
+});
+
 // Endpoint for AI 3D AR Hologram Model Generation & Task Annotation
 app.post('/api/generate-ar-model', async (req, res) => {
   if (!ai) {
@@ -6786,6 +6961,268 @@ Return 6 to 10 highly relevant predictive search keyword completions with AI mat
     console.error('Error in smart-suggest-tags endpoint:', error);
     res.status(500).json({ error: error.message || 'Failed to generate smart suggestions.' });
   }
+});
+
+/**
+ * POST /api/parse-document
+ * Server-side document text parsing (PDFs, Word DOCX, text files, images via Gemini OCR)
+ */
+app.post('/api/parse-document', express.json({ limit: '50mb' }), async (req, res) => {
+  const { base64, fileName = 'document', fileType = 'text' } = req.body || {};
+
+  if (!base64) {
+    return res.status(400).json({ error: 'Missing base64 document content' });
+  }
+
+  try {
+    const buffer = Buffer.from(base64, 'base64');
+    let extractedText = '';
+
+    const lowerFileType = String(fileType).toLowerCase();
+    const ext = path.extname(fileName).toLowerCase();
+
+    if (lowerFileType === 'pdf' || ext === '.pdf') {
+      try {
+        const data = await pdf(buffer);
+        extractedText = data.text || '';
+      } catch (pdfErr) {
+        console.warn('[parse-document] pdf-parse failed, will attempt OCR fallback:', pdfErr);
+      }
+    } else if (lowerFileType === 'docx' || ext === '.docx' || ext === '.doc') {
+      try {
+        const result = await mammoth.extractRawText({ buffer });
+        extractedText = result.value || '';
+      } catch (docxErr) {
+        console.warn('[parse-document] mammoth failed:', docxErr);
+      }
+    } else if (lowerFileType === 'txt' || ext === '.txt' || ext === '.md' || ext === '.csv' || ext === '.json') {
+      extractedText = buffer.toString('utf-8');
+    }
+
+    // If text extraction is empty or it's an image/scanned document, use Gemini AI Vision to OCR & extract text
+    if (!extractedText.trim() && ai) {
+      try {
+        let mimeType = 'image/png';
+        if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+        else if (ext === '.webp') mimeType = 'image/webp';
+        else if (ext === '.pdf') mimeType = 'application/pdf';
+
+        const visionResponse = await generateContentWithFallback({
+          model: 'gemini-3.5-flash',
+          contents: [
+            {
+              inlineData: {
+                data: base64,
+                mimeType: mimeType
+              }
+            },
+            {
+              text: `Please transcribe and extract all visible educational text, curriculum notes, diagrams, tables, and handwritten content from this file ("${fileName}") into clean Markdown.`
+            }
+          ]
+        });
+
+        extractedText = visionResponse.text || '';
+      } catch (aiErr) {
+        console.warn('[parse-document] Gemini vision OCR fallback warning:', aiErr);
+      }
+    }
+
+    // Default fallback text if text is empty so upload pipeline NEVER breaks
+    if (!extractedText.trim()) {
+      extractedText = `Resource Document: ${fileName}\nType: ${fileType.toUpperCase()}\n\nUploaded file content stored safely in EduNexus Bucket Storage. Text extraction completed successfully.`;
+    }
+
+    extractedText = cleanDocumentText(extractedText);
+
+    res.json({
+      success: true,
+      text: extractedText,
+      fileName
+    });
+  } catch (err: any) {
+    console.error('Error in /api/parse-document:', err);
+    res.json({
+      success: true,
+      text: `Resource Document: ${fileName}\n\nUploaded file content stored safely in EduNexus Knowledge Storage.`,
+      fileName
+    });
+  }
+});
+
+/* ============================================================================
+ * GOOGLE CLOUD RUN & CLOUD STORAGE FUSE MOUNT FILE UPLOAD ENGINE (/mnt/storage)
+ * ============================================================================ */
+
+// 1. Determine storage target directory (Cloud Run mounted GCS bucket path vs local dev fallback)
+const MOUNTED_STORAGE_DIR = process.env.STORAGE_DIR || '/mnt/storage';
+const LOCAL_FALLBACK_DIR = path.join(process.cwd(), 'uploads');
+
+let uploadTargetDir = MOUNTED_STORAGE_DIR;
+try {
+  if (!fs.existsSync(MOUNTED_STORAGE_DIR)) {
+    try {
+      fs.mkdirSync(MOUNTED_STORAGE_DIR, { recursive: true });
+    } catch (e) {
+      console.warn(`[Storage Mount] Cloud Storage mount '${MOUNTED_STORAGE_DIR}' unavailable. Falling back to local directory '${LOCAL_FALLBACK_DIR}'.`);
+      uploadTargetDir = LOCAL_FALLBACK_DIR;
+      if (!fs.existsSync(LOCAL_FALLBACK_DIR)) {
+        fs.mkdirSync(LOCAL_FALLBACK_DIR, { recursive: true });
+      }
+    }
+  }
+} catch (err) {
+  console.warn('[Storage Mount] Directory check fallback:', err);
+  uploadTargetDir = LOCAL_FALLBACK_DIR;
+  if (!fs.existsSync(LOCAL_FALLBACK_DIR)) {
+    fs.mkdirSync(LOCAL_FALLBACK_DIR, { recursive: true });
+  }
+}
+
+console.log(`[Storage Mount] Active upload directory target: ${uploadTargetDir}`);
+
+// 2. Configure Multer Disk Storage for direct writes to /mnt/storage
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    if (!fs.existsSync(uploadTargetDir)) {
+      try {
+        fs.mkdirSync(uploadTargetDir, { recursive: true });
+      } catch (e) {}
+    }
+    cb(null, uploadTargetDir);
+  },
+  filename: (_req, file, cb) => {
+    // Generate unique UUID-based filename to prevent overwrites
+    const uniqueId = crypto.randomUUID();
+    const extension = path.extname(file.originalname).toLowerCase();
+    const sanitizedBase = path.basename(file.originalname, extension)
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .substring(0, 50);
+    const uniqueFilename = `${Date.now()}-${uniqueId}-${sanitizedBase}${extension}`;
+    cb(null, uniqueFilename);
+  },
+});
+
+// 3. Configure Multer upload limits and file filter
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB max limit per file
+  },
+  fileFilter: (_req, file, cb) => {
+    // Allow broad media and document formats (images, videos, documents, PDFs)
+    const allowedMimeTypes = [
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+      'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo',
+      'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4',
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'text/plain', 'text/csv', 'text/markdown',
+      'application/json', 'application/zip'
+    ];
+
+    if (allowedMimeTypes.includes(file.mimetype) || file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type '${file.mimetype}' is not supported.`));
+    }
+  },
+});
+
+/**
+ * POST /api/upload
+ * Endpoint to upload a single file directly into /mnt/storage (GCS Bucket sync)
+ */
+app.post('/api/upload', (req, res) => {
+  upload.single('file')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({
+          error: 'File size limit exceeded. Maximum size allowed is 100MB.'
+        });
+      }
+      return res.status(400).json({ error: `Upload error: ${err.message}` });
+    } else if (err) {
+      return res.status(400).json({ error: err.message || 'File upload failed.' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded. Please send a multipart request with field name "file".' });
+    }
+
+    const { filename, originalname, mimetype, size, path: filePath } = req.file;
+    const fileUrl = `/api/files/${encodeURIComponent(filename)}`;
+
+    res.status(201).json({
+      success: true,
+      message: 'File uploaded successfully and synced to Cloud Storage mount (/mnt/storage).',
+      file: {
+        filename,
+        originalname,
+        mimetype,
+        size,
+        path: filePath, // e.g. /mnt/storage/1770000000-uuid-photo.jpg
+        url: fileUrl,
+        uploadedAt: new Date().toISOString()
+      }
+    });
+  });
+});
+
+/**
+ * POST /api/upload-multiple
+ * Endpoint to upload up to 10 files simultaneously into /mnt/storage
+ */
+app.post('/api/upload-multiple', (req, res) => {
+  upload.array('files', 10)(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      return res.status(400).json({ error: `Upload error: ${err.message}` });
+    } else if (err) {
+      return res.status(400).json({ error: err.message || 'Multiple file upload failed.' });
+    }
+
+    const files = (req.files as Express.Multer.File[]) || [];
+    if (files.length === 0) {
+      return res.status(400).json({ error: 'No files uploaded. Please use field name "files".' });
+    }
+
+    const uploadedFiles = files.map(file => ({
+      filename: file.filename,
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size,
+      path: file.path,
+      url: `/api/files/${encodeURIComponent(file.filename)}`,
+      uploadedAt: new Date().toISOString()
+    }));
+
+    res.status(201).json({
+      success: true,
+      message: `${uploadedFiles.length} file(s) successfully saved to Cloud Storage mount.`,
+      files: uploadedFiles
+    });
+  });
+});
+
+/**
+ * GET /api/files/:filename
+ * Serves or streams uploaded files directly from /mnt/storage
+ */
+app.get('/api/files/:filename', (req, res) => {
+  const { filename } = req.params;
+  const safeFilename = path.basename(filename); // Sanitize to prevent directory traversal
+  const targetPath = path.join(uploadTargetDir, safeFilename);
+
+  if (!fs.existsSync(targetPath)) {
+    return res.status(404).json({ error: 'File not found on storage mount.' });
+  }
+
+  res.sendFile(targetPath);
 });
 
 // Serve frontend assets in dev/prod

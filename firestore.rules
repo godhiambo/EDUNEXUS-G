@@ -105,6 +105,13 @@ service cloud.firestore {
              (!('read' in data) || data.read is bool);
     }
 
+    function isValidTutorSession(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.subject is string && data.subject.size() <= 256 &&
+             data.topic is string && data.topic.size() <= 256;
+    }
+
     // Users Collection rules
     match /users/{userId} {
       allow read: if isSignedIn();
@@ -254,6 +261,14 @@ service cloud.firestore {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow create: if isSignedIn() && isValidLearningPath(request.resource.data);
       allow update: if isSignedIn() && resource.data.userId == request.auth.uid && isValidLearningPath(request.resource.data);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Tutor Sessions Collection rules (Chat history persistence for AI Tutor)
+    match /tutorSessions/{sessionId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidTutorSession(request.resource.data);
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && isValidTutorSession(request.resource.data);
       allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
 

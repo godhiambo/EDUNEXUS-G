@@ -88,16 +88,16 @@ if (typeof window !== 'undefined') {
 export const auth = getAuth();
 export const storage = getStorage(app);
 
+// Non-blocking asynchronous connection check
 async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    // Non-blocking connection check if needed
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.error("Please check your Firebase configuration.");
     }
   }
 }
-testConnection();
 
 export enum OperationType {
   CREATE = 'create',

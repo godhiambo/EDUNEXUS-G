@@ -3,12 +3,14 @@ import { motion } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
-import { SavedDocument, InlineComment, ParagraphReaction, DocumentVersion, DocumentAnnotation } from '../types';
+import { SavedDocument, InlineComment, CommentReply, ParagraphReaction, DocumentVersion, DocumentAnnotation, ParentTeacherMessage as ChatMsg } from '../types';
 import { saveCurriculumDocsToOfflineCache } from '../utils/offlineCache';
-import { extractDocumentHeadings } from '../utils/toc';
+import { extractDocumentHeadings, groupHeadingsByPedagogicalPhase, PedagogicalPhaseGroup } from '../utils/toc';
+import { ACADEMIC_VOCAB_MAP, getDetectedAcademicTermsCount, AcademicTerm, ContextExample, get3ContextExamplesForTerm } from '../data/academicVocabData';
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   Cpu,
   Copy,
   Download,
@@ -41,6 +43,9 @@ import {
   X,
   Users,
   ChevronDown,
+  ChevronRight,
+  EyeOff,
+  SlidersHorizontal,
   Bold,
   Italic,
   Underline,
@@ -100,7 +105,12 @@ import {
   BellRing,
   Radio,
   Mic,
-  Box
+  Box,
+  Moon,
+  Sun,
+  Compass,
+  PenTool,
+  Target
 } from 'lucide-react';
 import ConversationalPodcastModal from './ConversationalPodcastModal';
 import ARHologramReaderModal from './ARHologramReaderModal';
@@ -126,9 +136,9 @@ import ReadingLevelAnalyzer from './ReadingLevelAnalyzer';
 import { findRequirements } from '../data/kenyanCurriculumStandards';
 import { VersionDiffViewer } from './VersionDiffViewer';
 import { calculateReadability } from '../utils/readability';
-import { doc, setDoc, deleteDoc, collection, query, where, onSnapshot, orderBy, getDocs } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, deleteDoc, collection, query, where, onSnapshot, orderBy, getDocs, addDoc, collection as firestoreCollection, onSnapshot as firestoreOnSnapshot, query as firestoreQuery, orderBy as firestoreOrderBy, addDoc as firestoreAddDoc, updateDoc as firestoreUpdateDoc, doc as firestoreDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, cleanUndefined, handleFirestoreError, OperationType, compressObject, decompressObject, saveDocumentWithImageChunks } from '../firebase';
+import { db, storage, cleanUndefined, handleFirestoreError, OperationType, compressObject, decompressObject, saveDocumentWithImageChunks, db as chatDb, handleFirestoreError as chatHandleError, OperationType as ChatOpType, cleanUndefined as chatCleanUndefined } from '../firebase';
 import {
   getGoogleWorkspaceToken,
   getGoogleWorkspaceUser,
@@ -253,6 +263,29 @@ export default function DocumentViewer({
   const [editedContent, setEditedContent] = useState(document.content);
   const [editedTitle, setEditedTitle] = useState(document.title);
   const [showHighlightPopover, setShowHighlightPopover] = useState(false);
+  const [isQuickStudyMode, setIsQuickStudyMode] = useState(false);
+
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    return localStorage.getItem('document_dark_mode') === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('document_dark_mode', String(isDarkMode));
+  }, [isDarkMode]);
+
+  const toggleQuickStudyMode = () => {
+    const nextMode = !isQuickStudyMode;
+    setIsQuickStudyMode(nextMode);
+    if (nextMode) {
+      setIsCommentsOpen(false);
+      setIsAnnotationsOpen(false);
+      setIsReactionsSidebarOpen(false);
+      setIsVersionsSidebarOpen(false);
+      setIsParentChatOpen(false);
+      setIsSocraticSidebarOpen(false);
+      setIsEditing(false);
+    }
+  };
 
   // Automated Spell and Grammar Checking Engine state
   const [isCheckingSpelling, setIsCheckingSpelling] = useState(false);
@@ -351,6 +384,282 @@ export default function DocumentViewer({
   const [isReadingRulerEnabled, setIsReadingRulerEnabled] = useState(false);
   const [rulerHeight, setRulerHeight] = useState(30);
   const [eslClickToDefine, setEslClickToDefine] = useState(false);
+
+  const [highlightAcademicVocab, setHighlightAcademicVocab] = useState<boolean>(() => {
+    return localStorage.getItem('accessibility_vocab_highlight') === 'true';
+  });
+  useEffect(() => {
+    localStorage.setItem('accessibility_vocab_highlight', String(highlightAcademicVocab));
+  }, [highlightAcademicVocab]);
+
+  const [activeAcademicVocab, setActiveAcademicVocab] = useState<{
+    term: string;
+    matchedData?: AcademicTerm;
+    dynamicData?: {
+      word?: string;
+      type?: string;
+      definition?: string;
+      examples?: ContextExample[];
+    };
+    dynamicDef?: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [isFetchingDynamicVocab, setIsFetchingDynamicVocab] = useState<boolean>(false);
+
+  const handleAcademicVocabClick = useCallback(async (termText: string, pos: { x: number; y: number }) => {
+    const wordLower = termText.toLowerCase().replace(/[^a-z]/g, '');
+    const preseeded = ACADEMIC_VOCAB_MAP[wordLower];
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    const relativeX = rect ? Math.max(10, Math.min(pos.x - rect.left, rect.width - 380)) : Math.max(10, pos.x - 190);
+    const relativeY = rect ? Math.max(10, pos.y - rect.top) : Math.max(10, pos.y);
+
+    if (preseeded) {
+      setActiveAcademicVocab({
+        term: termText,
+        matchedData: preseeded,
+        x: relativeX,
+        y: relativeY
+      });
+    } else {
+      setActiveAcademicVocab({
+        term: termText,
+        x: relativeX,
+        y: relativeY
+      });
+      setIsFetchingDynamicVocab(true);
+
+      try {
+        const response = await fetch('/api/tutor-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: `Identify and explain the academic vocabulary term "${termText}" for a student.
+
+Provide your response strictly in valid JSON format containing:
+1. "word": "${termText}"
+2. "type": part of speech (e.g. noun, verb, adjective)
+3. "definition": clear, concise academic definition suitable for students
+4. "examples": an array of EXACTLY 3 example sentences demonstrating how "${termText}" is used in 3 DIFFERENT academic contexts:
+   - Context 1: "STEM / Natural Sciences"
+   - Context 2: "Humanities & Social Studies"
+   - Context 3: "Academic Research & Essay"
+
+Example JSON output format:
+{
+  "word": "${termText}",
+  "type": "noun",
+  "definition": "Clear academic definition of ${termText}...",
+  "examples": [
+    { "context": "STEM / Natural Sciences", "sentence": "First example sentence in science." },
+    { "context": "Humanities & Social Studies", "sentence": "Second example sentence in humanities." },
+    { "context": "Academic Research & Essay", "sentence": "Third example sentence in research." }
+  ]
+}`,
+            context: `Academic vocabulary identification request for term: ${termText}`
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const rawMsg = data.message || '';
+
+          let parsedWord = termText;
+          let parsedType = 'academic term';
+          let parsedDef = '';
+          let parsedExamples: ContextExample[] = [];
+
+          try {
+            const cleanedJson = rawMsg.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+            const jsonStart = cleanedJson.indexOf('{');
+            const jsonEnd = cleanedJson.lastIndexOf('}');
+            if (jsonStart !== -1 && jsonEnd !== -1) {
+              const jsonObj = JSON.parse(cleanedJson.substring(jsonStart, jsonEnd + 1));
+              if (jsonObj.definition) parsedDef = jsonObj.definition;
+              if (jsonObj.type) parsedType = jsonObj.type;
+              if (jsonObj.word) parsedWord = jsonObj.word;
+              if (Array.isArray(jsonObj.examples) && jsonObj.examples.length > 0) {
+                parsedExamples = jsonObj.examples.map((ex: any) => ({
+                  context: ex.context || 'Academic Context',
+                  sentence: ex.sentence || (typeof ex === 'string' ? ex : String(ex))
+                }));
+              }
+            }
+          } catch (e) {
+            parsedDef = rawMsg;
+          }
+
+          if (!parsedDef) parsedDef = rawMsg;
+
+          if (parsedExamples.length < 3) {
+            const fallbackContexts = [
+              { context: 'STEM / Natural Sciences', sentence: `Researchers analyze how ${termText} operates in physical or biological systems.` },
+              { context: 'Humanities & Social Studies', sentence: `Historical and cultural studies frequently examine the societal implications of ${termText}.` },
+              { context: 'Academic Research & Essay', sentence: `Writing a scholarly analysis requires critically evaluating the principles of ${termText}.` }
+            ];
+            while (parsedExamples.length < 3) {
+              parsedExamples.push(fallbackContexts[parsedExamples.length]);
+            }
+          }
+
+          setActiveAcademicVocab(prev => prev ? {
+            ...prev,
+            dynamicData: {
+              word: parsedWord,
+              type: parsedType,
+              definition: parsedDef,
+              examples: parsedExamples.slice(0, 3)
+            },
+            dynamicDef: parsedDef
+          } : null);
+        } else {
+          setActiveAcademicVocab(prev => prev ? {
+            ...prev,
+            dynamicDef: `An essential academic concept: "${termText}".`,
+            dynamicData: {
+              word: termText,
+              type: 'academic term',
+              definition: `Key academic vocabulary concept: "${termText}".`,
+              examples: [
+                { context: 'STEM / Natural Sciences', sentence: `Scientists study how ${termText} functions within natural systems.` },
+                { context: 'Humanities & Social Studies', sentence: `Scholars explore the influence of ${termText} on societal development.` },
+                { context: 'Academic Research & Essay', sentence: `Effective essay writing requires a clear understanding of ${termText}.` }
+              ]
+            }
+          } : null);
+        }
+      } catch (err) {
+        setActiveAcademicVocab(prev => prev ? {
+          ...prev,
+          dynamicDef: `An essential academic concept: "${termText}".`,
+          dynamicData: {
+            word: termText,
+            type: 'academic term',
+            definition: `Key academic vocabulary concept: "${termText}".`,
+            examples: [
+              { context: 'STEM / Natural Sciences', sentence: `Scientists study how ${termText} functions within natural systems.` },
+              { context: 'Humanities & Social Studies', sentence: `Scholars explore the influence of ${termText} on societal development.` },
+              { context: 'Academic Research & Essay', sentence: `Effective essay writing requires a clear understanding of ${termText}.` }
+            ]
+          }
+        } : null);
+      } finally {
+        setIsFetchingDynamicVocab(false);
+      }
+    }
+  }, []);
+
+  const [flashcardExportStatus, setFlashcardExportStatus] = useState<string | null>(null);
+  const [isExportingFlashcard, setIsExportingFlashcard] = useState<boolean>(false);
+
+  const handleExportToFlashcards = useCallback(async () => {
+    if (!activeAcademicVocab) return;
+    setIsExportingFlashcard(true);
+
+    const word = activeAcademicVocab.matchedData?.word || activeAcademicVocab.dynamicData?.word || activeAcademicVocab.term;
+    const type = activeAcademicVocab.matchedData?.type || activeAcademicVocab.dynamicData?.type || 'academic term';
+    const definition = activeAcademicVocab.matchedData?.definition || activeAcademicVocab.dynamicData?.definition || activeAcademicVocab.dynamicDef || '';
+
+    const examplesList: ContextExample[] = activeAcademicVocab.matchedData
+      ? get3ContextExamplesForTerm(activeAcademicVocab.matchedData)
+      : (activeAcademicVocab.dynamicData?.examples && activeAcademicVocab.dynamicData.examples.length >= 3
+          ? activeAcademicVocab.dynamicData.examples
+          : [
+              { context: 'STEM / Natural Sciences', sentence: `Researchers analyze how ${word} operates in physical or biological systems.` },
+              { context: 'Humanities & Social Studies', sentence: `Literary and historical analyses frequently evaluate the social impact of ${word}.` },
+              { context: 'Academic Research & Essay', sentence: `Constructing a persuasive thesis requires critically evaluating ${word}.` }
+            ]);
+
+    const cardId = `card-vocab-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const formattedExamplesText = examplesList.map((ex, idx) => `**Context ${idx + 1} (${ex.context}):**\n"${ex.sentence}"`).join('\n\n');
+
+    const newFlashcard = {
+      id: cardId,
+      front: `${word} (${type})`,
+      back: `**Definition:**\n${definition}\n\n**3 Academic Context Examples:**\n\n${formattedExamplesText}`,
+      hint: `Academic Category: ${activeAcademicVocab.matchedData?.category || 'General Academic'} | Part of Speech: ${type}`,
+      category: 'Academic Vocabulary',
+      mastered: false,
+      repetition: 0,
+      interval: 1,
+      easeFactor: 2.5,
+      dueDate: new Date().toISOString()
+    };
+
+    const deckStorageKey = `edunexus_revision_flashcards_${document.id || 'general'}`;
+    let existingDeck: any = null;
+
+    try {
+      const stored = localStorage.getItem(deckStorageKey) || localStorage.getItem('edunexus_academic_revision_deck');
+      if (stored) {
+        existingDeck = JSON.parse(stored);
+      }
+    } catch (err) {
+      console.warn("Could not read existing revision deck from localStorage:", err);
+    }
+
+    const updatedCards = existingDeck?.cards ? [...existingDeck.cards] : [];
+    const existingCardIndex = updatedCards.findIndex((c: any) => c.front?.toLowerCase().includes(word.toLowerCase()));
+    if (existingCardIndex >= 0) {
+      updatedCards[existingCardIndex] = newFlashcard;
+    } else {
+      updatedCards.unshift(newFlashcard);
+    }
+
+    const revisionDeck = {
+      id: existingDeck?.id || `deck-academic-vocab-${document.id || Date.now()}`,
+      title: `Academic Vocabulary Revision Deck - ${document.title || 'Curriculum'}`,
+      description: `Collection of exported academic vocabulary terms with definitions and 3 contextual examples for revision.`,
+      subject: document.subject || 'General Academic',
+      topic: 'Academic Vocabulary Revision',
+      cards: updatedCards,
+      createdAt: existingDeck?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      sourceDocId: document.id
+    };
+
+    try {
+      localStorage.setItem(deckStorageKey, JSON.stringify(revisionDeck));
+      localStorage.setItem('edunexus_academic_revision_deck', JSON.stringify(revisionDeck));
+    } catch (err) {
+      console.warn("Error storing revision deck in localStorage:", err);
+    }
+
+    try {
+      const revisionDoc: SavedDocument = {
+        id: revisionDeck.id,
+        title: revisionDeck.title,
+        docType: 'flashcards',
+        curriculum: 'cbc',
+        subject: revisionDeck.subject,
+        classLevel: document.classLevel || 'General',
+        gradeLevel: document.classLevel || 'General',
+        topic: revisionDeck.topic,
+        subTopic: '',
+        duration: '',
+        content: `# ${revisionDeck.title}\n\nDedicated revision deck containing ${revisionDeck.cards.length} academic vocabulary cards for topic: ${revisionDeck.topic}.\n\n` +
+          revisionDeck.cards.map((c: any) => `### ${c.front}\n${c.back}\n`).join('\n---\n'),
+        createdAt: revisionDeck.createdAt,
+        lastModified: new Date().toISOString(),
+        tags: ['flashcards', 'academic-vocabulary', 'revision', revisionDeck.subject],
+        category: 'Flashcards',
+        flashcardDeck: revisionDeck,
+        lastModifiedByUid: profile?.uid || 'system',
+        lastModifiedByName: profile?.displayName || profile?.email || 'Student',
+      };
+
+      await saveDocumentWithImageChunks(revisionDoc.id, revisionDoc);
+    } catch (err) {
+      console.warn("Saved flashcards locally. Firestore sync note:", err);
+    }
+
+    setIsExportingFlashcard(false);
+    setFlashcardExportStatus('Exported!');
+    setTimeout(() => {
+      setFlashcardExportStatus(null);
+    }, 4000);
+  }, [activeAcademicVocab, document, profile]);
   
   const [spokenBlockText, setSpokenBlockText] = useState<string | null>(null);
   const [currentSpeechCharIndex, setCurrentSpeechCharIndex] = useState<number>(0);
@@ -677,10 +986,11 @@ export default function DocumentViewer({
   }, [isRecipientViewOnly, isEditing]);
 
   const getAccessibilityBgClass = () => {
+    if (isDarkMode) return 'bg-slate-900 text-slate-100 border-slate-800 dark';
     if (tintColor === 'cream') return 'bg-[#FAF6EB] text-[#2F210F] border-amber-200/80';
     if (tintColor === 'mint') return 'bg-[#EBF7EE] text-[#0E2F16] border-emerald-200/80';
     if (tintColor === 'blue') return 'bg-[#ECF5FC] text-[#0C243C] border-blue-200/80';
-    if (tintColor === 'contrast') return 'bg-slate-900 text-slate-100 border-slate-700';
+    if (tintColor === 'contrast') return 'bg-slate-900 text-slate-100 border-slate-700 dark';
     return '';
   };
 
@@ -1032,7 +1342,110 @@ export default function DocumentViewer({
   const [scrollSpeed, setScrollSpeed] = useState(0); // Smooth scroll velocity in px/s
   const [scrollReversals, setScrollReversals] = useState(0); // Re-reading/back-and-forth direction changes
   const [sectionPauseDuration, setSectionPauseDuration] = useState(0); // Stationary reading pause timer on section (s)
+  const [readingProgress, setReadingProgress] = useState(0); // Scroll progress percentage (0 - 100%)
+  const [showBackToTop, setShowBackToTop] = useState(false); // Floating Back to Top visibility
   const [inferredLearningState, setInferredLearningState] = useState<'breezing' | 'struggling' | 'focused' | 'idle'>('focused');
+  
+  // Extract major headings for Quick Jump navigation dropdown
+  const quickJumpHeadings = useMemo(() => {
+    return extractDocumentHeadings(editedContent || document.content || '');
+  }, [editedContent, document.content]);
+
+  // Group document sections by logical pedagogical phases using document metadata
+  const quickJumpPhaseGroups = useMemo(() => {
+    return groupHeadingsByPedagogicalPhase(quickJumpHeadings, {
+      lessonLayout: document.lessonLayout,
+      docType: document.docType,
+      category: document.category,
+    });
+  }, [quickJumpHeadings, document.lessonLayout, document.docType, document.category]);
+
+  const renderPhaseIcon = useCallback((phaseId: string, className = "w-3.5 h-3.5 shrink-0") => {
+    switch (phaseId) {
+      case 'phase-intro':
+        return <Sparkles className={`${className} text-indigo-500 dark:text-indigo-400`} />;
+      case 'phase-guided':
+        return <GraduationCap className={`${className} text-emerald-500 dark:text-emerald-400`} />;
+      case 'phase-independent':
+        return <PenTool className={`${className} text-amber-500 dark:text-amber-400`} />;
+      case 'phase-assessment':
+        return <Target className={`${className} text-rose-500 dark:text-rose-400`} />;
+      case 'phase-extensions':
+        return <Layers className={`${className} text-purple-500 dark:text-purple-400`} />;
+      default:
+        return <Compass className={`${className} text-slate-500 dark:text-slate-400`} />;
+    }
+  }, []);
+
+  // Pedagogical Phase Group Expand/Collapse State
+  const [collapsedPhaseGroupIds, setCollapsedPhaseGroupIds] = useState<Record<string, boolean>>({});
+  const [showPhaseGroupToggleMenu, setShowPhaseGroupToggleMenu] = useState<boolean>(false);
+  const [autoAccordionPhaseMode, setAutoAccordionPhaseMode] = useState<boolean>(false);
+
+  const togglePhaseGroupCollapse = useCallback((phaseId: string) => {
+    setCollapsedPhaseGroupIds((prev) => {
+      const currentlyCollapsed = !!prev[phaseId];
+      if (autoAccordionPhaseMode) {
+        // If expanding phaseId, collapse all other phase groups
+        if (currentlyCollapsed) {
+          const nextState: Record<string, boolean> = {};
+          quickJumpPhaseGroups.forEach((g) => {
+            if (g.id !== phaseId) {
+              nextState[g.id] = true;
+            }
+          });
+          return nextState;
+        } else {
+          // If already expanded, toggle collapse
+          return { ...prev, [phaseId]: true };
+        }
+      } else {
+        return { ...prev, [phaseId]: !prev[phaseId] };
+      }
+    });
+  }, [autoAccordionPhaseMode, quickJumpPhaseGroups]);
+
+  const toggleAutoAccordionMode = useCallback(() => {
+    setAutoAccordionPhaseMode((prev) => {
+      const nextVal = !prev;
+      if (nextVal) {
+        // Auto-focus on first non-empty phase group by collapsing all others
+        const firstGroup = quickJumpPhaseGroups.find((g) => g.headings.length > 0);
+        if (firstGroup) {
+          const nextState: Record<string, boolean> = {};
+          quickJumpPhaseGroups.forEach((g) => {
+            if (g.id !== firstGroup.id) {
+              nextState[g.id] = true;
+            }
+          });
+          setCollapsedPhaseGroupIds(nextState);
+        }
+      }
+      return nextVal;
+    });
+  }, [quickJumpPhaseGroups]);
+
+  const expandAllPhaseGroups = useCallback(() => {
+    setCollapsedPhaseGroupIds({});
+  }, []);
+
+  const collapseAllPhaseGroups = useCallback(() => {
+    const allCollapsed: Record<string, boolean> = {};
+    quickJumpPhaseGroups.forEach((g) => {
+      if (g.headings.length > 0) {
+        allCollapsed[g.id] = true;
+      }
+    });
+    setCollapsedPhaseGroupIds(allCollapsed);
+  }, [quickJumpPhaseGroups]);
+
+  const handleJumpToSection = useCallback((headingId: string) => {
+    if (!headingId) return;
+    const targetEl = window.document.getElementById(headingId);
+    if (targetEl) {
+      targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
   
   // Proactive Behavioral Prompt Triggers
   const [hasTriggeredProactiveChallenge, setHasTriggeredProactiveChallenge] = useState(false);
@@ -1122,6 +1535,17 @@ export default function DocumentViewer({
       const deltaY = currentY - lastScrollY.current;
       const deltaTime = Math.max((now - lastScrollTime.current) / 1000, 0.05);
 
+      const windowHeight = window.innerHeight;
+      const docHeight = Math.max(
+        window.document.documentElement.scrollHeight,
+        window.document.body.scrollHeight,
+        window.document.documentElement.offsetHeight
+      );
+      const maxScroll = docHeight - windowHeight;
+      const progress = maxScroll > 0 ? Math.min(100, Math.max(0, (currentY / maxScroll) * 100)) : 0;
+      setReadingProgress(Math.round(progress));
+      setShowBackToTop(currentY > 300);
+
       if (Math.abs(deltaY) > 5) {
         const currentDir = deltaY > 0 ? 'down' : 'up';
         if (lastScrollDir.current && lastScrollDir.current !== currentDir) {
@@ -1138,8 +1562,13 @@ export default function DocumentViewer({
       lastScrollTime.current = now;
     };
 
+    handleScroll();
     window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
+    window.addEventListener('resize', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
+    };
   }, []);
 
   // 1-Second Passive Analytics Loop: Dwell Time & Stationary Pause Counter
@@ -2186,13 +2615,26 @@ export default function DocumentViewer({
   const [reflectionAdjustments, setReflectionAdjustments] = useState(document.reflectionAdjustments || '');
   const [reflectionSaved, setReflectionSaved] = useState(false);
 
-  // Comments Sidebar states
+  // Comments & Collaborative Side-Notes states
   const [comments, setComments] = useState<InlineComment[]>([]);
   const [isCommentsOpen, setIsCommentsOpen] = useState(false);
   const [isParentChatOpen, setIsParentChatOpen] = useState(false);
   const [newCommentText, setNewCommentText] = useState('');
   const [newSelectedText, setNewSelectedText] = useState('');
   const [activeHighlightedText, setActiveHighlightedText] = useState<string | null>(null);
+  const [selectedCommentCategory, setSelectedCommentCategory] = useState<NonNullable<InlineComment['category']>>('Pedagogical Note');
+  const [selectedCommentColor, setSelectedCommentColor] = useState<NonNullable<InlineComment['color']>>('yellow');
+  const [commentSearchQuery, setCommentSearchQuery] = useState('');
+  const [commentCategoryFilter, setCommentCategoryFilter] = useState<string>('All');
+  const [showResolvedComments, setShowResolvedComments] = useState(false);
+  const [activeReplyCommentId, setActiveReplyCommentId] = useState<string | null>(null);
+  const [replyTextMap, setReplyTextMap] = useState<Record<string, string>>({});
+
+  // Floating selection tool states
+  const [isAddingFloatingComment, setIsAddingFloatingComment] = useState(false);
+  const [floatingCommentCategory, setFloatingCommentCategory] = useState<NonNullable<InlineComment['category']>>('Pedagogical Note');
+  const [floatingCommentColor, setFloatingCommentColor] = useState<NonNullable<InlineComment['color']>>('yellow');
+  const [floatingCommentNote, setFloatingCommentNote] = useState('');
 
   // Annotations Sidebar states
   const [annotations, setAnnotations] = useState<DocumentAnnotation[]>([]);
@@ -2494,6 +2936,34 @@ export default function DocumentViewer({
     }
   };
 
+  // Sync active side-notes to document metadata in Firestore
+  const syncCommentsToMetadata = async (docId: string, currentComments: InlineComment[]) => {
+    if (!docId) return;
+    try {
+      const activeComments = currentComments.filter(c => !c.resolved);
+      const sideNotesMeta = activeComments.slice(0, 10).map(c => ({
+        id: c.id,
+        selectedText: c.selectedText || '',
+        comment: c.comment,
+        authorName: c.authorName,
+        createdAt: c.createdAt,
+        category: c.category || 'General',
+        color: c.color || 'yellow'
+      }));
+
+      const docRef = doc(db, 'documents', docId);
+      await updateDoc(docRef, {
+        commentsCount: currentComments.length,
+        lastCommentAt: currentComments.length > 0 ? currentComments[0].createdAt : null,
+        lastCommentBy: currentComments.length > 0 ? currentComments[0].authorName : null,
+        sideNotesMetadata: sideNotesMeta
+      });
+    } catch (err: any) {
+      console.error("Error syncing comments metadata to document:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `documents/${docId}`);
+    }
+  };
+
   const handleCaptureSelection = () => {
     const selection = window.getSelection();
     if (selection) {
@@ -2507,7 +2977,7 @@ export default function DocumentViewer({
 
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile) return;
+    if (!profile || !document.id) return;
     if (!newCommentText.trim()) return;
 
     try {
@@ -2522,22 +2992,140 @@ export default function DocumentViewer({
         authorUid: profile.uid,
         authorName: profile.displayName || profile.email || 'Anonymous Teacher',
         authorEmail: profile.email || '',
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        category: selectedCommentCategory,
+        color: selectedCommentColor,
+        resolved: false,
+        replies: []
       };
 
       await setDoc(commentDocRef, cleanUndefined(newComment));
+      
+      const updatedComments = [newComment, ...comments];
+      await syncCommentsToMetadata(document.id, updatedComments);
+
       setNewCommentText('');
       setNewSelectedText('');
-    } catch (err) {
+
+      logActivity(
+        'comment',
+        `Added collaborative side-note to lesson: "${document.title}"`,
+        profile,
+        document.id,
+        document.title
+      );
+    } catch (err: any) {
       console.error('Error saving comment:', err);
+      handleFirestoreError(err, OperationType.WRITE, `documents/${document.id}/comments`);
+    }
+  };
+
+  const handleAddFloatingComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile || !document.id) return;
+    if (!floatingCommentNote.trim()) return;
+
+    try {
+      const commentId = `comment-${Date.now()}-${profile.uid}`;
+      const commentDocRef = doc(db, 'documents', document.id, 'comments', commentId);
+      
+      const newComment: InlineComment = {
+        id: commentId,
+        docId: document.id,
+        selectedText: floatingSelectedText.trim(),
+        comment: floatingCommentNote.trim(),
+        authorUid: profile.uid,
+        authorName: profile.displayName || profile.email || 'Anonymous Teacher',
+        authorEmail: profile.email || '',
+        createdAt: new Date().toISOString(),
+        category: floatingCommentCategory,
+        color: floatingCommentColor,
+        resolved: false,
+        replies: []
+      };
+
+      await setDoc(commentDocRef, cleanUndefined(newComment));
+
+      const updatedComments = [newComment, ...comments];
+      await syncCommentsToMetadata(document.id, updatedComments);
+
+      setFloatingCommentNote('');
+      setFloatingSelectedText('');
+      setFloatingToolPos(null);
+      setIsAddingFloatingComment(false);
+      setIsCommentsOpen(true);
+
+      logActivity(
+        'comment',
+        `Added collaborative side-note on highlighted text: "${document.title}"`,
+        profile,
+        document.id,
+        document.title
+      );
+    } catch (err: any) {
+      console.error('Error saving floating comment:', err);
+      handleFirestoreError(err, OperationType.WRITE, `documents/${document.id}/comments`);
+    }
+  };
+
+  const handleToggleResolveComment = async (comment: InlineComment) => {
+    if (!document.id) return;
+    try {
+      const commentDocRef = doc(db, 'documents', document.id, 'comments', comment.id);
+      const newResolvedState = !comment.resolved;
+      await updateDoc(commentDocRef, {
+        resolved: newResolvedState
+      });
+
+      const updatedComments = comments.map(c => c.id === comment.id ? { ...c, resolved: newResolvedState } : c);
+      await syncCommentsToMetadata(document.id, updatedComments);
+    } catch (err: any) {
+      console.error('Error toggling resolve comment:', err);
+      handleFirestoreError(err, OperationType.UPDATE, `documents/${document.id}/comments/${comment.id}`);
+    }
+  };
+
+  const handleAddReplyToComment = async (commentId: string) => {
+    const replyText = replyTextMap[commentId];
+    if (!profile || !document.id || !replyText || !replyText.trim()) return;
+    try {
+      const comment = comments.find(c => c.id === commentId);
+      if (!comment) return;
+
+      const newReply: CommentReply = {
+        id: `reply-${Date.now()}-${profile.uid}`,
+        authorUid: profile.uid,
+        authorName: profile.displayName || profile.email || 'Anonymous Teacher',
+        authorEmail: profile.email || '',
+        text: replyText.trim(),
+        createdAt: new Date().toISOString()
+      };
+
+      const updatedReplies = [...(comment.replies || []), newReply];
+      const commentDocRef = doc(db, 'documents', document.id, 'comments', commentId);
+      await updateDoc(commentDocRef, {
+        replies: updatedReplies
+      });
+
+      const updatedComments = comments.map(c => c.id === commentId ? { ...c, replies: updatedReplies } : c);
+      await syncCommentsToMetadata(document.id, updatedComments);
+      setReplyTextMap(prev => ({ ...prev, [commentId]: '' }));
+      setActiveReplyCommentId(null);
+    } catch (err: any) {
+      console.error('Error adding reply to comment:', err);
+      handleFirestoreError(err, OperationType.UPDATE, `documents/${document.id}/comments/${commentId}`);
     }
   };
 
   const handleDeleteComment = async (commentId: string) => {
+    if (!document.id) return;
     try {
       await deleteDoc(doc(db, 'documents', document.id, 'comments', commentId));
-    } catch (err) {
+      const updatedComments = comments.filter(c => c.id !== commentId);
+      await syncCommentsToMetadata(document.id, updatedComments);
+    } catch (err: any) {
       console.error('Error deleting comment:', err);
+      handleFirestoreError(err, OperationType.DELETE, `documents/${document.id}/comments/${commentId}`);
     }
   };
 
@@ -5090,6 +5678,19 @@ ${profile?.displayName || 'Classroom Teacher'}
               <p className="font-semibold text-slate-700">{document.duration || '40 minutes'}</p>
             </div>
 
+            <div>
+              <p className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                <Timer className="w-3 h-3 text-amber-600 shrink-0" />
+                <span>Estimated Reading Time</span>
+              </p>
+              <p className="font-semibold text-slate-700 flex items-center gap-1.5 mt-0.5">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-900 border border-amber-200/80 rounded-md text-xs font-bold">
+                  ~{liveReadingTimeMin} min read
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono">({liveWordCount.toLocaleString()} words)</span>
+              </p>
+            </div>
+
             {document.docType === 'scheme-of-work' && (
               <>
                 {document.lessonsPerWeek && (
@@ -5471,7 +6072,261 @@ ${profile?.displayName || 'Classroom Teacher'}
   };
 
   return (
-    <div className="max-w-4xl mx-auto py-4 space-y-6 print-full-width">
+    <div className="max-w-4xl mx-auto py-4 space-y-6 print-full-width relative">
+      {/* Fixed Top Reading Progress Bar & Quick Jump Navigation */}
+      <div className="fixed top-0 left-0 right-0 z-50 no-print">
+        {/* Progress Bar Line */}
+        <div 
+          className="h-1.5 bg-slate-200/50 backdrop-blur-xs w-full pointer-events-none"
+          title={`Lesson Reading Progress: ${readingProgress}%`}
+        >
+          <div 
+            className="h-full bg-gradient-to-r from-emerald-500 via-teal-500 to-amber-500 transition-all duration-150 ease-out shadow-[0_0_10px_rgba(16,185,129,0.7)]"
+            style={{ width: `${readingProgress}%` }}
+          />
+        </div>
+
+        {/* Quick Jump to Sections Dropdown (Grouped by Pedagogical Phase with Expand/Collapse) */}
+        {quickJumpHeadings.length > 0 && (
+          <div className="absolute top-2.5 right-4 sm:right-6 flex items-center gap-2 bg-slate-900/95 text-slate-100 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-xl border border-slate-700/80 text-xs font-semibold transition-all z-50">
+            <Compass className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
+            <span className="hidden sm:inline text-[11px] font-bold text-slate-300">Pedagogical Phase Jump:</span>
+
+            {/* Quick Toggle All Action Buttons in Header */}
+            <div className="flex items-center gap-1 pr-1.5 border-r border-slate-700/80">
+              <button
+                onClick={expandAllPhaseGroups}
+                className="px-2 py-0.5 text-[10px] font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-950/40 hover:bg-emerald-900/60 rounded border border-emerald-500/40 transition cursor-pointer flex items-center gap-1 shrink-0"
+                title="Expand All Pedagogical Phase Groups"
+              >
+                <Eye className="w-3 h-3 text-emerald-400" />
+                <span className="hidden md:inline">Expand All</span>
+              </button>
+              <button
+                onClick={collapseAllPhaseGroups}
+                className="px-2 py-0.5 text-[10px] font-bold text-rose-400 hover:text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 rounded border border-rose-500/40 transition cursor-pointer flex items-center gap-1 shrink-0"
+                title="Collapse All Pedagogical Phase Groups"
+              >
+                <EyeOff className="w-3 h-3 text-rose-400" />
+                <span className="hidden md:inline">Collapse All</span>
+              </button>
+            </div>
+            
+            {/* Visual Iconography Fast-Jump Cues with Collapse Status */}
+            <div className="hidden lg:flex items-center gap-1.5 pr-1.5 border-r border-slate-700/80">
+              {quickJumpPhaseGroups.map((group) => {
+                const isCollapsed = !!collapsedPhaseGroupIds[group.id];
+                return (
+                  <button
+                    key={`top-icon-cue-${group.id}`}
+                    onClick={() => {
+                      if (isCollapsed) {
+                        togglePhaseGroupCollapse(group.id);
+                      }
+                      if (group.headings.length > 0) {
+                        handleJumpToSection(group.headings[0].id);
+                      }
+                    }}
+                    className={`p-1 hover:bg-slate-800 rounded-md transition cursor-pointer flex items-center gap-1 group/icon ${
+                      isCollapsed ? 'opacity-40 hover:opacity-100' : 'opacity-100'
+                    }`}
+                    title={`${group.phaseName} (${group.headings.length} sections)${isCollapsed ? ' - Collapsed (Click to Expand & Jump)' : ' - Expanded'}`}
+                  >
+                    {renderPhaseIcon(group.id, "w-3.5 h-3.5 transition-transform group-hover/icon:scale-125")}
+                    <span className={`text-[10px] hidden xl:inline font-bold ${
+                      isCollapsed ? 'text-slate-500 line-through' : 'text-slate-400 group-hover/icon:text-white'
+                    }`}>
+                      {group.shortName}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Quick Filter & Phase Toggle Popover Button */}
+            <div className="relative">
+              <button
+                onClick={() => setShowPhaseGroupToggleMenu(!showPhaseGroupToggleMenu)}
+                className={`p-1 hover:bg-slate-800 rounded-full transition cursor-pointer flex items-center gap-1 ${
+                  Object.keys(collapsedPhaseGroupIds).length > 0 ? 'text-amber-400 bg-slate-800' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Toggle Phase Group Visibility & Expand/Collapse Categories"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+              </button>
+
+              {showPhaseGroupToggleMenu && (
+                <div className="absolute right-0 top-8 w-64 bg-slate-900 border border-slate-700 shadow-2xl rounded-xl p-3 z-50 text-xs text-slate-200 animate-fadeIn">
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800">
+                    <span className="font-bold text-amber-300 flex items-center gap-1.5">
+                      <SlidersHorizontal className="w-3.5 h-3.5" />
+                      Phase Category Visibility
+                    </span>
+                    <button
+                      onClick={() => setShowPhaseGroupToggleMenu(false)}
+                      className="text-slate-400 hover:text-white p-0.5 rounded hover:bg-slate-800 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Auto-Collapse Accordion Focus Mode Toggle */}
+                  <div
+                    onClick={toggleAutoAccordionMode}
+                    className={`p-2 rounded-lg border cursor-pointer transition flex items-center justify-between mb-2.5 ${
+                      autoAccordionPhaseMode
+                        ? 'bg-amber-950/40 border-amber-500/50 text-amber-200'
+                        : 'bg-slate-800/50 border-slate-700/60 text-slate-300 hover:bg-slate-800'
+                    }`}
+                    title="When enabled, expanding a phase category automatically collapses all other phase groups"
+                  >
+                    <div className="flex items-center gap-2 pr-2">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <div>
+                        <div className="font-bold text-[11px] leading-snug">Auto-Collapse Accordion</div>
+                        <div className="text-[9.5px] text-slate-400">Keep UI focused on 1 active phase</div>
+                      </div>
+                    </div>
+                    <div className={`w-7 h-4 rounded-full p-0.5 transition-colors shrink-0 ${autoAccordionPhaseMode ? 'bg-amber-500' : 'bg-slate-700'}`}>
+                      <div className={`w-3 h-3 rounded-full bg-white transition-transform ${autoAccordionPhaseMode ? 'translate-x-3' : 'translate-x-0'}`} />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 mb-2 px-1">
+                    <button
+                      onClick={expandAllPhaseGroups}
+                      className="text-emerald-400 hover:text-emerald-300 underline font-semibold cursor-pointer"
+                    >
+                      Expand All
+                    </button>
+                    <button
+                      onClick={collapseAllPhaseGroups}
+                      className="text-rose-400 hover:text-rose-300 underline font-semibold cursor-pointer"
+                    >
+                      Collapse All
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin">
+                    {quickJumpPhaseGroups.map((group) => {
+                      const isCollapsed = !!collapsedPhaseGroupIds[group.id];
+                      return (
+                        <div
+                          key={`menu-toggle-${group.id}`}
+                          onClick={() => togglePhaseGroupCollapse(group.id)}
+                          className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition border ${
+                            isCollapsed
+                              ? 'bg-slate-950/80 border-slate-800 text-slate-500'
+                              : 'bg-slate-800/80 border-slate-700/80 text-slate-100 hover:bg-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 truncate pr-2">
+                            {renderPhaseIcon(group.id, "w-3.5 h-3.5")}
+                            <span className="font-medium text-[11px] truncate">{group.shortName}</span>
+                            <span className="text-[10px] text-slate-400 shrink-0">({group.headings.length})</span>
+                          </div>
+                          {isCollapsed ? (
+                            <div className="flex items-center gap-1 text-[10px] text-rose-400 font-bold bg-rose-950/60 px-1.5 py-0.5 rounded border border-rose-900/60 shrink-0">
+                              <EyeOff className="w-3 h-3" />
+                              <span>Collapsed</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1 text-[10px] text-emerald-400 font-bold bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-900/60 shrink-0">
+                              <Eye className="w-3 h-3" />
+                              <span>Expanded</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <select
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val) {
+                  if (val === '__TOGGLE_ACCORDION_MODE__') {
+                    toggleAutoAccordionMode();
+                  } else if (val === '__EXPAND_ALL__') {
+                    expandAllPhaseGroups();
+                  } else if (val === '__COLLAPSE_ALL__') {
+                    collapseAllPhaseGroups();
+                  } else if (val.startsWith('__TOGGLE_PHASE_')) {
+                    const phaseId = val.replace('__TOGGLE_PHASE_', '');
+                    togglePhaseGroupCollapse(phaseId);
+                  } else {
+                    handleJumpToSection(val);
+                  }
+                  e.target.value = '';
+                }
+              }}
+              defaultValue=""
+              className="bg-transparent text-slate-100 hover:text-white font-medium text-xs border-none outline-none cursor-pointer pr-1 py-0.5 focus:ring-0 max-w-[150px] sm:max-w-[220px] truncate"
+              title="Quick Jump to Sections (Automatically grouped by Pedagogical Phase)"
+              id="pedagogical-quick-jump-select"
+            >
+              <option value="" disabled className="bg-slate-900 text-slate-400">
+                Jump to Phase / Section ({quickJumpHeadings.length})...
+              </option>
+              <option value="__TOGGLE_ACCORDION_MODE__" className="bg-slate-950 text-amber-300 font-extrabold">
+                {autoAccordionPhaseMode ? '⚡ Auto-Collapse Accordion: ON (Focus 1 Phase)' : '⚡ Auto-Collapse Accordion: OFF (Click to Enable)'}
+              </option>
+              <option value="__EXPAND_ALL__" className="bg-slate-950 text-emerald-400 font-bold">
+                📂 Expand All Phase Groups
+              </option>
+              <option value="__COLLAPSE_ALL__" className="bg-slate-950 text-rose-400 font-bold">
+                📁 Collapse All Phase Groups
+              </option>
+              {quickJumpPhaseGroups.map((group) => {
+                const isCollapsed = !!collapsedPhaseGroupIds[group.id];
+                if (isCollapsed) {
+                  return (
+                    <optgroup
+                      key={group.id}
+                      label={`📁 ${group.iconEmoji} ${group.phaseName} (${group.headings.length} - COLLAPSED)`}
+                      className="bg-slate-900 text-slate-500 font-bold italic"
+                    >
+                      <option
+                        value={`__TOGGLE_PHASE_${group.id}`}
+                        className="bg-slate-900 text-emerald-400 font-extrabold"
+                      >
+                        ▶ Click to Expand {group.shortName} ({group.headings.length} sections)...
+                      </option>
+                    </optgroup>
+                  );
+                }
+
+                return (
+                  <optgroup
+                    key={group.id}
+                    label={`📖 ${group.iconEmoji} ${group.phaseName} (${group.headings.length})`}
+                    className="bg-slate-900 text-amber-300 font-extrabold"
+                  >
+                    <option
+                      value={`__TOGGLE_PHASE_${group.id}`}
+                      className="bg-slate-900 text-rose-400 font-semibold"
+                    >
+                      ▼ Collapse {group.shortName} phase category...
+                    </option>
+                    {group.headings.map((h, index) => (
+                      <option key={`${h.id}-${index}`} value={h.id} className="bg-slate-900 text-slate-200 font-medium pl-2">
+                        {h.level === 1 ? '• ' : h.level === 2 ? '  ↳ ' : '    - '}
+                        {h.text}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+            </select>
+            <span className="text-[10px] text-emerald-400 font-mono font-bold bg-emerald-950/80 border border-emerald-500/30 px-1.5 py-0.5 rounded-full shrink-0">
+              {readingProgress}%
+            </span>
+          </div>
+        )}
+      </div>
       <style>{`
         @media print {
           /* Hide non-essential UI elements like top action bars, editor toggles, sidebars, popups */
@@ -5668,8 +6523,37 @@ ${profile?.displayName || 'Classroom Teacher'}
         }
       `}</style>
 
+      {/* Floating Quick Study Control Bar */}
+      {isQuickStudyMode && (
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 backdrop-blur-md text-white px-5 py-2.5 rounded-full shadow-2xl flex items-center gap-4 border border-slate-700/80 text-xs font-bold no-print"
+        >
+          <div className="flex items-center gap-2 text-amber-300">
+            <BookOpen className="w-4 h-4 text-amber-400 animate-pulse" />
+            <span className="font-extrabold tracking-wide">Quick Study Mode</span>
+          </div>
+          <span className="w-px h-4 bg-slate-700" />
+          <div className="flex items-center gap-2 text-slate-300 text-[11px] font-mono">
+            <Timer className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>{liveReadingTimeMin} min read • {liveWordCount.toLocaleString()} words • {readingProgress}% read</span>
+          </div>
+          <span className="w-px h-4 bg-slate-700" />
+          <button
+            onClick={() => setIsQuickStudyMode(false)}
+            className="flex items-center gap-1.5 text-slate-100 hover:text-white bg-amber-600 hover:bg-amber-700 px-3.5 py-1.5 rounded-full transition cursor-pointer text-xs font-bold shadow-xs"
+            title="Exit Quick Study Mode"
+          >
+            <X className="w-3.5 h-3.5" />
+            <span>Exit Quick Study</span>
+          </button>
+        </motion.div>
+      )}
+
       {/* Action Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 no-print action-header">
+      {!isQuickStudyMode && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 no-print action-header">
         <div className="flex flex-wrap items-center gap-4">
           <button
             onClick={onBack}
@@ -6031,6 +6915,19 @@ ${profile?.displayName || 'Classroom Teacher'}
           </button>
 
           <button
+            onClick={toggleQuickStudyMode}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-extrabold shadow-sm transition border cursor-pointer ${
+              isQuickStudyMode
+                ? 'bg-amber-600 text-white border-amber-700 ring-2 ring-amber-500/30'
+                : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white border-amber-600/90 shadow-xs'
+            }`}
+            title="Activate Quick Study Mode: Hides sidebars, header, and toolbars for a centered wide-margin reading view"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-amber-100" />
+            <span>{isQuickStudyMode ? 'Exit Quick Study' : 'Quick Study 📖'}</span>
+          </button>
+
+          <button
             onClick={() => setIsSocraticSidebarOpen(!isSocraticSidebarOpen)}
             className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition ${
               isSocraticSidebarOpen
@@ -6282,6 +7179,21 @@ ${profile?.displayName || 'Classroom Teacher'}
             <span className="w-px h-4 bg-slate-200" />
 
             <button
+              onClick={() => setHighlightAcademicVocab(!highlightAcademicVocab)}
+              className={`p-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+                highlightAcademicVocab
+                  ? 'bg-indigo-600 text-white border border-indigo-700 shadow-xs ring-2 ring-indigo-500/20'
+                  : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
+              }`}
+              title="Identify and highlight complex academic vocabulary words with instant definitions"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${highlightAcademicVocab ? 'text-amber-300 animate-spin' : 'text-indigo-600'}`} />
+              <span className="text-[10px]">Academic Vocab {highlightAcademicVocab ? 'On ✨' : 'Off'}</span>
+            </button>
+
+            <span className="w-px h-4 bg-slate-200" />
+
+            <button
               onClick={() => {
                 setIsAccessibilityOpen(!isAccessibilityOpen);
                 setIsCommentsOpen(false);
@@ -6298,6 +7210,22 @@ ${profile?.displayName || 'Classroom Teacher'}
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
               <span className="text-[10px]">Settings ♿</span>
+            </button>
+
+            <span className="w-px h-4 bg-slate-200" />
+
+            <button
+              onClick={() => setIsDarkMode(!isDarkMode)}
+              className={`p-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+                isDarkMode
+                  ? 'bg-slate-800 text-amber-300 border border-slate-700 shadow-xs'
+                  : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
+              }`}
+              title="Toggle Dark Mode for Document Viewer (Persisted in LocalStorage)"
+              id="dark-mode-toggle-btn"
+            >
+              {isDarkMode ? <Sun className="w-3.5 h-3.5 text-amber-300" /> : <Moon className="w-3.5 h-3.5 text-slate-600" />}
+              <span className="text-[10px]">{isDarkMode ? 'Dark Mode' : 'Light Mode'}</span>
             </button>
           </div>
 
@@ -6316,6 +7244,7 @@ ${profile?.displayName || 'Classroom Teacher'}
           )}
         </div>
       </div>
+      )}
 
       {saved && (
         <div className="bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-xl p-3 text-xs font-semibold flex items-center gap-2 animate-fadeIn no-print">
@@ -6338,27 +7267,42 @@ ${profile?.displayName || 'Classroom Teacher'}
       {/* Editor & Metadata Section */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left main column containing material preview and reflections */}
-        <div className={`${isRightSidebarCollapsed ? 'lg:col-span-12' : 'lg:col-span-9 xl:col-span-10'} flex flex-col gap-6 print-full-width`}>
+        <div className={`${isQuickStudyMode ? 'max-w-3xl mx-auto w-full' : (isRightSidebarCollapsed ? 'lg:col-span-12' : 'lg:col-span-9 xl:col-span-10')} flex flex-col gap-6 print-full-width`}>
           {/* Side-by-side Layout: Preview Card on left, Comments sidebar on right when open */}
           <div className="flex flex-col xl:flex-row gap-6 items-start w-full">
             <div className="flex-1 min-w-0 w-full">
               {/* Main Renderer or Text Area Card */}
               <motion.div
+                key={`doc-card-${document.id || document.title}`}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
                 layout
                 whileHover={!isFullscreen ? { y: -4, boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.08)" } : undefined}
-                transition={{ duration: 0.4, ease: "easeInOut" }}
+                transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
                 className={`${
                   isFullscreen
-                    ? 'fixed inset-0 z-[100] bg-white overflow-y-auto p-6 md:p-10 flex flex-col'
-                    : 'bg-white rounded-2xl border border-[#e5e1da] shadow-sm overflow-hidden flex flex-col'
+                    ? isDarkMode ? 'fixed inset-0 z-[100] bg-slate-950 text-slate-100 dark overflow-y-auto p-6 md:p-10 flex flex-col' : 'fixed inset-0 z-[100] bg-white overflow-y-auto p-6 md:p-10 flex flex-col'
+                    : isQuickStudyMode
+                    ? isDarkMode ? 'bg-slate-900 text-slate-100 dark rounded-3xl border border-slate-800 shadow-xl overflow-hidden flex flex-col max-w-3xl mx-auto w-full transition-all duration-300' : 'bg-white rounded-3xl border border-slate-200/90 shadow-xl overflow-hidden flex flex-col max-w-3xl mx-auto w-full transition-all duration-300'
+                    : isDarkMode ? 'bg-slate-900 text-slate-100 dark rounded-2xl border border-slate-800 shadow-sm overflow-hidden flex flex-col' : 'bg-white rounded-2xl border border-[#e5e1da] shadow-sm overflow-hidden flex flex-col'
                 }`}
               >
+            {!isQuickStudyMode && (
             <div className="p-4 border-b border-[#e5e1da] bg-[#f4f1ea]/50 flex items-center justify-between no-print preview-toggle-bar">
             <div className="flex items-center gap-2 flex-wrap">
               <span className={`w-2 h-2 rounded-full ${isEditing ? 'bg-amber-400 animate-pulse' : isPrintLayoutPreview ? 'bg-rose-500 animate-pulse' : 'bg-[#5f6f52]'}`}></span>
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                 {isEditing ? 'Editing Source Code' : isPrintLayoutPreview ? 'Classroom Handout Print Preview' : 'Curriculum-Aligned Output View'}
               </span>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-amber-50 text-amber-900 border border-amber-200/90 rounded-full text-xs font-bold shadow-2xs">
+                <Timer className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                <span>Estimated Reading Time: <strong>{liveReadingTimeMin} min read</strong></span>
+                <span className="text-[10px] opacity-75 font-normal">({liveWordCount.toLocaleString()} words)</span>
+              </div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-50 text-emerald-900 border border-emerald-200/90 rounded-full text-xs font-bold shadow-2xs">
+                <BookOpen className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                <span>Progress: <strong>{readingProgress}% Read</strong></span>
+              </div>
               {activeSessions.length > 0 && (
                 <div className="ml-3 flex items-center gap-1.5 bg-emerald-50/75 border border-emerald-200/55 rounded-full px-3 py-1 text-[10px] text-emerald-850 font-bold animate-fadeIn">
                   <span className="relative flex h-2 w-2 mr-0.5">
@@ -6489,6 +7433,19 @@ ${profile?.displayName || 'Classroom Teacher'}
               </button>
 
               <button
+                onClick={toggleQuickStudyMode}
+                className={`px-3 py-1 rounded-lg text-xs font-extrabold transition flex items-center gap-1 cursor-pointer border ${
+                  isQuickStudyMode
+                    ? 'bg-amber-600 text-white border-amber-700 shadow-sm'
+                    : 'bg-amber-50 text-amber-900 border-amber-200/90 hover:bg-amber-100'
+                }`}
+                title="Activate Quick Study reading mode (hides sidebar, header, and toolbar)"
+              >
+                <BookOpen className="w-3.5 h-3.5 text-amber-600" />
+                <span>Quick Study</span>
+              </button>
+
+              <button
                 onClick={() => setShowBehavioralTelemetryBar(!showBehavioralTelemetryBar)}
                 className={`px-3 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer border ${
                   inferredLearningState === 'breezing'
@@ -6513,6 +7470,78 @@ ${profile?.displayName || 'Classroom Teacher'}
               </button>
             </div>
           </div>
+          )}
+
+          {/* Quick Pedagogical Phase Jump Bar with Collapse Controls */}
+          {quickJumpPhaseGroups.length > 0 && !isEditing && !isPrintLayoutPreview && !isQuickStudyMode && (
+            <div className="px-4 py-2 border-b border-[#e5e1da] bg-[#fbf9f5] flex items-center justify-between gap-2 overflow-x-auto no-print text-xs scrollbar-none">
+              <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
+                <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-slate-500 shrink-0">
+                  <Compass className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+                  <span>Pedagogical Phases:</span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                  {quickJumpPhaseGroups.map((group) => {
+                    const isCollapsed = !!collapsedPhaseGroupIds[group.id];
+                    return (
+                      <div
+                        key={`phase-pill-${group.id}`}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold border transition shadow-2xs ${
+                          isCollapsed
+                            ? 'bg-slate-200/60 border-slate-300 text-slate-500 opacity-75'
+                            : `${group.badgeColor} hover:scale-102`
+                        }`}
+                      >
+                        <button
+                          onClick={() => {
+                            if (isCollapsed) {
+                              togglePhaseGroupCollapse(group.id);
+                            }
+                            if (group.headings.length > 0) {
+                              handleJumpToSection(group.headings[0].id);
+                            }
+                          }}
+                          className="flex items-center gap-1.5 cursor-pointer hover:underline"
+                          title={isCollapsed ? `Expand and Jump to ${group.phaseName}` : `Jump to first section in ${group.phaseName}`}
+                        >
+                          {renderPhaseIcon(group.id)}
+                          <span className="text-xs">{group.iconEmoji}</span>
+                          <span className={isCollapsed ? 'line-through text-slate-500' : ''}>{group.shortName}</span>
+                          <span className="text-[9px] opacity-75 font-mono font-normal">({group.headings.length})</span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePhaseGroupCollapse(group.id);
+                          }}
+                          className="ml-0.5 p-0.5 rounded hover:bg-black/10 transition cursor-pointer text-slate-500 hover:text-slate-800"
+                          title={isCollapsed ? `Expand ${group.shortName} category` : `Collapse ${group.shortName} category`}
+                        >
+                          {isCollapsed ? <ChevronRight className="w-3 h-3 text-rose-500" /> : <ChevronDown className="w-3 h-3 text-emerald-600" />}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0 text-[10px] font-semibold text-slate-500">
+                <button
+                  onClick={expandAllPhaseGroups}
+                  className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded hover:bg-emerald-100 transition cursor-pointer font-bold"
+                  title="Expand all pedagogical phase categories"
+                >
+                  Expand All
+                </button>
+                <button
+                  onClick={collapseAllPhaseGroups}
+                  className="px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded hover:bg-rose-100 transition cursor-pointer font-bold"
+                  title="Collapse all pedagogical phase categories"
+                >
+                  Collapse All
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Passive Behavioral Analytics Telemetry Bar */}
           {showBehavioralTelemetryBar && (
@@ -6585,6 +7614,7 @@ ${profile?.displayName || 'Classroom Teacher'}
           )}
 
           {/* Differentiation Studio Toolbar (Dynamic & Clean) */}
+          {!isQuickStudyMode && (
           <div className="px-4 py-2 bg-indigo-50/70 border-b border-[#e5e1da] flex flex-col sm:flex-row items-center justify-between gap-2.5 no-print">
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-indigo-600 animate-pulse" />
@@ -6699,12 +7729,13 @@ ${profile?.displayName || 'Classroom Teacher'}
               )}
             </div>
           </div>
+          )}
 
           <div 
             id="collaborative-presence-area"
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
-            className={`${compareRightVersion ? 'p-6 md:p-8' : isEditing ? 'p-6 md:p-8' : (isHandwrittenTheme ? 'p-2' : 'p-6 md:p-8')} flex-1 min-h-[500px] print:p-0 relative`}
+            className={`${compareRightVersion ? 'p-6 md:p-8' : isEditing ? 'p-6 md:p-8' : isQuickStudyMode ? 'p-8 sm:p-12 md:p-16 max-w-2xl mx-auto leading-relaxed font-serif text-slate-850' : (isHandwrittenTheme ? 'p-2' : 'p-6 md:p-8')} flex-1 min-h-[500px] print:p-0 relative`}
           >
             {compareRightVersion ? (
               <VersionDiffViewer
@@ -7556,6 +8587,20 @@ ${profile?.displayName || 'Classroom Teacher'}
                     <div className="flex gap-1 p-0.5 bg-slate-100 rounded-lg border border-slate-200">
                       <button
                         type="button"
+                        onClick={() => setIsDarkMode(!isDarkMode)}
+                        className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                          isDarkMode
+                            ? 'bg-slate-800 text-amber-300 border border-slate-700 shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                        }`}
+                        title="Toggle Dark Mode (Persisted in LocalStorage)"
+                      >
+                        {isDarkMode ? <Sun className="w-3.5 h-3.5 text-amber-300" /> : <Moon className="w-3.5 h-3.5 text-slate-600" />}
+                        <span>{isDarkMode ? 'Dark Mode: ON' : 'Dark Mode: OFF'}</span>
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => setShowStickyNotesOverlay(!showStickyNotesOverlay)}
                         className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition flex items-center gap-1.5 ${
                           showStickyNotesOverlay
@@ -7694,7 +8739,11 @@ ${profile?.displayName || 'Classroom Teacher'}
                       </div>
                     )}
 
-                    <div
+                    <motion.div
+                      key={`doc-body-${document.id || document.title}-${selectedDifferentiatedView}`}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
                       ref={containerRef}
                       onMouseMove={handleAccessibilityMouseMove}
                       onDoubleClick={handleDocumentDoubleClick}
@@ -7711,15 +8760,134 @@ ${profile?.displayName || 'Classroom Teacher'}
                             top: `${Math.max(10, floatingToolPos.y)}px`
                           }}
                         >
-                          {!isAddingFloatingAnnotation ? (
-                            <button
-                              type="button"
-                              onClick={() => setIsAddingFloatingAnnotation(true)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-full shadow-lg transition-all transform hover:scale-105 active:scale-95 cursor-pointer border border-amber-400"
-                            >
-                              <Bookmark className="w-3.5 h-3.5 fill-white text-white" />
-                              <span>Pin Sticky Note</span>
-                            </button>
+                          {!isAddingFloatingAnnotation && !isAddingFloatingComment ? (
+                            <div className="flex items-center gap-1.5 p-1 bg-slate-900/90 backdrop-blur-md rounded-full shadow-2xl border border-slate-700/60">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsAddingFloatingComment(true);
+                                  setIsAddingFloatingAnnotation(false);
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-full shadow-md transition-all transform hover:scale-105 active:scale-95 cursor-pointer"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5 fill-white text-white" />
+                                <span>💬 Add Side-Note</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsAddingFloatingAnnotation(true);
+                                  setIsAddingFloatingComment(false);
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-200 text-xs font-bold rounded-full transition-all transform hover:scale-105 active:scale-95 cursor-pointer border border-slate-700"
+                              >
+                                <Bookmark className="w-3.5 h-3.5 text-amber-300" />
+                                <span>Private Note</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setFloatingToolPos(null);
+                                  setFloatingSelectedText('');
+                                }}
+                                className="p-1 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition"
+                                title="Dismiss"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : isAddingFloatingComment ? (
+                            <div className="bg-white border-2 border-amber-400 shadow-2xl rounded-2xl p-3.5 w-80 flex flex-col gap-2.5 relative animate-scaleIn">
+                              <div className="flex items-center justify-between border-b border-amber-100 pb-2">
+                                <div className="flex items-center gap-1.5 text-amber-800">
+                                  <MessageSquare className="w-4 h-4 text-amber-600 fill-amber-500" />
+                                  <span className="text-xs font-extrabold uppercase tracking-wider">Collaborative Side-Note</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsAddingFloatingComment(false);
+                                    setFloatingToolPos(null);
+                                    setFloatingSelectedText('');
+                                  }}
+                                  className="p-1 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+
+                              <div className="bg-amber-50/70 border border-amber-200/70 p-2 rounded-xl text-[10px] text-amber-950 font-mono italic leading-relaxed line-clamp-3">
+                                "{floatingSelectedText}"
+                              </div>
+
+                              <form onSubmit={handleAddFloatingComment} className="space-y-2.5">
+                                {/* Category Selection */}
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">Category Tag</label>
+                                  <div className="flex flex-wrap gap-1">
+                                    {(['Pedagogical Note', 'Question', 'Correction', 'Teaching Tip', 'Differentiated Guidance', 'General'] as const).map(cat => (
+                                      <button
+                                        key={cat}
+                                        type="button"
+                                        onClick={() => setFloatingCommentCategory(cat)}
+                                        className={`px-2 py-0.5 rounded-full text-[9px] font-bold transition cursor-pointer border ${
+                                          floatingCommentCategory === cat
+                                            ? 'bg-amber-600 border-amber-700 text-white shadow-2xs'
+                                            : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
+                                        }`}
+                                      >
+                                        {cat}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <textarea
+                                  value={floatingCommentNote}
+                                  onChange={(e) => setFloatingCommentNote(e.target.value)}
+                                  placeholder="Write collaborative observation, feedback, or side-note for this text block..."
+                                  className="w-full h-16 bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs focus:outline-none focus:border-amber-500 focus:bg-white transition resize-none leading-relaxed text-slate-800"
+                                  required
+                                  autoFocus
+                                />
+
+                                {/* Highlight Color Selection */}
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="text-[9px] font-bold text-slate-500 uppercase">Highlight Accent:</span>
+                                  <div className="flex items-center gap-1.5">
+                                    {(['yellow', 'green', 'pink', 'blue'] as const).map((color) => {
+                                      const colorBg = 
+                                        color === 'yellow' ? 'bg-amber-100 border-amber-300' :
+                                        color === 'green' ? 'bg-emerald-100 border-emerald-300' :
+                                        color === 'pink' ? 'bg-rose-100 border-rose-300' :
+                                        'bg-sky-100 border-sky-300';
+                                      
+                                      const isSelected = floatingCommentColor === color;
+
+                                      return (
+                                        <button
+                                          key={color}
+                                          type="button"
+                                          onClick={() => setFloatingCommentColor(color)}
+                                          className={`w-4 h-4 rounded-full border cursor-pointer transition-all ${colorBg} ${isSelected ? 'ring-2 ring-amber-600 scale-110 shadow-xs' : 'hover:scale-105'}`}
+                                          title={`${color} highlight color`}
+                                        />
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+
+                                <div className="flex justify-end pt-1">
+                                  <button
+                                    type="submit"
+                                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold rounded-xl shadow-sm transition cursor-pointer"
+                                  >
+                                    <Send className="w-3 h-3" />
+                                    <span>Attach Side-Note</span>
+                                  </button>
+                                </div>
+                              </form>
+                            </div>
                           ) : (
                             <div className="bg-amber-50 border-2 border-amber-300 shadow-xl rounded-xl p-3 w-72 flex flex-col gap-2 relative rotate-1">
                               {/* Tape style header */}
@@ -7806,51 +8974,143 @@ ${profile?.displayName || 'Classroom Teacher'}
                         />
                       )}
 
-                      {/* ESL Word popup */}
-                      {selectedWord && (
+                      {/* Academic Vocabulary Tooltip Modal */}
+                      {activeAcademicVocab && (
                         <div 
-                          className="absolute z-50 bg-white border border-slate-200/90 shadow-xl rounded-xl p-3.5 max-w-xs animate-fadeIn text-left space-y-2 select-none"
+                          className="absolute z-50 bg-white border-2 border-indigo-200 shadow-2xl rounded-2xl p-4 max-w-md w-96 animate-fadeIn text-left space-y-3 select-none ring-4 ring-indigo-500/10 no-print"
                           style={{
-                            left: `${wordPosition ? Math.max(10, Math.min(wordPosition.x, (containerRef.current?.getBoundingClientRect().width || 400) - 260)) : 10}px`,
-                            top: `${wordPosition ? Math.max(10, wordPosition.y) : 10}px`
+                            left: `${activeAcademicVocab.x}px`,
+                            top: `${activeAcademicVocab.y}px`
                           }}
                         >
-                          <div className="flex items-center justify-between border-b border-slate-100 pb-1.5 gap-2">
-                            <span className="text-xs font-black uppercase text-indigo-700 tracking-wider">ESL Word Explorer</span>
+                          {/* Header */}
+                          <div className="flex items-center justify-between border-b border-indigo-100 pb-2 gap-2">
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-6 h-6 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs shrink-0">
+                                ✨
+                              </div>
+                              <div>
+                                <span className="text-[10px] font-extrabold uppercase text-indigo-700 tracking-wider block leading-tight">
+                                  Academic Vocabulary
+                                </span>
+                                {activeAcademicVocab.matchedData?.category && (
+                                  <span className="text-[9px] font-bold text-slate-400 block">
+                                    {activeAcademicVocab.matchedData.category}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                             <button 
-                              onClick={handleCloseWordPopup}
-                              className="p-0.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition"
+                              onClick={() => setActiveAcademicVocab(null)}
+                              className="p-1 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition cursor-pointer"
+                              title="Close Tooltip"
                             >
-                              <X className="w-3 h-3" />
+                              <X className="w-3.5 h-3.5" />
                             </button>
                           </div>
-                          
-                          <div className="space-y-1">
-                            <h5 className="text-sm font-bold text-slate-800 italic">"{selectedWord}"</h5>
-                            {isExplainingWord ? (
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 py-1">
-                                <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
-                                <span>Translating & defining...</span>
+
+                          {/* Content */}
+                          <div className="space-y-2.5">
+                            <div className="flex items-baseline justify-between gap-2">
+                              <h4 className="text-base font-black text-slate-900 tracking-tight">
+                                {activeAcademicVocab.matchedData?.word || activeAcademicVocab.dynamicData?.word || activeAcademicVocab.term}
+                              </h4>
+                              {(activeAcademicVocab.matchedData?.type || activeAcademicVocab.dynamicData?.type) && (
+                                <span className="text-[10px] font-mono font-bold italic text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200/60">
+                                  {activeAcademicVocab.matchedData?.type || activeAcademicVocab.dynamicData?.type}
+                                </span>
+                              )}
+                            </div>
+
+                            {isFetchingDynamicVocab ? (
+                              <div className="flex items-center gap-2 text-xs text-indigo-600 py-3 font-medium">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span>Generating AI definition & 3 academic context examples...</span>
                               </div>
                             ) : (
-                              <p className="text-[11px] text-slate-600 leading-normal font-medium">
-                                {selectedWordDefinition}
-                              </p>
+                              <div className="space-y-2.5">
+                                <p className="text-xs text-slate-700 leading-relaxed font-medium bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                                  {activeAcademicVocab.matchedData?.definition || activeAcademicVocab.dynamicData?.definition || activeAcademicVocab.dynamicDef}
+                                </p>
+
+                                {/* 3 Example Sentences in Different Academic Contexts */}
+                                {(() => {
+                                  const examplesList: ContextExample[] = activeAcademicVocab.matchedData
+                                    ? get3ContextExamplesForTerm(activeAcademicVocab.matchedData)
+                                    : (activeAcademicVocab.dynamicData?.examples && activeAcademicVocab.dynamicData.examples.length >= 3
+                                        ? activeAcademicVocab.dynamicData.examples
+                                        : [
+                                            { context: 'STEM / Natural Sciences', sentence: `Researchers analyze how ${activeAcademicVocab.term} operates in physical or biological systems.` },
+                                            { context: 'Humanities & Social Studies', sentence: `Literary and historical analyses frequently evaluate the social impact of ${activeAcademicVocab.term}.` },
+                                            { context: 'Academic Research & Essay', sentence: `Constructing a persuasive thesis requires critically evaluating ${activeAcademicVocab.term}.` }
+                                          ]);
+
+                                  return (
+                                    <div className="space-y-1.5 pt-1">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 flex items-center gap-1">
+                                          <BookOpen className="w-3 h-3 text-indigo-600" />
+                                          Academic Context Examples (3):
+                                        </span>
+                                      </div>
+
+                                      <div className="space-y-1.5 max-h-52 overflow-y-auto pr-0.5">
+                                        {examplesList.slice(0, 3).map((ex, idx) => (
+                                          <div key={idx} className="bg-indigo-50/50 border border-indigo-100/80 rounded-xl p-2 space-y-0.5">
+                                            <div className="flex items-center justify-between gap-1">
+                                              <span className="text-[9px] font-black uppercase text-indigo-700 bg-indigo-100/90 px-1.5 py-0.2 rounded-md">
+                                                Context {idx + 1}: {ex.context}
+                                              </span>
+                                            </div>
+                                            <p className="text-[11px] text-slate-700 italic font-medium leading-normal">
+                                              "{ex.sentence}"
+                                            </p>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
                             )}
                           </div>
 
-                          <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100 justify-end">
-                            <button
-                              onClick={() => speakText(selectedWord)}
-                              className="px-2 py-1 bg-[#5f6f52]/10 hover:bg-[#5f6f52]/20 text-[#5f6f52] text-[9px] font-bold rounded-md flex items-center gap-1 transition"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-volume-2">
-                                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-                                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
-                              </svg>
-                              <span>Pronounce</span>
-                            </button>
+                          {/* Actions */}
+                          <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 gap-1.5 flex-wrap">
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => speakText(activeAcademicVocab.matchedData?.word || activeAcademicVocab.dynamicData?.word || activeAcademicVocab.term)}
+                                className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg flex items-center gap-1 transition shadow-xs cursor-pointer"
+                                title="Listen to pronunciation"
+                              >
+                                <Volume2 className="w-3 h-3" />
+                                <span>Pronounce</span>
+                              </button>
+
+                              <button
+                                onClick={handleExportToFlashcards}
+                                disabled={isExportingFlashcard || isFetchingDynamicVocab}
+                                className={`px-2.5 py-1 text-[10px] font-bold rounded-lg flex items-center gap-1 transition shadow-xs cursor-pointer ${
+                                  flashcardExportStatus
+                                    ? 'bg-emerald-600 text-white border border-emerald-600'
+                                    : 'bg-amber-500 hover:bg-amber-600 text-white border border-amber-500'
+                                }`}
+                                title="Save this complex word, definition, and 3 example sentences into a revision flashcard list"
+                              >
+                                {isExportingFlashcard ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : flashcardExportStatus ? (
+                                  <Check className="w-3 h-3 text-white" />
+                                ) : (
+                                  <Layers className="w-3 h-3" />
+                                )}
+                                <span>{flashcardExportStatus || 'Export to Flashcards'}</span>
+                              </button>
+                            </div>
+
+                            <span className="text-[9px] text-indigo-600 font-mono font-bold bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                              3 Context Examples ✨
+                            </span>
                           </div>
                         </div>
                       )}
@@ -8197,6 +9457,8 @@ ${profile?.displayName || 'Classroom Teacher'}
                                       currentlySpokenText={spokenBlockText}
                                       currentSpeechCharIndex={currentSpeechCharIndex}
                                       isDyslexiaMode={isDyslexiaMode}
+                                      highlightAcademicVocab={highlightAcademicVocab}
+                                      onAcademicVocabClick={handleAcademicVocabClick}
                                     />
                                   </div>
                                 )}
@@ -8228,6 +9490,8 @@ ${profile?.displayName || 'Classroom Teacher'}
                                   currentlySpokenText={spokenBlockText}
                                   currentSpeechCharIndex={currentSpeechCharIndex}
                                   isDyslexiaMode={isDyslexiaMode}
+                                  highlightAcademicVocab={highlightAcademicVocab}
+                                  onAcademicVocabClick={handleAcademicVocabClick}
                                 />
                               </>
                             )}
@@ -8248,6 +9512,17 @@ ${profile?.displayName || 'Classroom Teacher'}
                               <span className="text-xs font-black tracking-wider text-[#5f6f52] uppercase font-sans">EduNexus</span>
                               <span className="text-[9px] text-slate-400 font-mono tracking-tight uppercase">Curriculum Library</span>
                             </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2 mb-3 no-print">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-900 border border-amber-200/90 shadow-2xs">
+                              <Timer className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                              <span>Estimated Reading Time: <strong>{liveReadingTimeMin} min read</strong></span>
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200 font-mono">
+                              <FileText className="w-3 h-3 text-slate-400" />
+                              <span>{liveWordCount.toLocaleString()} words</span>
+                            </span>
                           </div>
 
                           <h1 className="font-bold text-3xl mb-4 text-slate-900">
@@ -8275,10 +9550,12 @@ ${profile?.displayName || 'Classroom Teacher'}
                             currentlySpokenText={spokenBlockText}
                             currentSpeechCharIndex={currentSpeechCharIndex}
                             isDyslexiaMode={isDyslexiaMode}
+                            highlightAcademicVocab={highlightAcademicVocab}
+                            onAcademicVocabClick={handleAcademicVocabClick}
                           />
                         </div>
                       )}
-                    </div>
+                    </motion.div>
                   </>
                 )}
               </div>
@@ -8371,8 +9648,8 @@ ${profile?.displayName || 'Classroom Teacher'}
               );
             })}
           </div>
-          </motion.div>
-        </div>
+        </motion.div>
+      </div>
 
         {/* Accessibility & Reader Assist Sidebar */}
         {isAccessibilityOpen && (
@@ -8401,7 +9678,7 @@ ${profile?.displayName || 'Classroom Teacher'}
               {/* Preset Quick Activations */}
               <div className="bg-amber-50/50 border border-amber-100 rounded-xl p-3 space-y-2.5">
                 <h5 className="text-[10px] font-bold uppercase tracking-wider text-amber-800">Support Presets</h5>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-1.5">
                   <button
                     onClick={() => {
                       setIsDyslexiaMode(!isDyslexiaMode);
@@ -8419,7 +9696,7 @@ ${profile?.displayName || 'Classroom Teacher'}
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-                    📖 Dyslexia Mode
+                    📖 Dyslexia
                   </button>
                   <button
                     onClick={() => {
@@ -8431,7 +9708,19 @@ ${profile?.displayName || 'Classroom Teacher'}
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-                    🗣️ ESL Word Assist
+                    🗣️ ESL Assist
+                  </button>
+                  <button
+                    onClick={() => {
+                      setHighlightAcademicVocab(!highlightAcademicVocab);
+                    }}
+                    className={`p-2 rounded-lg text-[10px] font-bold border transition text-center cursor-pointer ${
+                      highlightAcademicVocab
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    ✨ Acad Vocab
                   </button>
                 </div>
               </div>
@@ -8659,10 +9948,31 @@ ${profile?.displayName || 'Classroom Teacher'}
                 </div>
               </div>
 
-              {/* 3. ESL vocabulary helpers and clickable translations */}
+              {/* 3. ESL & Academic Vocabulary Aid */}
               <div className="space-y-2 pt-2 border-t border-slate-100">
-                <h5 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">3. ESL Vocabulary Aid</h5>
+                <h5 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">3. ESL & Academic Vocabulary Aid</h5>
                 
+                {/* Academic Vocab Highlighter toggle */}
+                <div className="flex items-center justify-between gap-2 p-1.5 bg-indigo-50/50 rounded-xl border border-indigo-100">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-slate-800 block">Academic Vocabulary Highlighter</span>
+                      {highlightAcademicVocab && (
+                        <span className="text-[8px] font-black bg-indigo-600 text-white px-1.5 py-0.2 rounded-full uppercase tracking-wider">
+                          {getDetectedAcademicTermsCount(preprocessedDisplayContent)} terms
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[9px] text-slate-500 block">Identifies complex academic terms with instant definition tooltips and pronunciation</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={highlightAcademicVocab}
+                    onChange={(e) => setHighlightAcademicVocab(e.target.checked)}
+                    className="w-4 h-4 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
+                  />
+                </div>
+
                 <div className="flex items-center justify-between gap-2 p-1">
                   <div className="space-y-0.5">
                     <span className="text-xs font-bold text-slate-700 block">Double-Click definitions</span>
@@ -8729,18 +10039,21 @@ ${profile?.displayName || 'Classroom Teacher'}
           </div>
         )}
 
-        {/* Comments Sidebar */}
-        {isCommentsOpen && (
-          <div className="w-full xl:w-80 shrink-0 bg-white rounded-2xl border border-[#e5e1da] shadow-sm p-4 space-y-4 no-print flex flex-col max-h-[850px] overflow-hidden animate-fadeIn">
+        {/* Collaborative Side-Notes & Comments Sidebar */}
+        {!isQuickStudyMode && isCommentsOpen && (
+          <div className="w-full xl:w-80 shrink-0 bg-white rounded-2xl border border-[#e5e1da] shadow-sm p-4 space-y-3.5 no-print flex flex-col max-h-[850px] overflow-hidden animate-fadeIn">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-[#f4f1ea] pb-3">
-              <div className="flex items-center gap-1.5">
-                <div className="w-7 h-7 rounded-lg bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-700">
-                  <MessageSquare className="w-4 h-4 fill-amber-500 text-amber-500" />
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-800 shadow-2xs">
+                  <MessageSquare className="w-4 h-4 fill-amber-600 text-amber-600" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Comments</h4>
-                  <p className="text-[9px] text-slate-400">Section Feedback</p>
+                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">Collaborative Side-Notes</h4>
+                  <p className="text-[9px] text-amber-700 font-semibold flex items-center gap-1">
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                    Synced to Firestore Metadata
+                  </p>
                 </div>
               </div>
               <button
@@ -8751,89 +10064,239 @@ ${profile?.displayName || 'Classroom Teacher'}
               </button>
             </div>
 
-            {/* New Comment Form (Only for Teachers) */}
-            {!isStudent && (
-              <form onSubmit={handleAddComment} className="space-y-3 bg-[#faf9f6] p-3 rounded-xl border border-[#e5e1da] shadow-2xs shrink-0">
-                <p className="text-[10px] font-bold text-[#5f6f52] uppercase tracking-wider">Add Comment</p>
-                
-                {/* Selected Text Reference */}
-                <div className="space-y-1">
-                  <label className="text-[9px] font-extrabold uppercase text-slate-400 block">Referenced Text</label>
-                  {newSelectedText ? (
-                    <div className="relative bg-amber-50/50 border border-amber-100 p-2 rounded-lg text-[10px] text-slate-600 italic font-mono leading-relaxed pr-6">
-                      "{newSelectedText}"
-                      <button
-                        type="button"
-                        onClick={() => setNewSelectedText('')}
-                        className="absolute top-1 right-1 text-slate-400 hover:text-slate-600 p-0.5 rounded-full"
-                        title="Clear selection reference"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      <button
-                        type="button"
-                        onClick={handleCaptureSelection}
-                        className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700 hover:text-amber-800 bg-amber-50/50 border border-amber-200/60 p-2 rounded-lg w-full justify-center transition cursor-pointer"
-                      >
-                        <span>✨ Use Highlighted Text</span>
-                      </button>
-                      <p className="text-[9px] text-slate-400 leading-tight">
-                        Select text in the preview on the left and click above to attach feedback directly to it.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Comment Field */}
-                <div className="space-y-1">
-                  <textarea
-                    value={newCommentText}
-                    onChange={(e) => setNewCommentText(e.target.value)}
-                    placeholder="Write constructive observations, recommended modifications, or peer coaching feedback..."
-                    className="w-full h-16 bg-white border border-[#e5e1da] px-2.5 py-1.5 rounded-lg text-xs focus:outline-none focus:border-[#5f6f52] transition resize-none leading-relaxed"
-                    required
-                  />
-                </div>
-
-                <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    className="flex items-center gap-1 px-3 py-1.5 bg-[#5f6f52] hover:bg-[#4d5a42] text-white text-[11px] font-bold rounded-lg shadow-xs transition cursor-pointer"
-                  >
-                    <Send className="w-3 h-3" />
-                    <span>Add Comment</span>
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* Scrollable list of comments */}
-            <div className="flex-1 overflow-y-auto space-y-3.5 pr-1 max-h-[400px]">
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">All Feedback ({comments.length})</p>
+            {/* New Side-Note Form */}
+            <form onSubmit={handleAddComment} className="space-y-2.5 bg-[#fbfaf8] p-3 rounded-xl border border-[#e8e4dc] shadow-2xs shrink-0">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold text-[#5f6f52] uppercase tracking-wider flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-amber-500" /> Add Side-Note
+                </p>
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Firestore Saved</span>
+              </div>
               
-              {comments.length === 0 ? (
-                <div className="text-center py-6 border border-dashed border-slate-200 rounded-xl bg-slate-50/30">
-                  <MessageSquare className="w-6 h-6 text-slate-300 mx-auto mb-2" />
-                  <p className="text-[10px] text-slate-400 italic">No comments left on this document yet.</p>
+              {/* Selected Text Reference */}
+              <div className="space-y-1">
+                <label className="text-[9px] font-extrabold uppercase text-slate-400 block">Referenced Text</label>
+                {newSelectedText ? (
+                  <div className="relative bg-amber-50/70 border border-amber-200 p-2 rounded-lg text-[10px] text-slate-700 italic font-mono leading-relaxed pr-6 line-clamp-3">
+                    "{newSelectedText}"
+                    <button
+                      type="button"
+                      onClick={() => setNewSelectedText('')}
+                      className="absolute top-1 right-1 text-slate-400 hover:text-slate-600 p-0.5 rounded-full"
+                      title="Clear selection reference"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <button
+                      type="button"
+                      onClick={handleCaptureSelection}
+                      className="flex items-center gap-1.5 text-[10px] font-bold text-amber-800 hover:text-amber-900 bg-amber-50/80 border border-amber-200 p-1.5 rounded-lg w-full justify-center transition cursor-pointer"
+                    >
+                      <span>✨ Attach to Highlighted Text</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Category Pills */}
+              <div className="space-y-1">
+                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Note Type</label>
+                <div className="flex flex-wrap gap-1">
+                  {(['Pedagogical Note', 'Question', 'Correction', 'Teaching Tip', 'Differentiated Guidance', 'General'] as const).map(cat => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setSelectedCommentCategory(cat)}
+                      className={`px-2 py-0.5 rounded-full text-[9px] font-bold transition cursor-pointer border ${
+                        selectedCommentCategory === cat
+                          ? 'bg-[#5f6f52] border-[#4d5a42] text-white shadow-2xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
                 </div>
-              ) : (
-                comments.map((comment) => {
+              </div>
+
+              {/* Comment Field */}
+              <div className="space-y-1">
+                <textarea
+                  value={newCommentText}
+                  onChange={(e) => setNewCommentText(e.target.value)}
+                  placeholder="Write collaborative feedback, teaching note, or observation..."
+                  className="w-full h-14 bg-white border border-[#e5e1da] px-2.5 py-1.5 rounded-lg text-xs focus:outline-none focus:border-[#5f6f52] transition resize-none leading-relaxed text-slate-800"
+                  required
+                />
+              </div>
+
+              {/* Accent Color & Submit */}
+              <div className="flex items-center justify-between pt-0.5">
+                <div className="flex items-center gap-1">
+                  {(['yellow', 'green', 'pink', 'blue'] as const).map((color) => {
+                    const colorBg = 
+                      color === 'yellow' ? 'bg-amber-100 border-amber-300' :
+                      color === 'green' ? 'bg-emerald-100 border-emerald-300' :
+                      color === 'pink' ? 'bg-rose-100 border-rose-300' :
+                      'bg-sky-100 border-sky-300';
+                    
+                    const isSelected = selectedCommentColor === color;
+
+                    return (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => setSelectedCommentColor(color)}
+                        className={`w-3.5 h-3.5 rounded-full border cursor-pointer transition-all ${colorBg} ${isSelected ? 'ring-2 ring-amber-600 scale-110 shadow-xs' : 'hover:scale-105'}`}
+                        title={`${color} accent`}
+                      />
+                    );
+                  })}
+                </div>
+
+                <button
+                  type="submit"
+                  className="flex items-center gap-1 px-3 py-1 bg-[#5f6f52] hover:bg-[#4d5a42] text-white text-[11px] font-bold rounded-lg shadow-2xs transition cursor-pointer"
+                >
+                  <Send className="w-3 h-3" />
+                  <span>Save Side-Note</span>
+                </button>
+              </div>
+            </form>
+
+            {/* Filter & Search Bar */}
+            <div className="space-y-1.5 pt-1 border-t border-slate-100">
+              <div className="flex items-center justify-between gap-1.5">
+                <input
+                  type="text"
+                  value={commentSearchQuery}
+                  onChange={(e) => setCommentSearchQuery(e.target.value)}
+                  placeholder="Search notes..."
+                  className="w-full bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg text-[10px] focus:outline-none focus:border-amber-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowResolvedComments(!showResolvedComments)}
+                  className={`px-2 py-1 rounded-lg text-[9px] font-bold transition shrink-0 border ${
+                    showResolvedComments
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : 'bg-slate-50 border-slate-200 text-slate-500'
+                  }`}
+                  title="Toggle showing resolved notes"
+                >
+                  {showResolvedComments ? 'Show All' : 'Active Only'}
+                </button>
+              </div>
+
+              {/* Filter Pills */}
+              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-0.5">
+                {['All', 'Pedagogical Note', 'Question', 'Correction', 'Teaching Tip', 'Differentiated Guidance'].map(cat => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setCommentCategoryFilter(cat)}
+                    className={`px-2 py-0.5 rounded-md text-[8px] font-bold shrink-0 transition border ${
+                      commentCategoryFilter === cat
+                        ? 'bg-amber-100 border-amber-300 text-amber-900'
+                        : 'bg-slate-50 border-slate-150 text-slate-500 hover:bg-slate-100'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Scrollable List of Side-Notes */}
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1 max-h-[380px]">
+              {(() => {
+                const filteredComments = comments.filter(c => {
+                  if (!showResolvedComments && c.resolved) return false;
+                  if (commentCategoryFilter !== 'All' && c.category !== commentCategoryFilter) return false;
+                  if (commentSearchQuery.trim()) {
+                    const q = commentSearchQuery.toLowerCase();
+                    const matchText = c.comment.toLowerCase().includes(q);
+                    const matchRef = (c.selectedText || '').toLowerCase().includes(q);
+                    const matchAuthor = c.authorName.toLowerCase().includes(q);
+                    return matchText || matchRef || matchAuthor;
+                  }
+                  return true;
+                });
+
+                if (filteredComments.length === 0) {
+                  return (
+                    <div className="text-center py-6 border border-dashed border-slate-200 rounded-xl bg-slate-50/50 space-y-1.5">
+                      <MessageSquare className="w-6 h-6 text-slate-300 mx-auto" />
+                      <p className="text-[10px] text-slate-400 font-medium">No side-notes matching criteria.</p>
+                      <p className="text-[8px] text-slate-400">Select text in document view to attach a collaborative side-note!</p>
+                    </div>
+                  );
+                }
+
+                return filteredComments.map((comment) => {
                   const isAuthor = profile && profile.uid === comment.authorUid;
                   const isAdminRole = profile && profile.role === 'Administrator';
                   const isActive = activeHighlightedText && comment.selectedText && activeHighlightedText.toLowerCase() === comment.selectedText.toLowerCase();
 
+                  const borderColor = 
+                    comment.color === 'green' ? 'border-l-emerald-500' :
+                    comment.color === 'pink' ? 'border-l-rose-500' :
+                    comment.color === 'blue' ? 'border-l-sky-500' :
+                    'border-l-amber-500';
+
+                  const tagBg = 
+                    comment.category === 'Pedagogical Note' ? 'bg-amber-100 text-amber-900 border-amber-200' :
+                    comment.category === 'Question' ? 'bg-indigo-100 text-indigo-900 border-indigo-200' :
+                    comment.category === 'Correction' ? 'bg-rose-100 text-rose-900 border-rose-200' :
+                    comment.category === 'Teaching Tip' ? 'bg-emerald-100 text-emerald-900 border-emerald-200' :
+                    comment.category === 'Differentiated Guidance' ? 'bg-purple-100 text-purple-900 border-purple-200' :
+                    'bg-slate-100 text-slate-800 border-slate-200';
+
                   return (
                     <div
                       key={comment.id}
-                      className={`border rounded-xl p-3 space-y-2 transition-all relative ${
+                      className={`border border-l-4 ${borderColor} rounded-xl p-3 space-y-2 transition-all relative ${
+                        comment.resolved ? 'opacity-60 bg-slate-50 border-slate-200' :
                         isActive
-                          ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-100 shadow-xs'
-                          : 'bg-white border-[#e5e1da] hover:border-slate-300'
+                          ? 'bg-amber-50/80 border-amber-300 ring-2 ring-amber-100 shadow-xs'
+                          : 'bg-white border-[#e5e1da] hover:border-slate-300 shadow-2xs'
                       }`}
                     >
+                      {/* Top Category Badge & Actions */}
+                      <div className="flex items-center justify-between gap-1">
+                        <span className={`px-2 py-0.5 rounded-full text-[8px] font-extrabold uppercase border ${tagBg}`}>
+                          {comment.category || 'General Note'}
+                        </span>
+                        
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleResolveComment(comment)}
+                            className={`p-1 rounded hover:bg-slate-100 transition ${comment.resolved ? 'text-emerald-600' : 'text-slate-400 hover:text-emerald-600'}`}
+                            title={comment.resolved ? "Mark active" : "Mark resolved"}
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          {(isAuthor || isAdminRole) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm('Delete this side-note?')) {
+                                  handleDeleteComment(comment.id);
+                                }
+                              }}
+                              className="text-slate-400 hover:text-red-500 p-1 rounded transition"
+                              title="Delete side-note"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
                       {/* Selected Text Reference */}
                       {comment.selectedText && (
                         <div
@@ -8842,48 +10305,97 @@ ${profile?.displayName || 'Classroom Teacher'}
                               setActiveHighlightedText(comment.selectedText);
                             }
                           }}
-                          className="border-l-2 border-amber-300 bg-amber-50/30 px-2 py-1.5 rounded-r text-[10px] text-slate-500 italic font-mono leading-relaxed cursor-pointer hover:bg-amber-100/30 transition-colors"
-                          title="Click to view reference highlight"
+                          className="border-l-2 border-amber-400 bg-amber-50/60 px-2 py-1.5 rounded-r text-[10px] text-slate-600 italic font-mono leading-relaxed cursor-pointer hover:bg-amber-100/50 transition-colors"
+                          title="Click to locate highlight in document"
                         >
                           "{comment.selectedText}"
                         </div>
                       )}
 
-                      {/* Comment Content */}
-                      <p className="text-xs text-slate-700 leading-relaxed break-words">{comment.comment}</p>
+                      {/* Comment Body */}
+                      <p className={`text-xs text-slate-800 leading-relaxed break-words ${comment.resolved ? 'line-through text-slate-500' : ''}`}>
+                        {comment.comment}
+                      </p>
 
-                      {/* Footer */}
-                      <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-50">
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-bold text-slate-600 truncate">{comment.authorName}</p>
-                          <p className="text-[8px] text-slate-400 font-mono">
-                            {new Date(comment.createdAt).toLocaleDateString()} at {new Date(comment.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                          </p>
+                      {/* Author Info */}
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[9px] text-slate-500">
+                        <div className="flex items-center gap-1 min-w-0">
+                          <div className="w-4 h-4 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-[8px] shrink-0">
+                            {comment.authorName.charAt(0).toUpperCase()}
+                          </div>
+                          <span className="font-bold text-slate-700 truncate">{comment.authorName}</span>
                         </div>
-                        {(isAuthor || isAdminRole) && (
+                        <span className="font-mono text-[8px] text-slate-400 shrink-0">
+                          {new Date(comment.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+
+                      {/* Replies List */}
+                      {comment.replies && comment.replies.length > 0 && (
+                        <div className="space-y-1.5 pt-1.5 border-t border-slate-100 pl-2">
+                          <p className="text-[8px] font-bold uppercase text-slate-400 tracking-wider">Replies ({comment.replies.length})</p>
+                          {comment.replies.map(reply => (
+                            <div key={reply.id} className="bg-slate-50 p-2 rounded-lg border border-slate-150 space-y-1 text-[10px]">
+                              <div className="flex items-center justify-between font-bold text-slate-700 text-[9px]">
+                                <span>{reply.authorName}</span>
+                                <span className="font-mono text-[8px] font-normal text-slate-400">
+                                  {new Date(reply.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                              <p className="text-slate-600 leading-relaxed">{reply.text}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Reply Input Trigger */}
+                      <div className="pt-1">
+                        {activeReplyCommentId === comment.id ? (
+                          <div className="space-y-1.5 bg-slate-50 p-2 rounded-lg border border-slate-200">
+                            <textarea
+                              value={replyTextMap[comment.id] || ''}
+                              onChange={(e) => setReplyTextMap(prev => ({ ...prev, [comment.id]: e.target.value }))}
+                              placeholder="Write a collaborative reply..."
+                              className="w-full h-12 bg-white border border-slate-200 p-1.5 rounded-md text-[10px] focus:outline-none focus:border-amber-500"
+                              autoFocus
+                            />
+                            <div className="flex justify-end gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setActiveReplyCommentId(null)}
+                                className="px-2 py-0.5 text-[9px] text-slate-500 hover:text-slate-700"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleAddReplyToComment(comment.id)}
+                                className="px-2.5 py-0.5 bg-[#5f6f52] text-white text-[9px] font-bold rounded shadow-2xs"
+                              >
+                                Reply
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
                           <button
-                            onClick={() => {
-                              if (window.confirm('Delete this comment?')) {
-                                handleDeleteComment(comment.id);
-                              }
-                            }}
-                            className="text-slate-400 hover:text-red-500 p-1 rounded transition"
-                            title="Delete comment"
+                            type="button"
+                            onClick={() => setActiveReplyCommentId(comment.id)}
+                            className="text-[9px] font-bold text-amber-700 hover:text-amber-900 flex items-center gap-1 cursor-pointer"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>💬 Reply to thread</span>
                           </button>
                         )}
                       </div>
                     </div>
                   );
-                })
-              )}
+                });
+              })()}
             </div>
           </div>
         )}
 
         {/* Reactions Review Sidebar */}
-        {isReactionsSidebarOpen && (
+        {!isQuickStudyMode && isReactionsSidebarOpen && (
           <div className="w-full xl:w-80 shrink-0 bg-white rounded-2xl border border-[#e5e1da] shadow-sm p-4 space-y-4 no-print flex flex-col max-h-[850px] overflow-hidden animate-fadeIn">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-[#f4f1ea] pb-3">
@@ -8976,7 +10488,7 @@ ${profile?.displayName || 'Classroom Teacher'}
         )}
 
         {/* Private Notes & Annotations Sidebar */}
-        {isAnnotationsOpen && (
+        {!isQuickStudyMode && isAnnotationsOpen && (
           <div className="w-full xl:w-80 shrink-0 bg-white rounded-2xl border border-[#e5e1da] shadow-sm p-4 space-y-4 no-print flex flex-col max-h-[850px] overflow-hidden animate-fadeIn">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-[#f4f1ea] pb-3">
@@ -9151,7 +10663,7 @@ ${profile?.displayName || 'Classroom Teacher'}
         )}
 
         {/* Parent-Teacher Direct Chat Panel */}
-        {isParentChatOpen && (
+        {!isQuickStudyMode && isParentChatOpen && (
           <DocumentParentChatPanel 
             document={document}
             profile={profile}
@@ -9161,7 +10673,7 @@ ${profile?.displayName || 'Classroom Teacher'}
         )}
 
         {/* Version History Sidebar */}
-        {isVersionsSidebarOpen && (
+        {!isQuickStudyMode && isVersionsSidebarOpen && (
           <div className="w-full xl:w-80 shrink-0 bg-white rounded-2xl border border-[#e5e1da] shadow-sm p-4 space-y-4 no-print flex flex-col max-h-[850px] overflow-hidden animate-fadeIn">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-[#f4f1ea] pb-3">
@@ -9356,7 +10868,13 @@ ${profile?.displayName || 'Classroom Teacher'}
 
         {/* AI Cognitive Activity Auto-Grader & Class Analytics Section */}
         {!isStudent && (
-          <div className="mb-6">
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-20px' }}
+            transition={{ duration: 0.4, ease: 'easeOut' }}
+            className="mb-6"
+          >
             <AIActivityAutoGrader
               document={document}
               difficultyLevel={document.difficultyLevel || 'intermediate'}
@@ -9367,23 +10885,35 @@ ${profile?.displayName || 'Classroom Teacher'}
                 setIsReflectionExpanded(true);
               }}
             />
-          </div>
+          </motion.div>
         )}
 
         {/* AI Reading Level Analyzer & Vocabulary Adapter */}
         {!isStudent && (
-          <div className="mb-6">
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-20px' }}
+            transition={{ duration: 0.4, ease: 'easeOut' }}
+            className="mb-6"
+          >
             <ReadingLevelAnalyzer
               document={document}
               editedContent={editedContent}
               setEditedContent={setEditedContent}
             />
-          </div>
+          </motion.div>
         )}
 
         {/* Post-Lesson Reflection Section */}
         {!isStudent && (
-            <div className="bg-white rounded-2xl border border-[#eadecd] shadow-sm overflow-hidden flex flex-col no-print animate-fadeIn">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-20px' }}
+              transition={{ duration: 0.4, ease: 'easeOut' }}
+              className="bg-white rounded-2xl border border-[#eadecd] shadow-sm overflow-hidden flex flex-col no-print animate-fadeIn"
+            >
               <div 
                 onClick={() => setIsReflectionExpanded(!isReflectionExpanded)}
                 className="p-4 bg-amber-50/50 border-b border-[#eadecd] flex items-center justify-between cursor-pointer hover:bg-amber-50/80 transition"
@@ -9476,12 +11006,12 @@ ${profile?.displayName || 'Classroom Teacher'}
                   </div>
                 </div>
               )}
-            </div>
+            </motion.div>
           )}
         </div>
 
         {/* Right Info sidebar */}
-        {!isRightSidebarCollapsed && (
+        {!isQuickStudyMode && !isRightSidebarCollapsed && (
           <div className="hidden lg:block space-y-6 no-print right-info-sidebar lg:col-span-3 xl:col-span-2">
             {renderSidebarContent()}
           </div>
@@ -11025,6 +12555,21 @@ ${profile?.displayName || 'Classroom Teacher'}
         </div>
       )}
 
+      {/* Floating Back to Top Button */}
+      {showBackToTop && (
+        <motion.button
+          initial={{ opacity: 0, scale: 0.8, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.8, y: 20 }}
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          className={`fixed ${timerIsFloating ? 'bottom-28' : 'bottom-6'} right-6 z-40 no-print flex items-center gap-2 px-3.5 py-2.5 bg-slate-900/90 hover:bg-slate-900 text-white rounded-full shadow-2xl border border-slate-700/70 backdrop-blur-md transition-all hover:scale-105 active:scale-95 text-xs font-bold cursor-pointer group`}
+          title="Scroll back to top of lesson plan"
+        >
+          <ArrowUp className="w-4 h-4 text-emerald-400 group-hover:-translate-y-0.5 transition-transform shrink-0" />
+          <span className="hidden sm:inline">Back to Top</span>
+        </motion.button>
+      )}
+
       {/* Floating Lesson Pacing Timer Widget */}
       {timerIsFloating && (
         <div className="fixed bottom-6 right-6 z-50 no-print max-w-[280px] sm:max-w-[320px] w-full bg-slate-900 text-slate-100 rounded-2xl shadow-2xl border border-slate-700/50 overflow-hidden animate-slideUp">
@@ -11329,7 +12874,7 @@ ${profile?.displayName || 'Classroom Teacher'}
       )}
 
       {/* Socratic AI Sidebar Panel */}
-      {isSocraticSidebarOpen && (
+      {!isQuickStudyMode && isSocraticSidebarOpen && (
         <div className="fixed top-0 right-0 h-full w-[380px] sm:w-[420px] bg-white border-l border-slate-200 shadow-2xl z-45 flex flex-col no-print animate-slideLeft">
           {/* Header */}
           <div className="p-4 bg-indigo-600 text-white flex items-center justify-between">
@@ -11781,17 +13326,6 @@ ${profile?.displayName || 'Classroom Teacher'}
 // ==========================================
 // Parent-Teacher Real-Time Chat & Feedback Sub-component
 // ==========================================
-import { 
-  collection as firestoreCollection, 
-  onSnapshot as firestoreOnSnapshot, 
-  query as firestoreQuery, 
-  orderBy as firestoreOrderBy, 
-  addDoc as firestoreAddDoc, 
-  updateDoc as firestoreUpdateDoc,
-  doc as firestoreDoc 
-} from 'firebase/firestore';
-import { db as chatDb, handleFirestoreError as chatHandleError, OperationType as ChatOpType, cleanUndefined as chatCleanUndefined } from '../firebase';
-import { ParentTeacherMessage as ChatMsg } from '../types';
 
 interface DocumentParentChatPanelProps {
   document: SavedDocument;

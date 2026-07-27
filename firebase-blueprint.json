@@ -52,6 +52,13 @@
           "type": "array",
           "items": { "type": "string" }
         },
+        "commentsCount": { "type": "integer" },
+        "lastCommentAt": { "type": "string", "format": "date-time" },
+        "lastCommentBy": { "type": "string" },
+        "sideNotesMetadata": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
         "isSharedWithColleagues": { "type": "boolean" },
         "sharedByUid": { "type": "string" },
         "sharedByName": { "type": "string" },
@@ -168,7 +175,11 @@
         "authorUid": { "type": "string" },
         "authorName": { "type": "string" },
         "authorEmail": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time" },
+        "category": { "type": "string" },
+        "color": { "type": "string" },
+        "resolved": { "type": "boolean" },
+        "replies": { "type": "array", "items": { "type": "object" } }
       },
       "required": ["id", "docId", "comment", "authorUid", "createdAt"]
     },
@@ -385,9 +396,51 @@
         "read": { "type": "boolean" }
       },
       "required": ["id", "senderUid", "senderName", "senderRole", "recipientUid", "recipientName", "recipientRole", "text", "createdAt"]
+    },
+    "tutorSession": {
+      "title": "AI Tutor Socratic Session",
+      "description": "Interactive Socratic AI tutoring session history with chat messages, scaffolding, and misconception triangulation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "topic": { "type": "string" },
+        "persona": { "type": "string" },
+        "scaffoldingLevel": { "type": "string" },
+        "difficultyLevel": { "type": "string" },
+        "messages": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "activeStep": { "type": "string" },
+        "misconceptions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "suggestedResources": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "conceptMap": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "isCbcMode": { "type": "boolean" },
+        "cbcSubject": { "type": "string" },
+        "cbcStrand": { "type": "string" },
+        "cbcSubStrand": { "type": "string" },
+        "cbcConcept": { "type": "string" },
+        "cbcSocraticMode": { "type": "string" }
+      },
+      "required": ["id", "userId", "subject", "topic"]
     }
   },
   "firestore": {
+    "/tutorSessions/{sessionId}": {
+      "schema": "tutorSession",
+      "description": "Store interactive Socratic AI tutor chat sessions for scrolling through and resuming previous conversations."
+    },
     "/parent_teacher_messages/{messageId}": {
       "schema": "parentTeacherMessage",
       "description": "Direct chat messages and educational feedback between parents and teachers."

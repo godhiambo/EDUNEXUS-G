@@ -44,6 +44,10 @@ export const connectGoogleWorkspace = async (): Promise<{ user: User; accessToke
     
     return { user: result.user, accessToken: credential.accessToken };
   } catch (error: any) {
+    if (error?.code === 'auth/popup-closed-by-user' || error?.code === 'auth/cancelled-popup-request') {
+      console.log('Google Workspace popup was closed by user.');
+      return null;
+    }
     console.error('Google Workspace Authentication Failed:', error);
     throw error;
   }

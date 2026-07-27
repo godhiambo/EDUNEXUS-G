@@ -25,7 +25,11 @@ import {
   RefreshCw,
   MessageSquare,
   Flame,
-  Award
+  Award,
+  Send,
+  User,
+  Users,
+  Plus
 } from 'lucide-react';
 
 interface DialogueTurn {
@@ -85,6 +89,13 @@ export default function ConversationalPodcastModal({
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [copied, setCopied] = useState<boolean>(false);
+
+  // Live Student Panel Interaction States
+  const [studentName, setStudentName] = useState<string>('Student Guest');
+  const [speakerTarget, setSpeakerTarget] = useState<string>('All Panelists');
+  const [studentQuestion, setStudentQuestion] = useState<string>('');
+  const [isAskingPanel, setIsAskingPanel] = useState<boolean>(false);
+  const [askError, setAskError] = useState<string | null>(null);
 
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -190,7 +201,7 @@ export default function ConversationalPodcastModal({
     const turn = podcastData.dialogue[lineIndex];
     const utterance = new SpeechSynthesisUtterance(turn.text);
 
-    // Pick distinct voices for Host Alex vs Dr. Sarah
+    // Pick distinct voices for Host Alex vs Dr. Sarah vs Live Student Panelist
     if (availableVoices.length > 0) {
       const englishVoices = availableVoices.filter(v => v.lang.startsWith('en'));
       const pool = englishVoices.length > 0 ? englishVoices : availableVoices;
@@ -200,11 +211,16 @@ export default function ConversationalPodcastModal({
         const alexVoice = pool.find(v => v.name.includes('Female') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Karen')) || pool[0];
         utterance.voice = alexVoice;
         utterance.pitch = 1.15;
-      } else {
+      } else if (turn.speaker.includes('Sarah') || turn.speaker.includes('Dr.')) {
         // Dr. Sarah: Calm educator / distinct pitch voice
         const sarahVoice = pool.find(v => v.name.includes('Natural') || v.name.includes('Daniel') || v.name.includes('Arthur') || v.name.includes('UK') || v.name.includes('Serena')) || pool[1] || pool[0];
         utterance.voice = sarahVoice;
         utterance.pitch = 0.88;
+      } else {
+        // Live Student Guest Voice
+        const studentVoice = pool.find(v => v.name.includes('US') || v.name.includes('David') || v.name.includes('Alex')) || pool[2] || pool[0];
+        utterance.voice = studentVoice;
+        utterance.pitch = 1.05;
       }
     }
 
@@ -239,6 +255,69 @@ export default function ConversationalPodcastModal({
       lineElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [podcastData, availableVoices, playbackRate, isMuted, topicConfidence, isESLEnabled]);
+
+  // Live Student Panel Question Submission Handler
+  const handleAskPanelist = useCallback(async (customQuestion?: string) => {
+    const questionToAsk = customQuestion || studentQuestion;
+    if (!questionToAsk.trim() || !podcastData || isAskingPanel) return;
+
+    setIsAskingPanel(true);
+    setAskError(null);
+
+    // Stop current speech playback temporarily
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsPlaying(false);
+
+    try {
+      const response = await fetch('/api/podcast-panelist-ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userQuestion: questionToAsk.trim(),
+          studentName: studentName.trim() || 'Student Guest',
+          podcastTitle: podcastData.episodeTitle || materialTitle,
+          materialsText: materialsText.slice(0, 2500),
+          currentDialogue: podcastData.dialogue.slice(-6),
+          speakerTarget: speakerTarget,
+        }),
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to submit question to the live panel');
+      }
+
+      const data = await response.json();
+      if (data.dialogueTurns && Array.isArray(data.dialogueTurns)) {
+        const newTurns: DialogueTurn[] = data.dialogueTurns;
+        const startIndex = podcastData.dialogue.length;
+
+        setPodcastData(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            dialogue: [...prev.dialogue, ...newTurns]
+          };
+        });
+
+        setStudentQuestion('');
+
+        // Automatically trigger speech playback for the new student interaction turns!
+        setTimeout(() => {
+          setCurrentLineIndex(startIndex);
+          setIsPlaying(true);
+          speakLine(startIndex);
+        }, 300);
+      }
+    } catch (err: any) {
+      console.error('Error asking panelist:', err);
+      setAskError(err.message || 'Failed to submit question to the panel.');
+    } finally {
+      setIsAskingPanel(false);
+    }
+  }, [studentQuestion, podcastData, isAskingPanel, studentName, materialTitle, materialsText, speakerTarget, speakLine]);
 
   const togglePlayPause = () => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window) || !podcastData) return;
@@ -574,6 +653,118 @@ export default function ConversationalPodcastModal({
                 </div>
               </div>
 
+              {/* Join Live Panel Interactivity Section */}
+              <div className="bg-gradient-to-r from-emerald-950/60 via-slate-900 to-indigo-950/60 border border-emerald-500/30 rounded-2xl p-4 space-y-3 shadow-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                      <Mic className="w-4 h-4 animate-pulse" />
+                    </div>
+                    <div>
+                      <h4 className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                        <span>Join the Live Podcast Panel</span>
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono uppercase font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          LIVE Q&A
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-slate-300">
+                        Ask a question or seek clarity directly from Dr. Sarah & Host Alex during the episode.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Question Quick Presets */}
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {[
+                    "Can you give an everyday analogy for this?",
+                    "Could you explain this step simply?",
+                    "How is this applied in real life?",
+                    "Can you clarify the main takeaway?"
+                  ].map((preset, idx) => (
+                    <button
+                      key={idx}
+                      disabled={isAskingPanel}
+                      onClick={() => handleAskPanelist(preset)}
+                      className="px-2.5 py-1 rounded-xl bg-slate-950/80 hover:bg-emerald-950 hover:text-emerald-300 text-slate-300 border border-slate-800 text-[10px] font-medium transition cursor-pointer disabled:opacity-50"
+                    >
+                      💡 {preset}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Live Question Input Form */}
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleAskPanelist();
+                  }}
+                  className="space-y-2"
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="flex items-center bg-slate-950/90 border border-slate-800 rounded-xl px-2.5 py-1">
+                      <User className="w-3.5 h-3.5 text-slate-400 mr-1.5 shrink-0" />
+                      <span className="text-[10px] text-slate-400 font-bold mr-1 shrink-0">Name:</span>
+                      <input
+                        type="text"
+                        value={studentName}
+                        onChange={(e) => setStudentName(e.target.value)}
+                        placeholder="Your Name"
+                        className="bg-transparent text-xs text-white focus:outline-none w-full"
+                      />
+                    </div>
+
+                    <div className="flex items-center bg-slate-950/90 border border-slate-800 rounded-xl px-2.5 py-1">
+                      <Users className="w-3.5 h-3.5 text-slate-400 mr-1.5 shrink-0" />
+                      <span className="text-[10px] text-slate-400 font-bold mr-1 shrink-0">Target:</span>
+                      <select
+                        value={speakerTarget}
+                        onChange={(e) => setSpeakerTarget(e.target.value)}
+                        className="bg-transparent text-xs text-emerald-300 focus:outline-none w-full font-medium cursor-pointer"
+                      >
+                        <option value="All Panelists" className="bg-slate-900 text-white">All Panelists</option>
+                        <option value="Dr. Sarah" className="bg-slate-900 text-white">Dr. Sarah (Lead Educator)</option>
+                        <option value="Host Alex" className="bg-slate-900 text-white">Host Alex (Co-Host)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={studentQuestion}
+                      onChange={(e) => setStudentQuestion(e.target.value)}
+                      placeholder="Ask the panelists a question or seek clarity on a concept..."
+                      disabled={isAskingPanel}
+                      className="flex-1 bg-slate-950/90 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none transition disabled:opacity-50"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!studentQuestion.trim() || isAskingPanel}
+                      className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-extrabold text-xs rounded-xl shadow-md transition cursor-pointer flex items-center gap-1.5 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isAskingPanel ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Panel Responding...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Ask Panel</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+
+                {askError && (
+                  <p className="text-[11px] text-rose-400 font-medium bg-rose-950/40 border border-rose-800/40 p-2 rounded-xl">
+                    ⚠️ {askError}
+                  </p>
+                )}
+              </div>
+
               {/* Conversational Dialogue Transcript */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -593,6 +784,8 @@ export default function ConversationalPodcastModal({
                   {podcastData.dialogue.map((turn, index) => {
                     const isCurrent = index === currentLineIndex && isPlaying;
                     const isAlex = turn.speaker.includes('Alex');
+                    const isSarah = turn.speaker.includes('Sarah') || turn.speaker.includes('Dr.');
+                    const isStudent = !isAlex && !isSarah;
 
                     return (
                       <div
@@ -608,6 +801,8 @@ export default function ConversationalPodcastModal({
                             ? 'bg-slate-900 border-cyan-500 shadow-md scale-[1.01]'
                             : index === currentLineIndex
                             ? 'bg-slate-900/80 border-indigo-500/50'
+                            : isStudent
+                            ? 'bg-emerald-950/20 border-emerald-500/30 hover:bg-emerald-900/30'
                             : 'bg-slate-900/40 border-slate-800/80 hover:bg-slate-900/70 hover:border-slate-700'
                         }`}
                       >
@@ -616,10 +811,12 @@ export default function ConversationalPodcastModal({
                           className={`w-8 h-8 rounded-xl shrink-0 flex items-center justify-center font-black text-xs shadow-xs ${
                             isAlex
                               ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
-                              : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                              : isSarah
+                              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                              : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                           }`}
                         >
-                          {isAlex ? 'HA' : 'DS'}
+                          {isAlex ? 'HA' : isSarah ? 'DS' : 'ST'}
                         </div>
 
                         <div className="flex-1 space-y-1">
@@ -633,11 +830,18 @@ export default function ConversationalPodcastModal({
                               </span>
                             </div>
 
-                            {turn.simpleAnalogyUsed && (
-                              <span className="text-[9px] px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded font-bold uppercase">
-                                💡 Simple Analogy
-                              </span>
-                            )}
+                            <div className="flex items-center gap-1.5">
+                              {isStudent && (
+                                <span className="text-[9px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded font-bold uppercase">
+                                  🎙️ Live Guest Question
+                                </span>
+                              )}
+                              {turn.simpleAnalogyUsed && (
+                                <span className="text-[9px] px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded font-bold uppercase">
+                                  💡 Simple Analogy
+                                </span>
+                              )}
+                            </div>
                           </div>
 
                           <p className={`text-xs leading-relaxed font-medium ${

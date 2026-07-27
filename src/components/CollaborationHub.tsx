@@ -535,7 +535,36 @@ export default function CollaborationHub() {
 
           {/* Cards Grid */}
           {loading ? (
-            <div className="p-12 text-center text-slate-400 italic">Syncing shared school pool...</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className="bg-white rounded-2xl border border-[#e5e1da] p-5 shadow-xs flex flex-col justify-between space-y-4 animate-pulse">
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="h-4 w-20 bg-slate-200 rounded-md"></div>
+                      <div className="h-4 w-16 bg-slate-200 rounded-full"></div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <div className="h-4 w-3/4 bg-slate-200 rounded-md"></div>
+                      <div className="h-3 w-1/2 bg-slate-100 rounded-md"></div>
+                    </div>
+                    <div className="p-3 bg-[#fdfbf7] border border-[#f4f1ea] rounded-xl space-y-2">
+                      <div className="flex justify-between items-center">
+                        <div className="h-3 w-20 bg-slate-200 rounded-md"></div>
+                        <div className="h-3 w-16 bg-slate-100 rounded-md"></div>
+                      </div>
+                      <div className="h-3.5 w-28 bg-slate-200 rounded-md"></div>
+                    </div>
+                  </div>
+                  <div className="pt-3 border-t border-[#f4f1ea] space-y-2">
+                    <div className="flex gap-2">
+                      <div className="flex-1 h-8 bg-slate-200 rounded-xl"></div>
+                      <div className="flex-1 h-8 bg-slate-200 rounded-xl"></div>
+                    </div>
+                    <div className="h-7 w-full bg-slate-100 rounded-xl"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : filteredSharedDocs.length === 0 ? (
             <div className="text-center p-16 bg-white rounded-2xl border border-[#e5e1da]">
               <Globe className="w-10 h-10 text-slate-300 mx-auto mb-3 opacity-60" />

@@ -272,6 +272,7 @@ function calculateFuzzyDocScore(query: string, doc: SavedDocument): FuzzyMatchSc
 
 interface DashboardProps {
   documents: SavedDocument[];
+  isLoading?: boolean;
   onCreateNew: () => void;
   onOpenDoc: (doc: SavedDocument) => void;
   onLoadDraft?: (draft: DocumentDraft) => void;
@@ -283,6 +284,7 @@ interface DashboardProps {
 
 export default function Dashboard({
   documents,
+  isLoading = false,
   onCreateNew,
   onOpenDoc,
   onLoadDraft,
@@ -1321,8 +1323,22 @@ export default function Dashboard({
       <StudentXpWidget onOpenFlashcards={onOpenFlashcards} />
 
       {/* Modernized Stats Dashboard Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        {/* Stat Card 1 */}
+      {isLoading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="bg-white p-5 rounded-2xl border border-[#e5e1da] shadow-xs flex items-center justify-between animate-pulse">
+              <div className="space-y-2.5 w-2/3">
+                <div className="h-3 w-20 bg-slate-200 rounded-md"></div>
+                <div className="h-8 w-14 bg-slate-200 rounded-lg"></div>
+                <div className="h-2.5 w-28 bg-slate-100 rounded-md"></div>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-slate-200 shrink-0"></div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* Stat Card 1 */}
         <div className="bg-white p-5 rounded-2xl border border-[#e5e1da] shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-between group">
           <div className="space-y-2">
             <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Total Materials</span>
@@ -1370,6 +1386,7 @@ export default function Dashboard({
           </div>
         </div>
       </div>
+      )}
 
       {/* Admin Document Usage Chart */}
       {isAdmin && (
@@ -2688,7 +2705,52 @@ export default function Dashboard({
                       </div>
                     </div>
 
-                    {shownDocsInFolder.length === 0 ? (
+                    {isLoading ? (
+                      <div className="p-6 space-y-4">
+                        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                          <div className="h-4 w-36 bg-slate-200 rounded-md animate-pulse"></div>
+                          <div className="h-4 w-24 bg-slate-200 rounded-md animate-pulse"></div>
+                        </div>
+                        {listLayout === 'table' ? (
+                          <div className="space-y-3">
+                            {[1, 2, 3, 4, 5].map((i) => (
+                              <div key={i} className="p-3.5 bg-slate-50/70 rounded-xl border border-slate-150 flex items-center justify-between gap-4 animate-pulse">
+                                <div className="flex items-center gap-3 w-1/2">
+                                  <div className="w-5 h-5 rounded-md bg-slate-200 shrink-0"></div>
+                                  <div className="w-8 h-8 rounded-lg bg-slate-200 shrink-0"></div>
+                                  <div className="space-y-1.5 w-full">
+                                    <div className="h-4 w-3/4 bg-slate-200 rounded-md"></div>
+                                    <div className="h-3 w-1/2 bg-slate-100 rounded-md"></div>
+                                  </div>
+                                </div>
+                                <div className="hidden sm:block h-6 w-20 bg-slate-200 rounded-full shrink-0"></div>
+                                <div className="hidden md:block h-4 w-24 bg-slate-200 rounded-md shrink-0"></div>
+                                <div className="h-8 w-16 bg-slate-200 rounded-lg shrink-0"></div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                            {[1, 2, 3, 4].map((i) => (
+                              <div key={i} className="bg-white border border-[#e5e1da] rounded-2xl p-5 space-y-4 animate-pulse min-h-[190px] flex flex-col justify-between">
+                                <div className="space-y-3">
+                                  <div className="flex justify-between items-center">
+                                    <div className="h-5 w-24 bg-slate-200 rounded-full"></div>
+                                    <div className="h-5 w-16 bg-slate-200 rounded-full"></div>
+                                  </div>
+                                  <div className="h-5 w-4/5 bg-slate-200 rounded-lg"></div>
+                                  <div className="h-4 w-1/2 bg-slate-100 rounded-md"></div>
+                                </div>
+                                <div className="flex justify-between items-center pt-3 border-t border-slate-100">
+                                  <div className="h-3 w-20 bg-slate-200 rounded-md"></div>
+                                  <div className="h-8 w-16 bg-slate-200 rounded-xl"></div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : shownDocsInFolder.length === 0 ? (
                       <div className="py-20 text-center max-w-lg mx-auto px-6 bg-[#fcfbf9]/30 rounded-b-3xl">
                         <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-100 flex items-center justify-center mx-auto mb-4 text-amber-500">
                           <FolderOpen className="w-8 h-8 animate-bounce" />

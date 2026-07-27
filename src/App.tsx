@@ -1,15 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { SavedDocument, GenerationParams, DocumentDraft, AppNotification } from './types';
 import { INITIAL_DOCUMENTS } from './data/seedDocs';
 import { EditableSelect } from './components/EditableSelect';
-import Dashboard from './components/Dashboard';
-import DocumentCreator from './components/DocumentCreator';
-import DocumentViewer from './components/DocumentViewer';
-import AdminPanel from './components/AdminPanel';
-import AdminPlaybook from './components/AdminPlaybook';
-import Settings from './components/Settings';
-import AuthScreen from './components/AuthScreen';
-import GlobalResources from './components/GlobalResources';
 import { AuthProvider, useAuth, resolveDisplayName } from './context/AuthContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { AccessibilityProvider, useAccessibility } from './context/AccessibilityContext';
@@ -19,24 +11,48 @@ import { logActivity } from './lib/activityLogger';
 import { handleResponseJson } from './utils/api';
 import { triggerAutoBackupIfEnabled } from './lib/googleWorkspace';
 import { collection, onSnapshot, setDoc, doc, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
-import CollaborationHub from './components/CollaborationHub';
 import NotificationCenter from './components/NotificationCenter';
 import { getStoredNotifications, checkUpcomingLessons } from './lib/notificationService';
 import PilotFeedbackModal from './components/PilotFeedbackModal';
-import VoiceNotebook from './components/VoiceNotebook';
-import AITutor from './components/AITutor';
-import AssessmentGenerator from './components/AssessmentGenerator';
 import SidebarTimerWidget from './components/SidebarTimerWidget';
-import FileLibrary from './components/FileLibrary';
-import ImageStudio from './components/ImageStudio';
-import VideoStudio from './components/VideoStudio';
 import { motion, AnimatePresence } from 'motion/react';
 import { Image as ImageIcon } from 'lucide-react';
 import VoiceNavigation from './components/VoiceNavigation';
-import LearnersPerformance from './components/LearnersPerformance';
-import VisualPhoneticsStudio from './components/VisualPhoneticsStudio';
 import AppIconShowcaseModal from './components/AppIconShowcaseModal';
 import NetworkStatusBadge from './components/NetworkStatusBadge';
+
+// Lazy-loaded major route components for chunk splitting & fast initial paint
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const DocumentCreator = lazy(() => import('./components/DocumentCreator'));
+const DocumentViewer = lazy(() => import('./components/DocumentViewer'));
+const AdminPanel = lazy(() => import('./components/AdminPanel'));
+const AdminPlaybook = lazy(() => import('./components/AdminPlaybook'));
+const Settings = lazy(() => import('./components/Settings'));
+const AuthScreen = lazy(() => import('./components/AuthScreen'));
+const GlobalResources = lazy(() => import('./components/GlobalResources'));
+const CollaborationHub = lazy(() => import('./components/CollaborationHub'));
+const VoiceNotebook = lazy(() => import('./components/VoiceNotebook'));
+const AITutor = lazy(() => import('./components/AITutor'));
+const AssessmentGenerator = lazy(() => import('./components/AssessmentGenerator'));
+const FileLibrary = lazy(() => import('./components/FileLibrary'));
+const ImageStudio = lazy(() => import('./components/ImageStudio'));
+const VideoStudio = lazy(() => import('./components/VideoStudio'));
+const LearnersPerformance = lazy(() => import('./components/LearnersPerformance'));
+const VisualPhoneticsStudio = lazy(() => import('./components/VisualPhoneticsStudio'));
+
+function ViewLoadingFallback() {
+  return (
+    <div className="w-full h-72 md:h-96 bg-white/70 backdrop-blur-md rounded-3xl border border-slate-200/80 p-8 flex flex-col items-center justify-center space-y-4 animate-pulse shadow-xs">
+      <div className="w-12 h-12 rounded-2xl bg-[#5f6f52]/15 border border-[#5f6f52]/20 flex items-center justify-center text-[#5f6f52]">
+        <Sparkles className="w-6 h-6 animate-spin" />
+      </div>
+      <div className="space-y-2 text-center">
+        <div className="h-4 w-40 bg-slate-200 rounded-full mx-auto" />
+        <div className="h-3 w-56 bg-slate-100 rounded-full mx-auto" />
+      </div>
+    </div>
+  );
+}
 
 import {
   Menu,
@@ -82,6 +98,7 @@ function AppContent() {
   const { user, profile, loading, logout, systemPolicies } = useAuth();
   const { t, language, aiLanguage, setLanguage, setAiLanguage } = useLanguage();
   const [documents, setDocuments] = useState<SavedDocument[]>([]);
+  const [isDocsLoading, setIsDocsLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'create' | 'view' | 'admin' | 'settings' | 'resources' | 'collaboration' | 'voice-notes' | 'tutor' | 'assessment-generator' | 'file-library' | 'image-studio' | 'video-studio' | 'performance' | 'phonetics'>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [tutorResourceId, setTutorResourceId] = useState<string>('');
@@ -340,9 +357,11 @@ function AppContent() {
     if (profile.uid.startsWith('offline-sandbox-')) {
       // In offline sandbox mode, bypass Firestore snapshot completely to avoid auth/network-request-failed
       setDocuments(INITIAL_DOCUMENTS);
+      setIsDocsLoading(false);
       return;
     }
 
+    setIsDocsLoading(true);
     const docsCol = collection(db, 'documents');
     const unsubscribe = onSnapshot(docsCol, async (snapshot) => {
       if (snapshot.empty) {
@@ -356,6 +375,7 @@ function AppContent() {
             console.error('Error seeding initial documents:', e);
           }
         }
+        setIsDocsLoading(false);
       } else {
         const list: SavedDocument[] = [];
         snapshot.forEach((snapDoc) => {
@@ -370,6 +390,7 @@ function AppContent() {
         });
         setDocuments(list);
         saveCurriculumDocsToOfflineCache(list);
+        setIsDocsLoading(false);
       }
     }, (error) => {
       console.warn('Firestore snapshot notice/offline mode:', error);
@@ -379,6 +400,7 @@ function AppContent() {
       } else {
         handleFirestoreError(error, OperationType.LIST, 'documents');
       }
+      setIsDocsLoading(false);
     });
 
     return unsubscribe;
@@ -845,7 +867,17 @@ function AppContent() {
 
   // Not signed in: Show custom AuthScreen
   if (!user || !profile) {
-    return <AuthScreen />;
+    return (
+      <Suspense fallback={
+        <div className="min-h-screen bg-[#fdfbf7] flex items-center justify-center p-4">
+          <div className="w-12 h-12 rounded-2xl bg-[#5f6f52]/15 border border-[#5f6f52]/20 flex items-center justify-center text-[#5f6f52] animate-pulse">
+            <Sparkles className="w-6 h-6 animate-spin" />
+          </div>
+        </div>
+      }>
+        <AuthScreen />
+      </Suspense>
+    );
   }
 
   // Account is suspended: Block app access and display suspended screen
@@ -1062,6 +1094,20 @@ function AppContent() {
               >
                 <GraduationCap className="w-4.5 h-4.5" />
                 <span>EduNexus AI Tutor</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveTab('resources');
+                }}
+                className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
+                  activeTab === 'resources'
+                    ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
+                    : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
+                }`}
+              >
+                <Globe className="w-4.5 h-4.5 text-[#5f6f52]" />
+                <span>Global Resources & Books</span>
               </button>
 
               {!(isStudent || isParent) && (
@@ -1293,107 +1339,110 @@ function AppContent() {
 
           {/* Core App Routing views */}
           <div className="flex-1">
-            {activeTab === 'dashboard' && (
-              <Dashboard
-                documents={documents}
-                onCreateNew={startNewGeneration}
-                onOpenDoc={(doc) => {
-                  setSelectedDoc(doc);
-                  setActiveTab('view');
-                }}
-                onLoadDraft={(draft) => {
-                  setSelectedDraft(draft);
-                  setActiveTab('create');
-                }}
-                onOpenFlashcards={() => setActiveTab('resources')}
-                userRole={profile?.role}
-                notifications={notifications}
-                setNotifications={setNotifications}
-              />
-            )}
+            <Suspense fallback={<ViewLoadingFallback />}>
+              {activeTab === 'dashboard' && (
+                <Dashboard
+                  documents={documents}
+                  isLoading={isDocsLoading}
+                  onCreateNew={startNewGeneration}
+                  onOpenDoc={(doc) => {
+                    setSelectedDoc(doc);
+                    setActiveTab('view');
+                  }}
+                  onLoadDraft={(draft) => {
+                    setSelectedDraft(draft);
+                    setActiveTab('create');
+                  }}
+                  onOpenFlashcards={() => setActiveTab('resources')}
+                  userRole={profile?.role}
+                  notifications={notifications}
+                  setNotifications={setNotifications}
+                />
+              )}
 
-            {activeTab === 'create' && (
-              <DocumentCreator
-                onBack={() => {
-                  setSelectedDraft(null);
-                  setActiveTab('dashboard');
-                }}
-                onGenerate={handleGenerate}
-                isGenerating={isGenerating}
-                initialDraft={selectedDraft}
-              />
-            )}
+              {activeTab === 'create' && (
+                <DocumentCreator
+                  onBack={() => {
+                    setSelectedDraft(null);
+                    setActiveTab('dashboard');
+                  }}
+                  onGenerate={handleGenerate}
+                  isGenerating={isGenerating}
+                  initialDraft={selectedDraft}
+                />
+              )}
 
-            {activeTab === 'view' && selectedDoc && (
-              <DocumentViewer
-                document={selectedDoc}
-                onBack={() => setActiveTab('dashboard')}
-                onUpdate={handleUpdateDoc}
-                onDelete={handleDeleteDoc}
-              />
-            )}
+              {activeTab === 'view' && selectedDoc && (
+                <DocumentViewer
+                  document={selectedDoc}
+                  onBack={() => setActiveTab('dashboard')}
+                  onUpdate={handleUpdateDoc}
+                  onDelete={handleDeleteDoc}
+                />
+              )}
 
-            {activeTab === 'admin' && hasPlaybookAccess && (
-              <div className="space-y-8 animate-fadeIn">
-                {/* Admin Panel at the Top */}
-                <AdminPanel />
+              {activeTab === 'admin' && hasPlaybookAccess && (
+                <div className="space-y-8 animate-fadeIn">
+                  {/* Admin Panel at the Top */}
+                  <AdminPanel />
 
-                {/* Comprehensive Master Admin Playbook & System Directory */}
-                <AdminPlaybook />
-              </div>
-            )}
+                  {/* Comprehensive Master Admin Playbook & System Directory */}
+                  <AdminPlaybook />
+                </div>
+              )}
 
-            {activeTab === 'settings' && (
-              <Settings documents={documents} />
-            )}
+              {activeTab === 'settings' && (
+                <Settings documents={documents} />
+              )}
 
-            {activeTab === 'resources' && (
-              <GlobalResources />
-            )}
+              {activeTab === 'resources' && (
+                <GlobalResources />
+              )}
 
-            {activeTab === 'collaboration' && (
-              <CollaborationHub />
-            )}
+              {activeTab === 'collaboration' && (
+                <CollaborationHub />
+              )}
 
-            {activeTab === 'voice-notes' && (
-              <VoiceNotebook currentProfile={profile} />
-            )}
+              {activeTab === 'voice-notes' && (
+                <VoiceNotebook currentProfile={profile} />
+              )}
 
-            {activeTab === 'tutor' && (
-              <AITutor
-                documents={documents}
-                initialSelectedResourceId={tutorResourceId}
-              />
-            )}
+              {activeTab === 'tutor' && (
+                <AITutor
+                  documents={documents}
+                  initialSelectedResourceId={tutorResourceId}
+                />
+              )}
 
-            {activeTab === 'assessment-generator' && (
-              <AssessmentGenerator onBackToDashboard={() => setActiveTab('dashboard')} />
-            )}
+              {activeTab === 'assessment-generator' && (
+                <AssessmentGenerator onBackToDashboard={() => setActiveTab('dashboard')} />
+              )}
 
-            {activeTab === 'performance' && (
-              <LearnersPerformance />
-            )}
+              {activeTab === 'performance' && (
+                <LearnersPerformance />
+              )}
 
-            {activeTab === 'file-library' && (
-              <FileLibrary
-                onSelectResourceForTutor={(resourceId) => {
-                  setTutorResourceId(resourceId);
-                  setActiveTab('tutor');
-                }}
-              />
-            )}
+              {activeTab === 'file-library' && (
+                <FileLibrary
+                  onSelectResourceForTutor={(resourceId) => {
+                    setTutorResourceId(resourceId);
+                    setActiveTab('tutor');
+                  }}
+                />
+              )}
 
-            {activeTab === 'image-studio' && (
-              <ImageStudio />
-            )}
+              {activeTab === 'image-studio' && (
+                <ImageStudio />
+              )}
 
-            {activeTab === 'video-studio' && (
-              <VideoStudio />
-            )}
+              {activeTab === 'video-studio' && (
+                <VideoStudio />
+              )}
 
-            {activeTab === 'phonetics' && (
-              <VisualPhoneticsStudio />
-            )}
+              {activeTab === 'phonetics' && (
+                <VisualPhoneticsStudio />
+              )}
+            </Suspense>
           </div>
         </main>
       </div>
@@ -1833,6 +1882,21 @@ function AppContent() {
                   >
                     <GraduationCap className="w-4.5 h-4.5 text-[#5f6f52]" />
                     <span>EduNexus AI Tutor</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTab('resources');
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer w-full text-left ${
+                      activeTab === 'resources'
+                        ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
+                        : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
+                    }`}
+                  >
+                    <Globe className="w-4.5 h-4.5 text-[#5f6f52]" />
+                    <span>Global Resources & Books</span>
                   </button>
 
                   {!(isStudent || isParent) && (

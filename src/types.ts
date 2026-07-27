@@ -7,7 +7,9 @@ export type DocumentType =
   | 'formative-assessment'
   | 'summative-assessment'
   | 'pedagogy-advisor'
-  | 'flashcards';
+  | 'flashcards'
+  | 'resource'
+  | 'book';
 
 export interface Flashcard {
   id: string;
@@ -102,6 +104,8 @@ export interface SavedDocument {
   curriculum: CurriculumType;
   subject: string;
   classLevel: string;
+  gradeLevel?: string;
+  externalUrl?: string;
   topic: string;
   subTopic: string;
   duration: string;
@@ -150,6 +154,18 @@ export interface SavedDocument {
   documentLength?: 'concise' | 'standard' | 'detailed' | 'comprehensive';
   aiReview?: DocumentAIReview;
   flashcardDeck?: FlashcardDeck;
+  commentsCount?: number;
+  lastCommentAt?: string;
+  lastCommentBy?: string;
+  sideNotesMetadata?: Array<{
+    id: string;
+    selectedText: string;
+    comment: string;
+    authorName: string;
+    createdAt: string;
+    category?: string;
+    color?: string;
+  }>;
 }
 
 export interface DocumentAIReview {
@@ -344,6 +360,15 @@ export const GRADE_OPTIONS_STANDARD = [
   'Form 4 (Grade 12)'
 ];
 
+export interface CommentReply {
+  id: string;
+  authorUid: string;
+  authorName: string;
+  authorEmail: string;
+  text: string;
+  createdAt: string;
+}
+
 export interface InlineComment {
   id: string;
   docId: string;
@@ -353,6 +378,10 @@ export interface InlineComment {
   authorName: string;
   authorEmail: string;
   createdAt: string;
+  category?: 'General' | 'Pedagogical Note' | 'Question' | 'Correction' | 'Teaching Tip' | 'Differentiated Guidance';
+  color?: 'yellow' | 'green' | 'pink' | 'blue';
+  resolved?: boolean;
+  replies?: CommentReply[];
 }
 
 export interface ActivityLog {

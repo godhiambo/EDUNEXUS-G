@@ -977,4 +977,32 @@ a:focus-visible {
   color: #ffffff !important;
 }
 
+/* File Library Animations & Fluid Transitions for Dropdowns & Containers */
+.file-library-header {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.file-library-header select,
+.file-library-header input,
+.file-library-header button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.file-library-header select:hover,
+.file-library-header select:focus {
+  transform: translateY(-1px);
+  border-color: #5f6f52;
+  box-shadow: 0 4px 14px rgba(95, 111, 82, 0.15);
+}
+
+.file-library-list-container {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform, opacity;
+}
+
+.file-card-item {
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s ease, opacity 0.2s ease;
+}
+
+
 

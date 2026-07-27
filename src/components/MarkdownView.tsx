@@ -1,5 +1,7 @@
 import React from 'react';
+import { motion } from 'motion/react';
 import { slugifyHeading } from '../utils/toc';
+import { ACADEMIC_VOCAB_MAP } from '../data/academicVocabData';
 import { 
   Sparkles, 
   Smile, 
@@ -18,6 +20,30 @@ import { MermaidDiagram } from './MermaidDiagram';
 import { ParagraphReaction } from '../types';
 import { useAccessibility } from '../context/AccessibilityContext';
 import QuickEmbedCard from './QuickEmbedCard';
+
+const staggerContainerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.055,
+      delayChildren: 0.05,
+    },
+  },
+};
+
+const blockItemVariants = {
+  hidden: { opacity: 0, y: 14, scale: 0.99 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: {
+      duration: 0.38,
+      ease: [0.16, 1, 0.3, 1],
+    },
+  },
+};
 
 interface ConceptLink {
   concept: string;
@@ -387,7 +413,10 @@ const ParagraphWithReactions: React.FC<ParagraphWithReactionsProps> = ({
   }, [isCurrentlySpoken, wordTokens, activeTokenIndex, sentenceRanges, finalActiveIndex, renderedContent]);
 
   return (
-    <div className={`group/para relative my-3 px-2 py-1.5 -mx-2 rounded-lg transition-all duration-200 ${isCurrentlySpoken ? 'bg-amber-50/75 border border-amber-200/60 shadow-xs scale-[1.005] ring-2 ring-amber-200/20' : 'hover:bg-slate-50/50'}`}>
+    <motion.div
+      variants={blockItemVariants}
+      className={`group/para relative my-3 px-2 py-1.5 -mx-2 rounded-lg transition-all duration-200 ${isCurrentlySpoken ? 'bg-amber-50/75 border border-amber-200/60 shadow-xs scale-[1.005] ring-2 ring-amber-200/20' : 'hover:bg-slate-50/50'}`}
+    >
       <div className={`text-slate-700 leading-relaxed relative ${alignmentClass} ${boldClass} ${italicClass}`}>
         {onSpeakText && (
           <button
@@ -477,7 +506,7 @@ const ParagraphWithReactions: React.FC<ParagraphWithReactionsProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -503,6 +532,8 @@ interface MarkdownViewProps {
   currentSpeechCharIndex?: number;
   isDyslexiaMode?: boolean;
   annotations?: any[];
+  highlightAcademicVocab?: boolean;
+  onAcademicVocabClick?: (term: string, pos: { x: number; y: number }) => void;
 }
 
 function parseImageParams(urlStr: string, altStr: string) {
@@ -611,7 +642,9 @@ function MarkdownView({
   currentlySpokenText,
   currentSpeechCharIndex = 0,
   isDyslexiaMode = false,
-  annotations = []
+  annotations = [],
+  highlightAcademicVocab = false,
+  onAcademicVocabClick
 }: MarkdownViewProps) {
   const [selectedModels, setSelectedModels] = React.useState<Record<string, string>>({});
 
@@ -674,7 +707,7 @@ function MarkdownView({
       const model = selectedModels[placeholderText] || 'nano banana';
 
       elements.push(
-        <div key={`diagram-${keyCount}`} className="my-6 p-5 bg-gradient-to-br from-emerald-50/50 to-amber-50/50 rounded-2xl border border-emerald-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-5 animate-fadeIn">
+        <motion.div key={`diagram-${keyCount}`} variants={blockItemVariants} className="my-6 p-5 bg-gradient-to-br from-emerald-50/50 to-amber-50/50 rounded-2xl border border-emerald-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-5 animate-fadeIn">
           <div className="space-y-1.5 flex-1">
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#5f6f52]/10 text-[#5f6f52] border border-[#5f6f52]/20">
               <Sparkles className="w-3 h-3 animate-pulse text-[#5f6f52]" />
@@ -722,7 +755,7 @@ function MarkdownView({
               <span className="text-xs text-slate-400 italic font-medium">Use viewer actions to generate</span>
             )}
           </div>
-        </div>
+        </motion.div>
       );
       i++;
       continue;
@@ -739,7 +772,11 @@ function MarkdownView({
         const textAlignClass = align === 'left' ? 'text-left' : align === 'right' ? 'text-right' : 'text-center';
 
         elements.push(
-          <div key={`img-${keyCount}`} className={`my-6 flex ${justifyClass} w-full`}>
+          <motion.div
+            key={`img-${keyCount}`}
+            variants={blockItemVariants}
+            className={`my-6 flex ${justifyClass} w-full`}
+          >
             <div className={`space-y-2 max-w-full ${textAlignClass}`} style={{ width: width, maxWidth: '100%' }}>
               <div className="inline-block rounded-2xl border border-[#e5e1da] overflow-hidden shadow-sm bg-white p-2 w-full">
                 <DbImageRefLoader
@@ -754,7 +791,7 @@ function MarkdownView({
                 </p>
               )}
             </div>
-          </div>
+          </motion.div>
         );
         i++;
         continue;
@@ -774,20 +811,28 @@ function MarkdownView({
       
       if (codeType === 'mermaid') {
         elements.push(
-          <div key={`mermaid-wrapper-${keyCount}`} className="my-6">
+          <motion.div
+            key={`mermaid-wrapper-${keyCount}`}
+            variants={blockItemVariants}
+            className="my-6"
+          >
             <div className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#5f6f52]/10 border border-[#5f6f52]/20 rounded-t-xl text-[10px] font-bold text-[#5f6f52] w-fit font-mono select-none">
               <span>📊 Visual Lesson Diagram / Concept Map</span>
             </div>
             <div className="border border-t-0 border-slate-200 rounded-b-xl bg-slate-50/50 p-2">
               <MermaidDiagram chart={codeLines.join('\n')} />
             </div>
-          </div>
+          </motion.div>
         );
       } else {
         elements.push(
-          <pre key={`code-${keyCount}`} className="bg-gray-50 border border-gray-200 text-gray-800 rounded-lg p-4 font-mono text-xs overflow-x-auto my-4 shadow-sm">
+          <motion.pre
+            key={`code-${keyCount}`}
+            variants={blockItemVariants}
+            className="bg-gray-50 border border-gray-200 text-gray-800 rounded-lg p-4 font-mono text-xs overflow-x-auto my-4 shadow-sm"
+          >
             <code>{codeLines.join('\n')}</code>
-          </pre>
+          </motion.pre>
         );
       }
       continue;
@@ -814,7 +859,11 @@ function MarkdownView({
       const dataRows = tableLines.slice(2).map((row) => parseRow(row));
 
       elements.push(
-        <div key={`table-wrapper-${keyCount}`} className="overflow-x-auto my-6 border border-slate-200/80 rounded-xl shadow-xs bg-white">
+        <motion.div
+          key={`table-wrapper-${keyCount}`}
+          variants={blockItemVariants}
+          className="overflow-x-auto my-6 border border-slate-200/80 rounded-xl shadow-xs bg-white"
+        >
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50/75 font-sans">
               <tr>
@@ -840,7 +889,7 @@ function MarkdownView({
               ))}
             </tbody>
           </table>
-        </div>
+        </motion.div>
       );
       continue;
     }
@@ -917,7 +966,11 @@ function MarkdownView({
       }
 
       elements.push(
-        <div key={`quote-${keyCount}`} className={calloutClass}>
+        <motion.div
+          key={`quote-${keyCount}`}
+          variants={blockItemVariants}
+          className={calloutClass}
+        >
           {titleText && (
             <div className="flex items-center gap-2 font-bold text-xs uppercase tracking-wider mb-2 select-none">
               {icon}
@@ -929,7 +982,7 @@ function MarkdownView({
               <p key={`qp-${qIdx}`}>{renderInline(ql)}</p>
             ) : null)}
           </div>
-        </div>
+        </motion.div>
       );
       continue;
     }
@@ -940,10 +993,15 @@ function MarkdownView({
       const { icon, extraStyle } = getHeadingIconAndStyle(headerText);
       const headingId = slugifyHeading(headerText) || `heading-${keyCount}`;
       elements.push(
-        <h4 id={headingId} key={`h3-${keyCount}`} className={`font-sans font-semibold text-base mt-6 mb-3 flex items-center gap-2 tracking-tight ${extraStyle || 'text-slate-800'}`}>
+        <motion.h4
+          id={headingId}
+          key={`h3-${keyCount}`}
+          variants={blockItemVariants}
+          className={`font-sans font-semibold text-base mt-6 mb-3 flex items-center gap-2 tracking-tight ${extraStyle || 'text-slate-800'}`}
+        >
           {icon || <span className="w-1 h-3.5 bg-slate-300 rounded-xs inline-block mr-0.5"></span>}
           <span>{renderInline(headerText)}</span>
-        </h4>
+        </motion.h4>
       );
       i++;
       continue;
@@ -953,10 +1011,15 @@ function MarkdownView({
       const { icon, extraStyle } = getHeadingIconAndStyle(headerText);
       const headingId = slugifyHeading(headerText) || `heading-${keyCount}`;
       elements.push(
-        <h3 id={headingId} key={`h2-${keyCount}`} className={`font-sans font-bold text-lg mt-8 mb-4 pb-1 border-b border-slate-150 flex items-center gap-2 tracking-tight ${extraStyle || 'text-slate-900'}`}>
+        <motion.h3
+          id={headingId}
+          key={`h2-${keyCount}`}
+          variants={blockItemVariants}
+          className={`font-sans font-bold text-lg mt-8 mb-4 pb-1 border-b border-slate-150 flex items-center gap-2 tracking-tight ${extraStyle || 'text-slate-900'}`}
+        >
           {icon || <span className="w-1.5 h-4 bg-slate-400 rounded-sm inline-block mr-0.5"></span>}
           <span>{renderInline(headerText)}</span>
-        </h3>
+        </motion.h3>
       );
       i++;
       continue;
@@ -966,10 +1029,15 @@ function MarkdownView({
       const { icon, extraStyle } = getHeadingIconAndStyle(headerText);
       const headingId = slugifyHeading(headerText) || `heading-${keyCount}`;
       elements.push(
-        <h2 id={headingId} key={`h1-${keyCount}`} className={`font-sans font-extrabold text-2xl mt-10 mb-5 pb-2 border-b-2 border-slate-200 flex items-center gap-2.5 tracking-tight ${extraStyle || 'text-slate-950'}`}>
+        <motion.h2
+          id={headingId}
+          key={`h1-${keyCount}`}
+          variants={blockItemVariants}
+          className={`font-sans font-extrabold text-2xl mt-10 mb-5 pb-2 border-b-2 border-slate-200 flex items-center gap-2.5 tracking-tight ${extraStyle || 'text-slate-950'}`}
+        >
           {icon}
           <span>{renderInline(headerText)}</span>
-        </h2>
+        </motion.h2>
       );
       i++;
       continue;
@@ -985,16 +1053,24 @@ function MarkdownView({
       const isForcedNumbered = listStyle === 'decimal';
       elements.push(
         isForcedNumbered ? (
-          <ol key={`ol-${keyCount}`} className="list-decimal pl-6 my-4 space-y-2.5 text-slate-700">
+          <motion.ol
+            key={`ol-${keyCount}`}
+            variants={blockItemVariants}
+            className="list-decimal pl-6 my-4 space-y-2.5 text-slate-700"
+          >
             {listItems.map((item, idx) => (
               <li key={`oli-${idx}`} className="leading-relaxed hover:text-slate-900 transition-colors duration-150 pl-1">
                 {renderInline(item)}
                 <RenderConceptLinks text={item} />
               </li>
             ))}
-          </ol>
+          </motion.ol>
         ) : (
-          <ul key={`ul-${keyCount}`} className="list-none pl-1 my-4 space-y-2.5 text-slate-700">
+          <motion.ul
+            key={`ul-${keyCount}`}
+            variants={blockItemVariants}
+            className="list-none pl-1 my-4 space-y-2.5 text-slate-700"
+          >
             {listItems.map((item, idx) => (
               <li key={`li-${idx}`} className="leading-relaxed hover:text-slate-900 transition-colors duration-150 pl-5 relative">
                 <span className="absolute left-0.5 top-[0.55rem] w-1.5 h-1.5 rounded-full bg-[#5f6f52]/70 inline-block"></span>
@@ -1002,7 +1078,7 @@ function MarkdownView({
                 <RenderConceptLinks text={item} />
               </li>
             ))}
-          </ul>
+          </motion.ul>
         )
       );
       continue;
@@ -1020,7 +1096,11 @@ function MarkdownView({
       const isForcedBulleted = listStyle === 'disc';
       elements.push(
         isForcedBulleted ? (
-          <ul key={`ul-${keyCount}`} className="list-none pl-1 my-4 space-y-2.5 text-slate-700">
+          <motion.ul
+            key={`ul-${keyCount}`}
+            variants={blockItemVariants}
+            className="list-none pl-1 my-4 space-y-2.5 text-slate-700"
+          >
             {listItems.map((item, idx) => (
               <li key={`li-${idx}`} className="leading-relaxed hover:text-slate-900 transition-colors duration-150 pl-5 relative">
                 <span className="absolute left-0.5 top-[0.55rem] w-1.5 h-1.5 rounded-full bg-[#5f6f52]/70 inline-block"></span>
@@ -1028,9 +1108,13 @@ function MarkdownView({
                 <RenderConceptLinks text={item} />
               </li>
             ))}
-          </ul>
+          </motion.ul>
         ) : (
-          <ol key={`ol-${keyCount}`} className="list-none pl-1 my-4 space-y-2.5 text-slate-700">
+          <motion.ol
+            key={`ol-${keyCount}`}
+            variants={blockItemVariants}
+            className="list-none pl-1 my-4 space-y-2.5 text-slate-700"
+          >
             {listItems.map((item, idx) => (
               <li key={`oli-${idx}`} className="leading-relaxed hover:text-slate-900 transition-colors duration-150 pl-6 relative">
                 <span className="absolute left-0 top-[0.15rem] font-mono text-xs font-bold text-[#5f6f52]/80 bg-[#5f6f52]/5 border border-[#5f6f52]/10 w-4.5 h-4.5 rounded-full flex items-center justify-center select-none">
@@ -1040,7 +1124,7 @@ function MarkdownView({
                 <RenderConceptLinks text={item} />
               </li>
             ))}
-          </ol>
+          </motion.ol>
         )
       );
       continue;
@@ -1048,7 +1132,13 @@ function MarkdownView({
 
     // 7. Divider / Horizontal Rule
     if (line.trim() === '---' || line.trim() === '***') {
-      elements.push(<hr key={`hr-${keyCount}`} className="my-8 border-t-2 border-slate-200" />);
+      elements.push(
+        <motion.hr
+          key={`hr-${keyCount}`}
+          variants={blockItemVariants}
+          className="my-8 border-t-2 border-slate-200"
+        />
+      );
       i++;
       continue;
     }
@@ -1086,7 +1176,7 @@ function MarkdownView({
     
     const parts: React.ReactNode[] = [];
     let currentIndex = 0;
-    const hasHighlights = (highlightedTexts && highlightedTexts.length > 0) || (annotationHighlightedTexts && annotationHighlightedTexts.length > 0);
+    const hasHighlights = (highlightedTexts && highlightedTexts.length > 0) || (annotationHighlightedTexts && annotationHighlightedTexts.length > 0) || Boolean(highlightAcademicVocab);
 
     const parseRemaining = (subText: string, keyPrefix: string): React.ReactNode[] => {
       const boldRegex = /\*\*(.*?)\*\*/g;
@@ -1305,7 +1395,43 @@ function MarkdownView({
     const activeCommentHLs = (highlightedTexts || []).filter(h => h && h.trim().length > 3);
     const activeAnnotateHLs = (annotationHighlightedTexts || []).filter(h => h && h.trim().length > 3);
     
-    if (activeCommentHLs.length === 0 && activeAnnotateHLs.length === 0) return text;
+    const processVocabText = (plainText: string, pIndex: number): React.ReactNode => {
+      if (!highlightAcademicVocab || !plainText) return plainText;
+
+      const vocabKeys = Object.keys(ACADEMIC_VOCAB_MAP).sort((a, b) => b.length - a.length);
+      const pattern = `\\b(${vocabKeys.join('|')})\\b`;
+      const vocabRegex = new RegExp(pattern, 'gi');
+
+      const subParts = plainText.split(vocabRegex);
+      if (subParts.length <= 1) return plainText;
+
+      return subParts.map((sub, sIdx) => {
+        const lowerKey = sub.toLowerCase();
+        if (ACADEMIC_VOCAB_MAP[lowerKey]) {
+          return (
+            <mark
+              key={`vocab-${pIndex}-${sIdx}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const rect = e.currentTarget.getBoundingClientRect();
+                onAcademicVocabClick?.(sub, { x: rect.left, y: rect.bottom + 5 });
+              }}
+              className="bg-indigo-100/90 text-indigo-950 dark:bg-indigo-950 dark:text-indigo-200 px-1 py-0.5 rounded cursor-pointer font-bold border-b-2 border-indigo-400 hover:bg-indigo-200 hover:border-indigo-600 transition-all inline-flex items-center gap-0.5 group/vocab shadow-2xs mx-0.5"
+              title={`Academic Vocabulary: Click for definition of "${sub}"`}
+            >
+              <span className="text-[9px] text-indigo-600 dark:text-indigo-400 group-hover/vocab:scale-125 transition-transform">✨</span>
+              <span>{sub}</span>
+            </mark>
+          );
+        }
+        return sub;
+      });
+    };
+
+    if (activeCommentHLs.length === 0 && activeAnnotateHLs.length === 0) {
+      return processVocabText(text, 0);
+    }
 
     const escapeRegExp = (str: string) => {
       return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1372,7 +1498,7 @@ function MarkdownView({
           </mark>
         );
       }
-      return part;
+      return processVocabText(part, index);
     });
   }
 
@@ -1381,7 +1507,17 @@ function MarkdownView({
     fontFamily === 'font-mono' ? 'font-mono' :
     fontFamily === 'font-cursive' ? 'font-handwritten' : 'font-sans';
 
-  return <div className={`markdown-body ${fontClass} text-slate-800`}>{elements}</div>;
+  return (
+    <motion.div
+      key={content ? content.slice(0, 100) : 'empty'}
+      initial="hidden"
+      animate="visible"
+      variants={staggerContainerVariants}
+      className={`markdown-body ${fontClass} text-slate-800`}
+    >
+      {elements}
+    </motion.div>
+  );
 }
 
 function DbImageRefLoader({ url, alt, className }: { url: string; alt: string; className: string }) {

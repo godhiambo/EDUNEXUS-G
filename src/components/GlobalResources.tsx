@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { handleResponseJson } from '../utils/api';
 import { db, cleanUndefined, compressObject } from '../firebase';
-import { collection, doc, setDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs } from 'firebase/firestore';
 import { SavedDocument } from '../types';
+import { INITIAL_DOCUMENTS } from '../data/seedDocs';
 import { triggerAutoBackupIfEnabled } from '../lib/googleWorkspace';
+import { OPEN_BOOKS_CATALOG, OpenBook } from '../data/openBooksData';
+import OpenBookReaderModal from './OpenBookReaderModal';
 import {
   Search,
   Sparkles,
@@ -19,8 +23,75 @@ import {
   Compass,
   ArrowRight,
   BookmarkCheck,
-  AlertCircle
+  AlertCircle,
+  BookOpen,
+  Book,
+  X,
+  Filter,
+  User,
+  Library,
+  Tag,
+  ArrowUpDown,
+  Share2,
+  Copy,
+  Send,
+  Users,
+  Link2,
+  MessageSquare,
+  Download,
+  HardDriveDownload,
+  CheckCircle2,
+  WifiOff,
+  FileDown,
+  Gauge,
+  ChevronDown
 } from 'lucide-react';
+
+export type DifficultyLevel = 'Beginner' | 'Intermediate' | 'Advanced';
+
+export function getItemDifficulty(item: {
+  title: string;
+  gradeLevel?: string;
+  category?: string;
+  description?: string;
+  summary?: string;
+  subject?: string;
+  type?: string;
+}): DifficultyLevel {
+  const text = `${item.title || ''} ${item.gradeLevel || ''} ${item.category || ''} ${item.subject || ''} ${item.type || ''} ${item.description || ''} ${item.summary || ''}`.toLowerCase();
+  
+  if (
+    text.includes('university') ||
+    text.includes('college') ||
+    text.includes('ap ') ||
+    text.includes('advanced') ||
+    text.includes('calculus') ||
+    text.includes('philosophy') ||
+    text.includes('higher ed') ||
+    text.includes('senior school') ||
+    text.includes('form 3') ||
+    text.includes('form 4')
+  ) {
+    return 'Advanced';
+  }
+
+  if (
+    text.includes('primary') ||
+    text.includes('grade 1-') ||
+    text.includes('grade k-') ||
+    text.includes('k-5') ||
+    text.includes('k-6') ||
+    text.includes('children') ||
+    text.includes('elementary') ||
+    text.includes('beginner') ||
+    text.includes('basic') ||
+    text.includes('intro')
+  ) {
+    return 'Beginner';
+  }
+
+  return 'Intermediate';
+}
 
 interface ResourceResult {
   title: string;
@@ -33,6 +104,17 @@ interface ResourceResult {
   suggestedActivity: string;
 }
 
+interface ShareItem {
+  type: 'book' | 'resource';
+  title: string;
+  url: string;
+  subjectOrCategory: string;
+  description: string;
+  authorOrType?: string;
+  bookData?: OpenBook;
+  resourceData?: ResourceResult;
+}
+
 export default function GlobalResources() {
   const { profile } = useAuth();
   const [query, setQuery] = useState('');
@@ -43,6 +125,307 @@ export default function GlobalResources() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [savedResourceUrls, setSavedResourceUrls] = useState<string[]>([]);
   const [activeCuratedQuery, setActiveCuratedQuery] = useState<string | null>(null);
+
+  // Instant live filter states
+  const [searchFilter, setSearchFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<string>('All');
+  const [contentTypeFilter, setContentTypeFilter] = useState<'all' | 'resources' | 'books'>('all');
+  const [sortBy, setSortBy] = useState<'newest' | 'alphabetical' | 'popularity'>('newest');
+  const [selectedDifficulties, setSelectedDifficulties] = useState<DifficultyLevel[]>([]);
+  const [isDifficultyDropdownOpen, setIsDifficultyDropdownOpen] = useState(false);
+  const [selectedBookForModal, setSelectedBookForModal] = useState<OpenBook | null>(null);
+  const [savedBookIds, setSavedBookIds] = useState<string[]>([]);
+
+  // AI Recommendation States & Matching
+  const [userDocTopics, setUserDocTopics] = useState<Array<{ title: string; subject: string; topic: string; keywords: string[] }>>([]);
+  const [onlyAiRecommended, setOnlyAiRecommended] = useState<boolean>(false);
+
+  // Offline Download & Caching States
+  const [offlineDownloadedKeys, setOfflineDownloadedKeys] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('edunexus_offline_download_keys');
+      return stored ? JSON.parse(stored) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [showOfflineOnly, setShowOfflineOnly] = useState<boolean>(false);
+  const [offlineDownloadNotification, setOfflineDownloadNotification] = useState<string | null>(null);
+
+  const handleToggleOfflineDownload = (item: {
+    idOrUrl: string;
+    type: 'book' | 'resource';
+    title: string;
+    categoryOrSubject: string;
+    description: string;
+    bookData?: OpenBook;
+    resourceData?: ResourceResult;
+  }) => {
+    const isAlreadyDownloaded = offlineDownloadedKeys.includes(item.idOrUrl);
+    let updatedKeys: string[];
+
+    if (isAlreadyDownloaded) {
+      updatedKeys = offlineDownloadedKeys.filter(k => k !== item.idOrUrl);
+      setOfflineDownloadedKeys(updatedKeys);
+      localStorage.setItem('edunexus_offline_download_keys', JSON.stringify(updatedKeys));
+
+      try {
+        const storageKey = item.type === 'book' ? `edunexus_offline_book_${item.idOrUrl}` : `edunexus_offline_res_${encodeURIComponent(item.idOrUrl)}`;
+        localStorage.removeItem(storageKey);
+      } catch (e) {
+        console.warn('Error clearing offline item from local storage:', e);
+      }
+
+      setOfflineDownloadNotification(`Removed "${item.title}" from local offline storage.`);
+      setTimeout(() => setOfflineDownloadNotification(null), 3000);
+    } else {
+      updatedKeys = [...offlineDownloadedKeys, item.idOrUrl];
+      setOfflineDownloadedKeys(updatedKeys);
+      localStorage.setItem('edunexus_offline_download_keys', JSON.stringify(updatedKeys));
+
+      const payload = {
+        idOrUrl: item.idOrUrl,
+        type: item.type,
+        title: item.title,
+        categoryOrSubject: item.categoryOrSubject,
+        description: item.description,
+        savedAt: new Date().toISOString(),
+        bookData: item.bookData,
+        resourceData: item.resourceData,
+      };
+
+      try {
+        const storageKey = item.type === 'book' ? `edunexus_offline_book_${item.idOrUrl}` : `edunexus_offline_res_${encodeURIComponent(item.idOrUrl)}`;
+        localStorage.setItem(storageKey, JSON.stringify(payload));
+      } catch (e) {
+        console.warn('Error saving offline item to local storage:', e);
+      }
+
+      // Trigger browser file download as a markdown study guide for true offline access on disk
+      try {
+        const textContent = item.type === 'book'
+          ? `# ${item.title}\n\nAuthor: ${item.bookData?.author || 'Unknown'}\nSubject: ${item.categoryOrSubject}\nLicense: ${item.bookData?.license || 'Open Access'}\nPages: ${item.bookData?.pageCount || 'N/A'}\n\n## Overview & Summary\n${item.description}\n\n${(item.bookData?.chapters || []).map((ch, idx) => `### ${idx + 1}. ${ch.title}\n${ch.content}`).join('\n\n')}\n\nOffline Link: ${item.bookData?.externalUrl || ''}`
+          : `# ${item.title}\n\nCategory: ${item.categoryOrSubject}\nType: ${item.resourceData?.type || 'Teaching Aid'}\nGrade Level: ${item.resourceData?.gradeLevel || 'General'}\n\n## Description\n${item.description}\n\n## Why Teachers Love It\n${item.resourceData?.whyTeachersLoveIt || ''}\n\n## Suggested Classroom Activity\n${item.resourceData?.suggestedActivity || ''}\n\nDirect URL: ${item.idOrUrl}`;
+
+        const blob = new Blob([textContent], { type: 'text/markdown;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `${item.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_offline_guide.md`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.warn('Disk download notice:', err);
+      }
+
+      setOfflineDownloadNotification(`"${item.title}" saved to local storage & downloaded offline!`);
+      setTimeout(() => setOfflineDownloadNotification(null), 3500);
+    }
+  };
+
+  useEffect(() => {
+    const loadUserDocumentsAndTopics = async () => {
+      let docs: SavedDocument[] = [];
+      try {
+        const snap = await getDocs(collection(db, 'documents'));
+        if (!snap.empty) {
+          snap.forEach(docSnap => {
+            const data = docSnap.data() as SavedDocument;
+            if (data && (data.title || data.subject || data.topic)) {
+              docs.push({ id: docSnap.id, ...data });
+            }
+          });
+        }
+      } catch (err) {
+        console.warn("Firestore documents fetch notice for GlobalResources AI recommendations:", err);
+      }
+
+      if (docs.length === 0) {
+        try {
+          const local = JSON.parse(localStorage.getItem('edunexus_documents') || '[]');
+          if (Array.isArray(local) && local.length > 0) {
+            docs = local;
+          } else {
+            docs = INITIAL_DOCUMENTS;
+          }
+        } catch (e) {
+          docs = INITIAL_DOCUMENTS;
+        }
+      }
+
+      const topicsInfo = docs.map(d => {
+        const title = d.title || '';
+        const subject = d.subject || '';
+        const topic = d.topic || d.subTopic || '';
+        const textForKeywords = `${title} ${subject} ${topic} ${(d.tags || []).join(' ')}`.toLowerCase();
+
+        const words = Array.from(new Set(
+          textForKeywords
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length > 3 && !['grade', 'lesson', 'plan', 'curriculum', 'school', 'junior', 'senior', 'unit', 'chapter', 'study', 'guide', 'model', 'activity', 'document', 'cbc'].includes(w))
+        ));
+
+        return {
+          title,
+          subject,
+          topic,
+          keywords: words
+        };
+      });
+
+      setUserDocTopics(topicsInfo);
+    };
+
+    loadUserDocumentsAndTopics();
+  }, []);
+
+  const getAiRecommendationInfo = (
+    title: string,
+    subjectOrCat: string,
+    desc: string,
+    extraField?: string
+  ) => {
+    if (!userDocTopics || userDocTopics.length === 0) return null;
+
+    const itemText = `${title} ${subjectOrCat} ${desc} ${extraField || ''}`.toLowerCase();
+
+    for (const docTopic of userDocTopics) {
+      const docSubLower = (docTopic.subject || '').toLowerCase();
+
+      // Subject overlap match (e.g. Science, Mathematics, Language, etc)
+      const isSubjectMatch = docSubLower.length >= 3 && (
+        itemText.includes(docSubLower) ||
+        subjectOrCat.toLowerCase().includes(docSubLower) ||
+        docSubLower.includes(subjectOrCat.toLowerCase())
+      );
+
+      // Keyword match
+      const matchedKw = docTopic.keywords.find(kw => kw.length >= 4 && itemText.includes(kw));
+
+      if (matchedKw || isSubjectMatch) {
+        return {
+          isRecommended: true,
+          matchedDocTitle: docTopic.title,
+          reason: matchedKw 
+            ? `Matches "${matchedKw}" from your "${docTopic.title}" study guide` 
+            : `Aligns with your "${docTopic.subject}" lesson plan`
+        };
+      }
+    }
+
+    return null;
+  };
+
+  // Share Modal States
+  const [shareItem, setShareItem] = useState<ShareItem | null>(null);
+  const [activeShareTab, setActiveShareTab] = useState<'link' | 'hub'>('link');
+  const [shareNote, setShareNote] = useState<string>('');
+  const [copiedLink, setCopiedLink] = useState<boolean>(false);
+  const [copiedCitation, setCopiedCitation] = useState<boolean>(false);
+  const [isSharingToHub, setIsSharingToHub] = useState<boolean>(false);
+  const [shareSuccessMsg, setShareSuccessMsg] = useState<string | null>(null);
+
+  const handleCopyLink = (url: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
+  };
+
+  const handleCopyCitation = (item: ShareItem) => {
+    const citation = item.type === 'book'
+      ? `"${item.title}" by ${item.authorOrType || 'Unknown'}. Subject: ${item.subjectOrCategory}. ${item.description} Link: ${item.url}`
+      : `"${item.title}" (${item.authorOrType || 'Web Resource'}). Category: ${item.subjectOrCategory}. ${item.description} Link: ${item.url}`;
+    navigator.clipboard.writeText(citation);
+    setCopiedCitation(true);
+    setTimeout(() => setCopiedCitation(false), 2500);
+  };
+
+  const handleShareToCollaborationHub = async (item: ShareItem) => {
+    if (!profile) return;
+    setIsSharingToHub(true);
+
+    const docId = `shared-res-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+    const content = item.type === 'book'
+      ? `# ${item.title}\n\n**Type:** Open-Access Book / Textbook\n**Author:** ${item.authorOrType || 'Unknown'}\n**Subject:** ${item.subjectOrCategory}\n**Pages:** ${item.bookData?.pageCount || 'N/A'}\n\n### Summary\n${item.description}\n\n**Read/Download Link:** [${item.url}](${item.url})\n\n${shareNote ? `> **Teacher's Note:** "${shareNote}"` : ''}`
+      : `# ${item.title}\n\n**Type:** ${item.authorOrType || 'Teaching Aid / Simulator'}\n**Category:** ${item.subjectOrCategory}\n**Grade Level:** ${item.resourceData?.gradeLevel || 'General'}\n\n### Description\n${item.description}\n\n**Why Teachers Love It:** ${item.resourceData?.whyTeachersLoveIt || 'Great interactive resource'}\n**Suggested Class Activity:** ${item.resourceData?.suggestedActivity || 'Classroom demonstration or student activity'}\n\n**Direct Link:** [${item.url}](${item.url})\n\n${shareNote ? `> **Teacher's Note:** "${shareNote}"` : ''}`;
+
+    const sharedDoc: SavedDocument = {
+      id: docId,
+      title: item.title,
+      docType: item.type === 'book' ? 'book' : 'resource',
+      curriculum: 'cbc',
+      subject: item.subjectOrCategory,
+      classLevel: item.bookData?.gradeLevel || item.resourceData?.gradeLevel || 'General',
+      gradeLevel: item.bookData?.gradeLevel || item.resourceData?.gradeLevel || 'General',
+      topic: item.type === 'book' ? 'Textbook Resource' : 'Teaching Aid',
+      subTopic: '',
+      duration: '',
+      content: content,
+      createdAt: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+      tags: ['global-resources', 'shared-by-teacher', item.type, item.subjectOrCategory],
+      category: item.type === 'book' ? 'Textbooks' : 'Teaching Aids',
+      isSharedWithColleagues: true,
+      sharedByUid: profile?.uid || 'unknown',
+      sharedByName: profile?.displayName || profile?.email || 'Teacher',
+      sharedAt: new Date().toISOString(),
+      lastModifiedByUid: profile?.uid || 'unknown',
+      lastModifiedByName: profile?.displayName || 'Teacher',
+      externalUrl: item.url
+    };
+
+    try {
+      await setDoc(doc(db, 'documents', docId), cleanUndefined(compressObject(sharedDoc)));
+
+      // Local backup
+      try {
+        const existingOffline = JSON.parse(localStorage.getItem('edunexus_my_materials') || '[]');
+        existingOffline.unshift({
+          id: docId,
+          fileName: item.title,
+          fileType: item.type,
+          category: item.type === 'book' ? 'Textbooks' : 'Teaching Aids',
+          subject: item.subjectOrCategory,
+          uploadedAt: new Date().toISOString(),
+          url: item.url,
+          isShared: true,
+          sharedBy: profile?.displayName || 'Teacher'
+        });
+        localStorage.setItem('edunexus_my_materials', JSON.stringify(existingOffline));
+      } catch (err) {
+        console.warn("Local storage fallback notice:", err);
+      }
+
+      setIsSharingToHub(false);
+      setShareSuccessMsg("Resource successfully published to Collaboration Hub!");
+      setTimeout(() => {
+        setShareSuccessMsg(null);
+        setShareItem(null);
+        setShareNote('');
+      }, 2000);
+    } catch (err) {
+      console.error("Error publishing resource to Collaboration Hub:", err);
+      setIsSharingToHub(false);
+      setShareSuccessMsg("Resource saved locally to Collaboration Hub!");
+      setTimeout(() => {
+        setShareSuccessMsg(null);
+        setShareItem(null);
+        setShareNote('');
+      }, 2000);
+    }
+  };
+
+  const handleSubjectTagClick = (subjectTag: string) => {
+    if (searchFilter.trim().toLowerCase() === subjectTag.trim().toLowerCase()) {
+      setSearchFilter('');
+    } else {
+      setSearchFilter(subjectTag);
+    }
+  };
 
   useEffect(() => {
     const handleNavigation = (e: Event) => {
@@ -251,6 +634,208 @@ ${resource.suggestedActivity}
     }
   };
 
+  const handleImportBookToMaterials = async (book: OpenBook) => {
+    if (isStudent) {
+      alert("Permission Denied: Students are restricted from adding materials.");
+      return;
+    }
+
+    try {
+      const docId = `doc-book-${book.id}-${Date.now()}`;
+      const chapterPreviews = book.chapters
+        .map((c) => `### ${c.title}\n\n${c.content}`)
+        .join('\n\n---\n\n');
+
+      const markdownContent = `# 📖 ${book.title}
+* **Author:** ${book.author}
+* **Category:** ${book.category}
+* **Subject:** ${book.subject}
+* **Grade / Target Level:** ${book.gradeLevel}
+* **License:** ${book.license}
+* **Source:** [Access Open Textbook / Gutenberg](${book.externalUrl})
+
+---
+
+### 📝 Summary
+${book.summary}
+
+---
+
+## 📚 Book Chapters & Content Preview
+
+${chapterPreviews}
+
+---
+*Imported via EduNexus Global Teaching Resources & Open Books Library.*`;
+
+      const newDoc: SavedDocument = {
+        id: docId,
+        title: `📚 Book: ${book.title}`,
+        docType: 'lesson-notes',
+        curriculum: 'standard',
+        subject: book.subject.includes('Math') || book.subject.includes('STEM') ? 'STEM' : 'English',
+        classLevel: book.gradeLevel,
+        topic: book.title,
+        subTopic: book.category,
+        duration: `${book.pageCount} pages`,
+        content: markdownContent,
+        createdAt: new Date().toISOString(),
+        lastModified: new Date().toISOString(),
+        tags: ['Open Book', book.category, book.subject, 'Imported']
+      };
+
+      await setDoc(doc(db, 'documents', docId), cleanUndefined(compressObject(newDoc)));
+      triggerAutoBackupIfEnabled(newDoc);
+
+      const initialVersionId = `v-1-${Date.now()}`;
+      const initialVersion = {
+        id: initialVersionId,
+        docId: docId,
+        title: newDoc.title,
+        content: newDoc.content,
+        lastModified: newDoc.createdAt,
+        modifiedByUid: profile?.uid || 'system',
+        modifiedByName: profile?.displayName || 'Open Books Library',
+        modifiedByEmail: profile?.email || '',
+        versionNumber: 1
+      };
+      await setDoc(doc(db, 'documents', docId, 'versions', initialVersionId), cleanUndefined(compressObject(initialVersion)));
+
+      setSavedBookIds(prev => [...prev, book.id]);
+    } catch (err: any) {
+      console.error('Error importing open book:', err);
+      alert('Failed to save book to materials: ' + err.message);
+    }
+  };
+
+  // Compute live filtered resources and books
+  const filterTerm = searchFilter.trim().toLowerCase();
+
+  const rawFilteredResources = resources.filter(res => {
+    if (contentTypeFilter === 'books') return false;
+
+    if (categoryFilter !== 'All') {
+      const typeLower = res.type.toLowerCase();
+      const catLower = res.category.toLowerCase();
+      const descLower = res.description.toLowerCase();
+
+      if (categoryFilter === 'PDFs') {
+        const isPdf = typeLower.includes('pdf') || typeLower.includes('worksheet') || typeLower.includes('printable') || descLower.includes('pdf') || descLower.includes('worksheet') || descLower.includes('printable');
+        if (!isPdf) return false;
+      } else if (categoryFilter === 'Interactive') {
+        const isInteractive = typeLower.includes('interactive') || typeLower.includes('sim') || typeLower.includes('game') || descLower.includes('interactive') || descLower.includes('simulation');
+        if (!isInteractive) return false;
+      } else if (categoryFilter === 'Videos') {
+        const isVideo = typeLower.includes('video') || typeLower.includes('audio') || typeLower.includes('media') || descLower.includes('video') || descLower.includes('audio') || descLower.includes('podcast');
+        if (!isVideo) return false;
+      } else if (categoryFilter === 'Lesson Plans') {
+        const isLesson = typeLower.includes('lesson') || typeLower.includes('plan') || typeLower.includes('guide') || descLower.includes('lesson plan') || descLower.includes('strategy');
+        if (!isLesson) return false;
+      } else if (categoryFilter === 'Books') {
+        const isBook = typeLower.includes('book') || typeLower.includes('reading') || typeLower.includes('article') || descLower.includes('book') || descLower.includes('literature');
+        if (!isBook) return false;
+      }
+    }
+
+    if (selectedDifficulties.length > 0) {
+      const diff = getItemDifficulty(res);
+      if (!selectedDifficulties.includes(diff)) return false;
+    }
+
+    if (showOfflineOnly) {
+      if (!offlineDownloadedKeys.includes(res.url)) return false;
+    }
+
+    if (onlyAiRecommended) {
+      const rec = getAiRecommendationInfo(res.title, res.category, res.description, res.type);
+      if (!rec) return false;
+    }
+
+    if (!filterTerm) return true;
+    return (
+      res.title.toLowerCase().includes(filterTerm) ||
+      res.category.toLowerCase().includes(filterTerm) ||
+      res.type.toLowerCase().includes(filterTerm) ||
+      res.description.toLowerCase().includes(filterTerm) ||
+      res.whyTeachersLoveIt.toLowerCase().includes(filterTerm) ||
+      res.suggestedActivity.toLowerCase().includes(filterTerm) ||
+      res.gradeLevel.toLowerCase().includes(filterTerm)
+    );
+  });
+
+  const rawFilteredBooks = OPEN_BOOKS_CATALOG.filter(book => {
+    if (contentTypeFilter === 'resources') return false;
+
+    if (categoryFilter !== 'All') {
+      if (categoryFilter === 'Interactive' || categoryFilter === 'Videos') {
+        return false;
+      }
+      if (categoryFilter === 'Lesson Plans') {
+        const isLesson = book.category.toLowerCase().includes('lesson') || book.summary.toLowerCase().includes('lesson') || book.subject.toLowerCase().includes('lesson');
+        if (!isLesson) return false;
+      }
+    }
+
+    if (selectedDifficulties.length > 0) {
+      const diff = getItemDifficulty(book);
+      if (!selectedDifficulties.includes(diff)) return false;
+    }
+
+    if (showOfflineOnly) {
+      if (!offlineDownloadedKeys.includes(book.id)) return false;
+    }
+
+    if (onlyAiRecommended) {
+      const rec = getAiRecommendationInfo(book.title, book.subject, book.summary, book.author);
+      if (!rec) return false;
+    }
+
+    if (!filterTerm) return true;
+    return (
+      book.title.toLowerCase().includes(filterTerm) ||
+      book.author.toLowerCase().includes(filterTerm) ||
+      book.subject.toLowerCase().includes(filterTerm) ||
+      book.category.toLowerCase().includes(filterTerm) ||
+      book.summary.toLowerCase().includes(filterTerm) ||
+      book.gradeLevel.toLowerCase().includes(filterTerm)
+    );
+  });
+
+  // Apply sorting ('newest', 'alphabetical', 'popularity')
+  const filteredResources = [...rawFilteredResources].sort((a, b) => {
+    if (sortBy === 'alphabetical') {
+      return a.title.localeCompare(b.title);
+    }
+    if (sortBy === 'popularity') {
+      const getPopularityScore = (res: ResourceResult) => {
+        let score = 0;
+        const lower = (res.title + ' ' + res.description + ' ' + res.category + ' ' + res.type + ' ' + res.whyTeachersLoveIt).toLowerCase();
+        if (lower.includes('phet') || lower.includes('khan academy') || lower.includes('nasa') || lower.includes('smithsonian')) score += 50;
+        if (lower.includes('interactive') || lower.includes('simulation') || lower.includes('openstax')) score += 30;
+        if (lower.includes('lesson plan') || lower.includes('worksheet') || lower.includes('lab')) score += 20;
+        if (lower.includes('stem') || lower.includes('math') || lower.includes('science')) score += 10;
+        return score;
+      };
+      return getPopularityScore(b) - getPopularityScore(a);
+    }
+    return 0; // 'newest' keeps original loaded array order
+  });
+
+  const filteredBooks = [...rawFilteredBooks].sort((a, b) => {
+    if (sortBy === 'alphabetical') {
+      return a.title.localeCompare(b.title);
+    }
+    if (sortBy === 'popularity') {
+      const getBookPopularity = (book: OpenBook) => {
+        let score = (book.gutenbergId ? 100 : 50) + Math.min(book.pageCount, 500);
+        if (book.category === 'Literature & Classics' || book.category === 'STEM & Textbooks') score += 40;
+        return score;
+      };
+      return getBookPopularity(b) - getBookPopularity(a);
+    }
+    return 0; // 'newest' keeps default catalog order
+  });
+
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 animate-fadeIn space-y-8" id="global-resources-tab">
       
@@ -283,10 +868,10 @@ ${resource.suggestedActivity}
               <button
                 key={topic.title}
                 onClick={() => handleCuratedClick(topic)}
-                className={`text-left p-5 rounded-2xl border transition-all duration-300 cursor-pointer flex flex-col justify-between group h-36 ${
+                className={`text-left p-5 rounded-2xl border transition-all duration-300 transform hover:-translate-y-1 hover:scale-[1.02] hover:shadow-lg cursor-pointer flex flex-col justify-between group h-36 ${
                   isActive
-                    ? 'bg-emerald-50 border-emerald-300 ring-2 ring-emerald-500/10'
-                    : 'bg-white border-slate-150 hover:border-[#5f6f52] hover:shadow-sm'
+                    ? 'bg-emerald-50 border-emerald-300 ring-2 ring-emerald-500/10 shadow-sm'
+                    : 'bg-white border-slate-150 hover:border-[#5f6f52]'
                 }`}
               >
                 <div>
@@ -309,13 +894,338 @@ ${resource.suggestedActivity}
 
       {/* Search Input and Filters Area */}
       <div className="bg-white rounded-3xl border border-slate-150 p-6 shadow-xs space-y-6">
-        <form onSubmit={(e) => { e.preventDefault(); handleSearch(); }} className="space-y-4">
-          
+        
+        {/* Quick Filter Bar */}
+        <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <label className="text-xs font-extrabold uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
+              <Filter className="w-4 h-4 text-emerald-700" />
+              <span>Quick Search & Filter Available Resources & Books</span>
+            </label>
+            <div className="flex items-center gap-3">
+              {/* Sorting Dropdown */}
+              <div className="flex items-center gap-1.5 bg-white border border-emerald-200/90 rounded-xl px-2.5 py-1 shadow-2xs">
+                <ArrowUpDown className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                <label htmlFor="resource-sort-dropdown" className="text-xs font-bold text-slate-600 shrink-0">
+                  Sort:
+                </label>
+                <select
+                  id="resource-sort-dropdown"
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as 'newest' | 'alphabetical' | 'popularity')}
+                  className="bg-transparent text-slate-800 text-xs font-bold focus:outline-none cursor-pointer pr-1"
+                >
+                  <option value="newest">Newest</option>
+                  <option value="alphabetical">Alphabetical</option>
+                  <option value="popularity">Popularity</option>
+                </select>
+              </div>
+
+              {/* Difficulty Level Multi-Select Dropdown */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsDifficultyDropdownOpen(!isDifficultyDropdownOpen)}
+                  className={`flex items-center gap-1.5 border rounded-xl px-2.5 py-1 text-xs font-bold transition shadow-2xs cursor-pointer ${
+                    selectedDifficulties.length > 0
+                      ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-500/20'
+                      : 'bg-white text-slate-700 border-emerald-200/90 hover:bg-slate-50'
+                  }`}
+                  title="Filter resources by difficulty level"
+                >
+                  <Gauge className={`w-3.5 h-3.5 ${selectedDifficulties.length > 0 ? 'text-white' : 'text-emerald-700'}`} />
+                  <span>
+                    Difficulty: {selectedDifficulties.length === 0 ? 'All Levels' : selectedDifficulties.join(', ')}
+                  </span>
+                  <ChevronDown className={`w-3 h-3 transition-transform ${isDifficultyDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                <AnimatePresence>
+                  {isDifficultyDropdownOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-20 cursor-default"
+                        onClick={() => setIsDifficultyDropdownOpen(false)}
+                      />
+                      <motion.div
+                        initial={{ opacity: 0, y: 6, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 6, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute right-0 mt-2 w-56 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-2.5 space-y-1"
+                      >
+                        <div className="flex items-center justify-between pb-2 mb-1 border-b border-slate-100 px-1">
+                          <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600 flex items-center gap-1">
+                            <Gauge className="w-3.5 h-3.5 text-emerald-600" /> Difficulty Level
+                          </span>
+                          {selectedDifficulties.length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedDifficulties([])}
+                              className="text-[10px] font-bold text-emerald-700 hover:underline cursor-pointer"
+                            >
+                              Reset
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedDifficulties(['Beginner', 'Intermediate', 'Advanced'])}
+                              className="text-[10px] font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
+                            >
+                              Select All
+                            </button>
+                          )}
+                        </div>
+
+                        {(['Beginner', 'Intermediate', 'Advanced'] as DifficultyLevel[]).map((level) => {
+                          const isChecked = selectedDifficulties.includes(level);
+                          const levelColors = {
+                            Beginner: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+                            Intermediate: 'text-amber-700 bg-amber-50 border-amber-200',
+                            Advanced: 'text-purple-700 bg-purple-50 border-purple-200'
+                          };
+                          return (
+                            <button
+                              key={level}
+                              type="button"
+                              onClick={() => {
+                                if (isChecked) {
+                                  setSelectedDifficulties(selectedDifficulties.filter(d => d !== level));
+                                } else {
+                                  setSelectedDifficulties([...selectedDifficulties, level]);
+                                }
+                              }}
+                              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                                isChecked
+                                  ? 'bg-emerald-50/80 text-emerald-950 font-extrabold'
+                                  : 'text-slate-700 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                                  isChecked
+                                    ? 'bg-emerald-600 border-emerald-600 text-white'
+                                    : 'border-slate-300 bg-white'
+                                }`}>
+                                  {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
+                                </div>
+                                <span>{level}</span>
+                              </div>
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full border ${levelColors[level]}`}>
+                                {level}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {(searchFilter || categoryFilter !== 'All' || contentTypeFilter !== 'all' || sortBy !== 'newest' || onlyAiRecommended || showOfflineOnly || selectedDifficulties.length > 0) && (
+                <button
+                  onClick={() => {
+                    setSearchFilter('');
+                    setCategoryFilter('All');
+                    setContentTypeFilter('all');
+                    setSortBy('newest');
+                    setOnlyAiRecommended(false);
+                    setShowOfflineOnly(false);
+                    setSelectedDifficulties([]);
+                  }}
+                  className="text-xs text-slate-500 hover:text-slate-800 font-semibold flex items-center gap-1 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" /> Clear Filters
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="relative">
+            <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-emerald-700">
+              <Search className="w-4.5 h-4.5" />
+            </span>
+            <input
+              type="text"
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+              placeholder="Type title, subject, or author to filter instantly (e.g., Algebra, Alice, Physics, PhET)..."
+              className="w-full bg-white border border-emerald-200 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/10 text-sm text-slate-800 pl-10 pr-10 py-2.5 rounded-xl transition focus:outline-none placeholder:text-slate-400 font-medium shadow-2xs"
+            />
+            {searchFilter && (
+              <button
+                onClick={() => setSearchFilter('')}
+                className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {searchFilter && (
+            <div className="flex items-center gap-2 pt-1 text-xs">
+              <span className="font-bold text-emerald-950 flex items-center gap-1">
+                <Tag className="w-3.5 h-3.5 text-emerald-700" /> Active Subject Tag Filter:
+              </span>
+              <span className="bg-emerald-700 text-white px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1.5 text-xs shadow-2xs">
+                <span>{searchFilter}</span>
+                <button
+                  type="button"
+                  onClick={() => setSearchFilter('')}
+                  className="hover:bg-emerald-800 rounded-full p-0.5 cursor-pointer transition-colors"
+                  title="Clear subject filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            </div>
+          )}
+
+          {selectedDifficulties.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+              <span className="font-bold text-emerald-950 flex items-center gap-1">
+                <Gauge className="w-3.5 h-3.5 text-emerald-700" /> Active Difficulty Filters:
+              </span>
+              {selectedDifficulties.map((level) => (
+                <span
+                  key={level}
+                  className="bg-emerald-700 text-white px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1.5 text-xs shadow-2xs"
+                >
+                  <span>{level}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDifficulties(selectedDifficulties.filter(d => d !== level))}
+                    className="hover:bg-emerald-800 rounded-full p-0.5 cursor-pointer transition-colors"
+                    title={`Remove ${level} filter`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Section Source Toggle Pills */}
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <span className="text-[11px] font-bold text-slate-500 mr-1">Show:</span>
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.94 }}
+              onClick={() => setContentTypeFilter('all')}
+              className={`px-3 py-1 rounded-full text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                contentTypeFilter === 'all'
+                  ? 'bg-[#5f6f52] text-white shadow-xs'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              <Library className="w-3.5 h-3.5" />
+              <span>All Items ({filteredResources.length + filteredBooks.length})</span>
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.94 }}
+              onClick={() => setContentTypeFilter('resources')}
+              className={`px-3 py-1 rounded-full text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                contentTypeFilter === 'resources'
+                  ? 'bg-[#5f6f52] text-white shadow-xs'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>Web Teaching Aids ({filteredResources.length})</span>
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.94 }}
+              onClick={() => setContentTypeFilter('books')}
+              className={`px-3 py-1 rounded-full text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                contentTypeFilter === 'books'
+                  ? 'bg-[#5f6f52] text-white shadow-xs'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Open-Access Books ({filteredBooks.length})</span>
+            </motion.button>
+
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.94 }}
+              onClick={() => setOnlyAiRecommended(!onlyAiRecommended)}
+              className={`px-3 py-1 rounded-full text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                onlyAiRecommended
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xs ring-2 ring-purple-400/30'
+                  : 'bg-indigo-50/90 text-indigo-900 border border-indigo-200 hover:bg-indigo-100'
+              }`}
+              title="Filter resources that match your generated lesson plans or document topics"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${onlyAiRecommended ? 'text-amber-300 fill-amber-300' : 'text-indigo-600'}`} />
+              <span>✨ AI Recommended Only</span>
+            </motion.button>
+
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.94 }}
+              onClick={() => setShowOfflineOnly(!showOfflineOnly)}
+              className={`px-3 py-1 rounded-full text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                showOfflineOnly
+                  ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-xs ring-2 ring-emerald-400/30'
+                  : 'bg-emerald-50/90 text-emerald-900 border border-emerald-200 hover:bg-emerald-100'
+              }`}
+              title="Filter resources saved to browser local storage for offline access"
+            >
+              <HardDriveDownload className={`w-3.5 h-3.5 ${showOfflineOnly ? 'text-amber-300' : 'text-emerald-700'}`} />
+              <span>Offline Saved ({offlineDownloadedKeys.length})</span>
+            </motion.button>
+          </div>
+
+          {/* Category / Format Specific Filter Pills */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-emerald-200/60">
+            <span className="text-[11px] font-bold text-slate-500 mr-1">Format Filter:</span>
+            {[
+              { id: 'All', label: 'All Formats', icon: Filter },
+              { id: 'PDFs', label: 'PDFs & Worksheets', icon: FileText },
+              { id: 'Interactive', label: 'Interactive Sims', icon: Sparkles },
+              { id: 'Videos', label: 'Videos & Media', icon: Tv },
+              { id: 'Lesson Plans', label: 'Lesson Plans', icon: Book },
+              { id: 'Books', label: 'Books & Textbooks', icon: BookOpen }
+            ].map((cat) => {
+              const IconComp = cat.icon;
+              const isActive = categoryFilter === cat.id;
+              return (
+                <motion.button
+                  key={cat.id}
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.93 }}
+                  onClick={() => setCategoryFilter(cat.id)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    isActive
+                      ? 'bg-emerald-700 text-white shadow-2xs'
+                      : 'bg-white/90 text-emerald-950 border border-emerald-200 hover:bg-emerald-100/70'
+                  }`}
+                >
+                  <IconComp className="w-3.5 h-3.5" />
+                  <span>{cat.label}</span>
+                </motion.button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Global Web Scanning Form */}
+        <form onSubmit={(e) => { e.preventDefault(); handleSearch(); }} className="space-y-4 pt-2 border-t border-slate-100">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              Scan Live Web Repositories (Gemini Grounding)
+            </span>
+          </div>
+
           <div className="flex flex-col md:flex-row gap-3">
-            {/* Search inputs */}
             <div className="relative flex-1">
               <span className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none text-slate-400">
-                <Search className="w-5 h-5" />
+                <Globe className="w-4.5 h-4.5" />
               </span>
               <input
                 type="text"
@@ -324,32 +1234,32 @@ ${resource.suggestedActivity}
                   setQuery(e.target.value);
                   setActiveCuratedQuery(null);
                 }}
-                placeholder="Describe what you want (e.g. gravity simulations, fraction word problems, reading comprehensions)..."
-                className="w-full bg-slate-50 hover:bg-slate-50/50 border border-slate-200 focus:border-[#5f6f52] focus:bg-white text-sm text-slate-800 pl-11 pr-4 py-3 rounded-2xl transition focus:outline-none"
+                placeholder="Describe topic for deep web search (e.g. gravity simulations, fraction word problems)..."
+                className="w-full bg-slate-50 hover:bg-slate-50/50 border border-slate-200 focus:border-[#5f6f52] focus:bg-white text-sm text-slate-800 pl-11 pr-4 py-2.5 rounded-2xl transition focus:outline-none"
               />
             </div>
 
             <button
               type="submit"
               disabled={isLoading || !query.trim()}
-              className="bg-[#5f6f52] hover:bg-[#4d5b41] disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold px-6 py-3 rounded-2xl transition flex items-center justify-center gap-2 shadow-sm shrink-0 cursor-pointer text-sm"
+              className="bg-[#5f6f52] hover:bg-[#4d5b41] disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold px-6 py-2.5 rounded-2xl transition flex items-center justify-center gap-2 shadow-sm shrink-0 cursor-pointer text-sm"
             >
               {isLoading ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  <span>Scanning repositories...</span>
+                  <span>Scanning...</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-4 h-4 text-[#fefae0]" />
-                  <span>Scan Globally</span>
+                  <span>Scan Web Repositories</span>
                 </>
               )}
             </button>
           </div>
 
           {/* Filters Row */}
-          <div className="flex flex-wrap gap-4 pt-2">
+          <div className="flex flex-wrap gap-4 pt-1">
             <div className="space-y-1">
               <label className="block text-[11px] font-extrabold uppercase tracking-widest text-slate-400">
                 Subject Focus
@@ -404,148 +1314,685 @@ ${resource.suggestedActivity}
 
       {/* Loading state placeholders */}
       {isLoading && (
-        <div className="space-y-6">
-          <div className="text-center py-6">
-            <Globe className="w-10 h-10 text-[#5f6f52] animate-spin mx-auto mb-3" />
-            <p className="text-sm font-bold text-slate-700">Connecting to global repository networks...</p>
-            <p className="text-xs text-slate-400 mt-1">Filtering verified teaching aids, simulators, and handouts via Gemini Search Grounding</p>
+        <div className="space-y-8 animate-fadeIn">
+          {/* Books Grid Skeleton */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+              <div className="h-5 w-48 bg-slate-200 rounded-lg animate-pulse"></div>
+              <div className="h-4 w-20 bg-slate-100 rounded-md animate-pulse"></div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="bg-white border border-slate-200 rounded-3xl p-5 space-y-3 animate-pulse">
+                  <div className="h-28 rounded-2xl bg-slate-200"></div>
+                  <div className="flex justify-between items-center">
+                    <div className="h-3 w-20 bg-slate-200 rounded-md"></div>
+                    <div className="h-3 w-16 bg-slate-100 rounded-md"></div>
+                  </div>
+                  <div className="h-5 w-4/5 bg-slate-200 rounded-lg"></div>
+                  <div className="h-3 w-2/3 bg-slate-100 rounded-md"></div>
+                  <div className="space-y-1.5 pt-1">
+                    <div className="h-3 w-full bg-slate-100 rounded-md"></div>
+                    <div className="h-3 w-5/6 bg-slate-100 rounded-md"></div>
+                  </div>
+                  <div className="pt-2">
+                    <div className="h-9 w-full bg-slate-200 rounded-xl"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="bg-slate-50 border border-slate-100 rounded-3xl p-6 space-y-4 animate-pulse">
-                <div className="flex justify-between items-start">
-                  <div className="h-6 w-1/2 bg-slate-200 rounded-xl"></div>
-                  <div className="h-5 w-16 bg-slate-200 rounded-full"></div>
+
+          {/* Resources Grid Skeleton */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+              <div className="h-5 w-56 bg-slate-200 rounded-lg animate-pulse"></div>
+              <div className="h-4 w-24 bg-slate-100 rounded-md animate-pulse"></div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4 animate-pulse">
+                  <div className="flex justify-between items-start">
+                    <div className="flex gap-2">
+                      <div className="h-5 w-20 bg-slate-200 rounded-full"></div>
+                      <div className="h-5 w-16 bg-slate-100 rounded-full"></div>
+                    </div>
+                    <div className="h-5 w-24 bg-slate-200 rounded-full"></div>
+                  </div>
+                  <div className="h-6 w-3/4 bg-slate-200 rounded-lg"></div>
+                  <div className="space-y-2">
+                    <div className="h-3 w-full bg-slate-100 rounded-lg"></div>
+                    <div className="h-3 w-5/6 bg-slate-100 rounded-lg"></div>
+                  </div>
+                  <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
+                    <div className="h-4 w-28 bg-slate-200 rounded-lg"></div>
+                    <div className="flex gap-2">
+                      <div className="h-8 w-20 bg-slate-200 rounded-xl"></div>
+                      <div className="h-8 w-24 bg-slate-200 rounded-xl"></div>
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <div className="h-3 w-full bg-slate-200 rounded-lg"></div>
-                  <div className="h-3 w-5/6 bg-slate-200 rounded-lg"></div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RESULTS GRID WITH SMOOTH SLIDE-IN ANIMATION */}
+      {!isLoading && (
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={`${searchFilter.trim().toLowerCase()}_${categoryFilter}_${contentTypeFilter}_${showOfflineOnly}_${onlyAiRecommended}_${sortBy}_${selectedDifficulties.join(',')}`}
+            initial={{ opacity: 0, x: 28, filter: 'blur(3px)' }}
+            animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
+            exit={{ opacity: 0, x: -28, filter: 'blur(3px)' }}
+            transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+            className="space-y-8"
+          >
+            {/* OPEN-ACCESS BOOKS SECTION */}
+            {(contentTypeFilter === 'all' || contentTypeFilter === 'books') && filteredBooks.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                  <h3 className="text-sm font-extrabold uppercase tracking-wider text-amber-900 flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-amber-700" />
+                    <span>Open-Access Textbooks & Classic Books ({filteredBooks.length})</span>
+                  </h3>
+                  <span className="text-xs text-slate-400 font-medium">Free Public Domain & CC Licensed</span>
                 </div>
-                <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
-                  <div className="h-4 w-24 bg-slate-200 rounded-lg"></div>
-                  <div className="h-8 w-28 bg-slate-200 rounded-xl"></div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {filteredBooks.map((book, idx) => {
+                    const isSaved = savedBookIds.includes(book.id);
+                    const recInfo = getAiRecommendationInfo(book.title, book.subject, book.summary, book.author);
+                    const bookDifficulty = getItemDifficulty(book);
+                    const difficultyColors = {
+                      Beginner: 'bg-emerald-50 text-emerald-800 border-emerald-200/90',
+                      Intermediate: 'bg-amber-50 text-amber-900 border-amber-200/90',
+                      Advanced: 'bg-purple-50 text-purple-900 border-purple-200/90'
+                    };
+                    return (
+                      <motion.div
+                        key={book.id}
+                        initial={{ opacity: 0, y: 14, x: 10 }}
+                        animate={{ opacity: 1, y: 0, x: 0 }}
+                        transition={{ duration: 0.28, delay: Math.min(idx * 0.035, 0.22), ease: 'easeOut' }}
+                        className="bg-white border border-slate-200 hover:border-amber-400 hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02] transform transition-all duration-300 rounded-3xl p-5 flex flex-col justify-between group relative overflow-hidden"
+                      >
+                        <div className="space-y-3">
+                          {/* Cover Banner */}
+                          <div className={`bg-gradient-to-r ${book.coverBg} text-white p-4 rounded-2xl flex items-center justify-between relative overflow-hidden shadow-xs`}>
+                            <span className="text-3xl drop-shadow-sm">{book.coverEmoji}</span>
+                            <span className="text-[9px] uppercase font-bold tracking-widest bg-black/25 backdrop-blur-xs text-white px-2.5 py-1 rounded-full border border-white/20">
+                              {book.license.split(' ')[0]}
+                            </span>
+                          </div>
+
+                          {/* AI Recommendation Badge */}
+                          {recInfo && (
+                            <div className="bg-gradient-to-r from-amber-500 via-indigo-600 to-purple-600 p-[1px] rounded-2xl shadow-2xs">
+                              <div className="bg-gradient-to-r from-amber-50 via-indigo-50/90 to-purple-50 text-indigo-950 px-3 py-1.5 rounded-[15px] flex items-center justify-between gap-1.5 text-xs font-bold border border-indigo-200/60">
+                                <div className="flex items-center gap-1.5 shrink-0 text-indigo-900">
+                                  <Sparkles className="w-3.5 h-3.5 text-amber-500 fill-amber-400 animate-pulse" />
+                                  <span className="font-extrabold text-[10px] uppercase tracking-wider text-indigo-900">AI Recommended</span>
+                                </div>
+                                <span className="text-[10px] text-indigo-700 font-medium truncate max-w-[170px]" title={recInfo.reason}>
+                                  {recInfo.reason}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Metadata */}
+                          <div className="flex items-center justify-between gap-2 text-[10px] font-bold text-slate-500 flex-wrap">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <motion.button
+                                type="button"
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.92 }}
+                                onClick={() => handleSubjectTagClick(book.subject)}
+                                title={`Click to filter resources by "${book.subject}"`}
+                                className={`px-2.5 py-1 rounded-full border transition-all cursor-pointer flex items-center gap-1.5 group/pill ${
+                                  searchFilter.trim().toLowerCase() === book.subject.trim().toLowerCase()
+                                    ? 'bg-amber-700 text-white border-amber-700 shadow-xs ring-2 ring-amber-500/20'
+                                    : 'bg-amber-50 text-amber-900 border-amber-200/80 hover:bg-amber-100 hover:border-amber-300 hover:shadow-2xs'
+                                }`}
+                              >
+                                <Tag className={`w-3 h-3 text-amber-600 transition-transform ${
+                                  searchFilter.trim().toLowerCase() === book.subject.trim().toLowerCase()
+                                    ? 'text-white'
+                                    : 'group-hover/pill:scale-110'
+                                }`} />
+                                <span>{book.subject}</span>
+                              </motion.button>
+
+                              <span className={`px-2 py-0.5 rounded-full border text-[10px] font-extrabold flex items-center gap-1 ${difficultyColors[bookDifficulty]}`}>
+                                <Gauge className="w-2.5 h-2.5 shrink-0" />
+                                <span>{bookDifficulty}</span>
+                              </span>
+                            </div>
+                            <span className="text-slate-400 font-mono">{book.pageCount} pages</span>
+                          </div>
+
+                          {/* Title & Author */}
+                          <div>
+                            <h4 className="text-base font-bold text-slate-900 leading-snug group-hover:text-amber-800 transition-colors line-clamp-2">
+                              {book.title}
+                            </h4>
+                            <p className="text-xs text-slate-500 font-medium flex items-center gap-1 mt-0.5">
+                              <User className="w-3 h-3 text-slate-400 shrink-0" /> {book.author}
+                            </p>
+                          </div>
+
+                          {/* Summary */}
+                          <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed">
+                            {book.summary}
+                          </p>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="pt-4 mt-4 border-t border-slate-100 flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() => setSelectedBookForModal(book)}
+                            className="flex-1 min-w-[110px] bg-amber-600 hover:bg-amber-700 text-white rounded-xl py-2 px-3 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                          >
+                            <BookOpen className="w-3.5 h-3.5" />
+                            <span>Read / Preview</span>
+                          </button>
+
+                          <button
+                            onClick={() => handleToggleOfflineDownload({
+                              idOrUrl: book.id,
+                              type: 'book',
+                              title: book.title,
+                              categoryOrSubject: book.subject,
+                              description: book.summary,
+                              bookData: book
+                            })}
+                            className={`rounded-xl py-2 px-3 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 ${
+                              offlineDownloadedKeys.includes(book.id)
+                                ? 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300 shadow-2xs'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/80'
+                            }`}
+                            title={offlineDownloadedKeys.includes(book.id) ? "Saved in browser local storage for offline reading (Click to remove)" : "Save book content to local browser storage & download guide for offline access"}
+                          >
+                            {offlineDownloadedKeys.includes(book.id) ? (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>Offline Ready</span>
+                              </>
+                            ) : (
+                              <>
+                                <Download className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                                <span>Offline Download</span>
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setShareItem({
+                                type: 'book',
+                                title: book.title,
+                                url: book.externalUrl || window.location.href,
+                                subjectOrCategory: book.subject,
+                                description: book.summary,
+                                authorOrType: book.author,
+                                bookData: book
+                              });
+                              setShareSuccessMsg(null);
+                              setShareNote('');
+                            }}
+                            className="p-2 py-2 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 transition flex items-center justify-center gap-1 text-xs font-bold cursor-pointer shrink-0"
+                            title="Share textbook link or send to Collaboration Hub"
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                            <span>Share</span>
+                          </button>
+
+                          {!isStudent && (
+                            <button
+                              onClick={() => handleImportBookToMaterials(book)}
+                              disabled={isSaved}
+                              className={`rounded-xl py-2 px-3 text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer shrink-0 ${
+                                isSaved
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                              }`}
+                              title="Import book to My Materials"
+                            >
+                              {isSaved ? (
+                                <BookmarkCheck className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <BookmarkPlus className="w-3.5 h-3.5 text-slate-600" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </motion.div>
+                    );
+                  })}
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
+            )}
+
+            {/* WEB RESOURCES SECTION */}
+            {(contentTypeFilter === 'all' || contentTypeFilter === 'resources') && filteredResources.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                  <p className="text-sm font-bold text-slate-700 flex items-center gap-1.5">
+                    <Check className="w-4 h-4 text-emerald-600" /> Web Teaching Aids & Simulators ({filteredResources.length})
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {filteredResources.map((resItem, idx) => {
+                    const isSaved = savedResourceUrls.includes(resItem.url);
+                    const recInfo = getAiRecommendationInfo(resItem.title, resItem.category, resItem.description, resItem.type);
+                    const resDifficulty = getItemDifficulty(resItem);
+                    const resDifficultyColors = {
+                      Beginner: 'text-emerald-800 bg-emerald-50 border-emerald-200/90',
+                      Intermediate: 'text-amber-900 bg-amber-50 border-amber-200/90',
+                      Advanced: 'text-purple-900 bg-purple-50 border-purple-200/90'
+                    };
+                    return (
+                      <motion.div
+                        key={resItem.url}
+                        initial={{ opacity: 0, y: 14, x: 10 }}
+                        animate={{ opacity: 1, y: 0, x: 0 }}
+                        transition={{ duration: 0.28, delay: Math.min(idx * 0.035, 0.22), ease: 'easeOut' }}
+                        className="bg-white border border-slate-150 hover:border-emerald-300 hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02] transform transition-all duration-300 rounded-3xl p-6 flex flex-col justify-between group relative overflow-hidden"
+                      >
+                        <div className="space-y-4">
+                          {/* AI Recommendation Banner */}
+                          {recInfo && (
+                            <div className="bg-gradient-to-r from-emerald-500 via-teal-600 to-indigo-600 p-[1px] rounded-2xl shadow-2xs">
+                              <div className="bg-gradient-to-r from-emerald-50 via-teal-50/90 to-indigo-50 text-emerald-950 px-3.5 py-1.5 rounded-[15px] flex items-center justify-between gap-2 text-xs font-bold border border-emerald-200/60">
+                                <div className="flex items-center gap-1.5 shrink-0 text-emerald-900">
+                                  <Sparkles className="w-3.5 h-3.5 text-emerald-600 fill-emerald-400 animate-pulse" />
+                                  <span className="font-extrabold text-[10px] uppercase tracking-wider text-emerald-900">AI Recommended</span>
+                                </div>
+                                <span className="text-[10px] text-emerald-700 font-medium truncate max-w-[210px]" title={recInfo.reason}>
+                                  {recInfo.reason}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Tags row */}
+                          <div className="flex flex-wrap gap-2 items-center justify-between">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <motion.button
+                                type="button"
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.92 }}
+                                onClick={() => handleSubjectTagClick(resItem.category)}
+                                title={`Click to filter resources by "${resItem.category}"`}
+                                className={`text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full border transition-all cursor-pointer flex items-center gap-1.5 group/pill ${
+                                  searchFilter.trim().toLowerCase() === resItem.category.trim().toLowerCase()
+                                    ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-500/20'
+                                    : 'text-emerald-800 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-300 border-emerald-200/80 hover:shadow-2xs'
+                                }`}
+                              >
+                                <Tag className={`w-3 h-3 text-emerald-600 transition-transform ${
+                                  searchFilter.trim().toLowerCase() === resItem.category.trim().toLowerCase()
+                                    ? 'text-white'
+                                    : 'group-hover/pill:scale-110'
+                                }`} />
+                                <span>{resItem.category}</span>
+                              </motion.button>
+                              <span className="text-[10px] uppercase font-bold tracking-wider text-indigo-800 bg-indigo-50 px-2 py-1 rounded-full border border-indigo-100">
+                                {resItem.type}
+                              </span>
+                              <span className={`text-[10px] uppercase font-extrabold tracking-wider px-2 py-0.5 rounded-full border flex items-center gap-1 ${resDifficultyColors[resDifficulty]}`}>
+                                <Gauge className="w-2.5 h-2.5 shrink-0" />
+                                <span>{resDifficulty}</span>
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <GraduationCap className="w-3 h-3" /> {resItem.gradeLevel}
+                            </span>
+                          </div>
+
+                          {/* Title */}
+                          <div>
+                            <h3 className="text-base font-bold text-slate-800 leading-snug group-hover:text-[#5f6f52] transition-colors">
+                              {resItem.title}
+                            </h3>
+                          </div>
+
+                          {/* Description */}
+                          <p className="text-xs text-slate-500 leading-relaxed">
+                            {resItem.description}
+                          </p>
+
+                          {/* Key insights / Classroom highlights */}
+                          <div className="space-y-2 bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
+                            <div className="text-xs text-slate-600">
+                              <span className="font-bold text-emerald-700 flex items-center gap-1 mb-0.5">
+                                <Lightbulb className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                Why Teachers Love It:
+                              </span>
+                              {resItem.whyTeachersLoveIt}
+                            </div>
+                            <div className="text-xs text-slate-600 pt-2 border-t border-slate-100">
+                              <span className="font-bold text-[#5f6f52] flex items-center gap-1 mb-0.5">
+                                <FileText className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                                Suggested Class Activity:
+                              </span>
+                              {resItem.suggestedActivity}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Actions buttons */}
+                        <div className="pt-5 mt-5 border-t border-slate-100 flex flex-wrap items-center gap-2">
+                          <a
+                            href={resItem.url}
+                            target="_blank"
+                            rel="noopener noreferrer referrer"
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl py-2 px-3 text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer shrink-0"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>Open Link</span>
+                          </a>
+
+                          <button
+                            onClick={() => handleToggleOfflineDownload({
+                              idOrUrl: resItem.url,
+                              type: 'resource',
+                              title: resItem.title,
+                              categoryOrSubject: resItem.category,
+                              description: resItem.description,
+                              resourceData: resItem
+                            })}
+                            className={`rounded-xl py-2 px-3 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 ${
+                              offlineDownloadedKeys.includes(resItem.url)
+                                ? 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300 shadow-2xs'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/80'
+                            }`}
+                            title={offlineDownloadedKeys.includes(resItem.url) ? "Saved in browser local storage for offline usage (Click to remove)" : "Save resource content to local browser storage & download guide for offline access"}
+                          >
+                            {offlineDownloadedKeys.includes(resItem.url) ? (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>Offline Ready</span>
+                              </>
+                            ) : (
+                              <>
+                                <Download className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                                <span>Offline Download</span>
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setShareItem({
+                                type: 'resource',
+                                title: resItem.title,
+                                url: resItem.url,
+                                subjectOrCategory: resItem.category,
+                                description: resItem.description,
+                                authorOrType: resItem.type,
+                                resourceData: resItem
+                              });
+                              setShareSuccessMsg(null);
+                              setShareNote('');
+                            }}
+                            className="p-2 py-2 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition flex items-center justify-center gap-1 text-xs font-bold cursor-pointer shrink-0"
+                            title="Share resource link or send to Collaboration Hub"
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                            <span>Share</span>
+                          </button>
+
+                          {!isStudent && (
+                            <button
+                              onClick={() => handleAddToMyMaterials(resItem)}
+                              disabled={isSaved}
+                              className={`flex-1 rounded-xl py-2 px-3 text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                                isSaved
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : 'bg-[#5f6f52] hover:bg-[#4d5b41] text-white shadow-xs'
+                              }`}
+                            >
+                              {isSaved ? (
+                                <>
+                                  <BookmarkCheck className="w-3.5 h-3.5 text-emerald-600 animate-bounce" />
+                                  <span>Saved to Materials</span>
+                                </>
+                              ) : (
+                                <>
+                                  <BookmarkPlus className="w-3.5 h-3.5" />
+                                  <span>Add to Materials</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* No results placeholder */}
+            {filteredResources.length === 0 && filteredBooks.length === 0 && (
+              <div className="bg-white border border-slate-150 rounded-3xl p-10 text-center text-slate-500">
+                <Globe className="w-12 h-12 text-[#a9b388] mx-auto mb-4" />
+                <h3 className="text-base font-bold text-slate-800">No Matching Resources or Books Found</h3>
+                <p className="text-xs text-slate-400 max-w-md mx-auto mt-1 leading-relaxed">
+                  {onlyAiRecommended ? (
+                    <>No items currently match the active "AI Recommended" filter for these keywords. Try toggling off "AI Recommended Only" or generating new lesson documents to unlock personalized matches.</>
+                  ) : searchFilter || categoryFilter !== 'All' ? (
+                    <>No items match your selected filters {searchFilter && <>("<strong>{searchFilter}</strong>")</>} {categoryFilter !== 'All' && <>(Category: "<strong>{categoryFilter}</strong>")</>}. Try adjusting your keywords or clearing the category filter.</>
+                  ) : (
+                    <>Choose a featured topic above or describe your curriculum focus to discover high-quality, verified lesson resources from top worldwide sources.</>
+                  )}
+                </p>
+                {(searchFilter || categoryFilter !== 'All' || contentTypeFilter !== 'all' || onlyAiRecommended) && (
+                  <button
+                    onClick={() => {
+                      setSearchFilter('');
+                      setCategoryFilter('All');
+                      setContentTypeFilter('all');
+                      setOnlyAiRecommended(false);
+                    }}
+                    className="mt-4 bg-[#5f6f52] hover:bg-[#4d5b41] text-white text-xs font-bold px-4 py-2 rounded-xl transition cursor-pointer shadow-2xs"
+                  >
+                    Clear All Filters
+                  </button>
+                )}
+              </div>
+            )}
+          </motion.div>
+        </AnimatePresence>
       )}
 
-      {/* Results grid */}
-      {!isLoading && resources.length > 0 && (
-        <div className="space-y-4 animate-fadeIn">
-          <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-            <p className="text-sm font-bold text-slate-500 flex items-center gap-1.5">
-              <Check className="w-4 h-4 text-emerald-600" /> Matches Found Globally ({resources.length})
-            </p>
-          </div>
+      {/* BOOK READER MODAL */}
+      <OpenBookReaderModal
+        book={selectedBookForModal}
+        onClose={() => setSelectedBookForModal(null)}
+        onImportToLibrary={(book) => handleImportBookToMaterials(book)}
+      />
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {resources.map((resItem) => {
-              const isSaved = savedResourceUrls.includes(resItem.url);
-              return (
-                <div
-                  key={resItem.url}
-                  className="bg-white border border-slate-150 hover:border-emerald-300 hover:shadow-md transition-all duration-300 rounded-3xl p-6 flex flex-col justify-between group"
-                >
-                  <div className="space-y-4">
-                    {/* Tags row */}
-                    <div className="flex flex-wrap gap-2 items-center justify-between">
-                      <div className="flex flex-wrap gap-1.5">
-                        <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
-                          {resItem.category}
-                        </span>
-                        <span className="text-[10px] uppercase font-bold tracking-wider text-indigo-800 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
-                          {resItem.type}
-                        </span>
-                      </div>
-                      <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-                        <GraduationCap className="w-3 h-3" /> {resItem.gradeLevel}
-                      </span>
-                    </div>
+      {/* SHARE RESOURCE / BOOK MODAL */}
+      {shareItem && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white border border-slate-200 shadow-2xl rounded-3xl max-w-lg w-full overflow-hidden flex flex-col space-y-0">
+            
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-indigo-900 via-slate-900 to-indigo-950 text-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-white/10 rounded-2xl border border-white/20">
+                  <Share2 className="w-5 h-5 text-indigo-300" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white leading-tight">
+                    Share {shareItem.type === 'book' ? 'Textbook' : 'Resource'}
+                  </h3>
+                  <p className="text-xs text-indigo-200 font-medium">
+                    Copy link or share with colleagues in Collaboration Hub
+                  </p>
+                </div>
+              </div>
 
-                    {/* Title */}
-                    <div>
-                      <h3 className="text-base font-bold text-slate-800 leading-snug group-hover:text-[#5f6f52] transition-colors">
-                        {resItem.title}
-                      </h3>
-                    </div>
+              <button
+                onClick={() => {
+                  setShareItem(null);
+                  setShareSuccessMsg(null);
+                  setShareNote('');
+                }}
+                className="p-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-full transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-                    {/* Description */}
-                    <p className="text-xs text-slate-500 leading-relaxed">
-                      {resItem.description}
-                    </p>
+            {/* Item Summary Banner */}
+            <div className="p-5 bg-indigo-50/50 border-b border-indigo-100 flex items-start gap-3">
+              <div className="p-2 bg-indigo-100 rounded-xl text-indigo-700 shrink-0 mt-0.5">
+                {shareItem.type === 'book' ? <BookOpen className="w-5 h-5" /> : <Globe className="w-5 h-5" />}
+              </div>
+              <div className="space-y-1 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-sm font-bold text-slate-900 line-clamp-1">{shareItem.title}</h4>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full shrink-0">
+                    {shareItem.subjectOrCategory}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">{shareItem.description}</p>
+              </div>
+            </div>
 
-                    {/* Key insights / Classroom highlights */}
-                    <div className="space-y-2 bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
-                      <div className="text-xs text-slate-600">
-                        <span className="font-bold text-emerald-700 flex items-center gap-1 mb-0.5">
-                          <Lightbulb className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                          Why Teachers Love It:
-                        </span>
-                        {resItem.whyTeachersLoveIt}
-                      </div>
-                      <div className="text-xs text-slate-600 pt-2 border-t border-slate-100">
-                        <span className="font-bold text-[#5f6f52] flex items-center gap-1 mb-0.5">
-                          <FileText className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                          Suggested Class Activity:
-                        </span>
-                        {resItem.suggestedActivity}
-                      </div>
-                    </div>
-                  </div>
+            {/* Tabs Header */}
+            <div className="flex border-b border-slate-200 bg-slate-50 px-5 pt-3 gap-2">
+              <button
+                onClick={() => setActiveShareTab('link')}
+                className={`pb-2.5 px-3 text-xs font-bold transition-all border-b-2 flex items-center gap-2 cursor-pointer ${
+                  activeShareTab === 'link'
+                    ? 'border-indigo-600 text-indigo-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Link2 className="w-3.5 h-3.5" />
+                <span>Copy Link & Citation</span>
+              </button>
 
-                  {/* Actions buttons */}
-                  <div className="pt-5 mt-5 border-t border-slate-100 flex items-center gap-3">
-                    <a
-                      href={resItem.url}
-                      target="_blank"
-                      rel="noopener noreferrer referrer"
-                      className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl py-2 px-3 text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Open Link</span>
-                    </a>
+              <button
+                onClick={() => setActiveShareTab('hub')}
+                className={`pb-2.5 px-3 text-xs font-bold transition-all border-b-2 flex items-center gap-2 cursor-pointer ${
+                  activeShareTab === 'hub'
+                    ? 'border-indigo-600 text-indigo-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Send to Collaboration Hub</span>
+              </button>
+            </div>
 
-                    {!isStudent && (
+            {/* Tab Body */}
+            <div className="p-5 space-y-4">
+              {shareSuccessMsg && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-bold text-emerald-800 flex items-center gap-2 animate-fadeIn">
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{shareSuccessMsg}</span>
+                </div>
+              )}
+
+              {activeShareTab === 'link' && (
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-1">
+                      <Link2 className="w-3.5 h-3.5 text-indigo-600" />
+                      Direct URL
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={shareItem.url}
+                        className="flex-1 bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-700 focus:outline-none select-all"
+                      />
                       <button
-                        onClick={() => handleAddToMyMaterials(resItem)}
-                        disabled={isSaved}
-                        className={`flex-1 rounded-xl py-2 px-3 text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
-                          isSaved
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                            : 'bg-[#5f6f52] hover:bg-[#4d5b41] text-white shadow-xs'
+                        onClick={() => handleCopyLink(shareItem.url)}
+                        className={`px-3.5 py-2 text-xs font-bold rounded-xl flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
+                          copiedLink
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
                         }`}
                       >
-                        {isSaved ? (
-                          <>
-                            <BookmarkCheck className="w-3.5 h-3.5 text-emerald-600 animate-bounce" />
-                            <span>Saved to Materials</span>
-                          </>
-                        ) : (
-                          <>
-                            <BookmarkPlus className="w-3.5 h-3.5" />
-                            <span>Add to Materials</span>
-                          </>
-                        )}
+                        {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
                       </button>
-                    )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                    <label className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-1">
+                      <FileText className="w-3.5 h-3.5 text-amber-600" />
+                      Resource Summary & Citation
+                    </label>
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 text-xs text-slate-600 leading-relaxed italic">
+                      "{shareItem.title}" — {shareItem.type === 'book' ? `Author: ${shareItem.authorOrType || 'Unknown'}` : `Category: ${shareItem.subjectOrCategory}`}. {shareItem.description} ({shareItem.url})
+                    </div>
+                    <button
+                      onClick={() => handleCopyCitation(shareItem)}
+                      className={`w-full py-2 px-3 text-xs font-bold rounded-xl border flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                        copiedCitation
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                          : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      {copiedCitation ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-slate-500" />}
+                      <span>{copiedCitation ? 'Citation Copied to Clipboard!' : 'Copy Full Summary & Citation'}</span>
+                    </button>
                   </div>
                 </div>
-              );
-            })}
+              )}
+
+              {activeShareTab === 'hub' && (
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-1">
+                      <MessageSquare className="w-3.5 h-3.5 text-indigo-600" />
+                      Add Note for Colleagues (Optional)
+                    </label>
+                    <textarea
+                      value={shareNote}
+                      onChange={(e) => setShareNote(e.target.value)}
+                      placeholder="e.g. Recommended textbook chapter for Grade 8 science teachers during next week's unit."
+                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none h-24"
+                    />
+                  </div>
+
+                  <div className="p-3 bg-indigo-50/60 rounded-xl border border-indigo-100 text-[11px] text-indigo-900 leading-relaxed">
+                    <strong>Collaboration Hub:</strong> Sharing will publish this resource to your school's shared knowledge repository where all fellow teachers and staff can discover, view, and comment.
+                  </div>
+
+                  <button
+                    onClick={() => handleShareToCollaborationHub(shareItem)}
+                    disabled={isSharingToHub}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 px-4 text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>{isSharingToHub ? 'Publishing to Hub...' : 'Send to Collaboration Hub'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
           </div>
         </div>
       )}
 
-      {/* No results placeholder */}
-      {!isLoading && resources.length === 0 && (
-        <div className="bg-white border border-slate-150 rounded-3xl p-10 text-center text-slate-500">
-          <Globe className="w-12 h-12 text-[#a9b388] mx-auto mb-4" />
-          <h3 className="text-base font-bold text-slate-800">Ready to Scan the Web</h3>
-          <p className="text-xs text-slate-400 max-w-md mx-auto mt-1 leading-relaxed">
-            Choose a featured topic above or describe your curriculum focus to discover high-quality, verified lesson resources from top worldwide sources.
-          </p>
+      {/* OFFLINE DOWNLOAD TOAST NOTIFICATION */}
+      {offlineDownloadNotification && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900/95 text-white text-xs font-semibold px-4 py-3 rounded-2xl shadow-2xl border border-slate-700/80 flex items-center gap-2.5 animate-bounce backdrop-blur-xs">
+          <HardDriveDownload className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{offlineDownloadNotification}</span>
         </div>
       )}
 
