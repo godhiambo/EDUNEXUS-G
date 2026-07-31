@@ -151,6 +151,7 @@ export interface SavedDocument {
   handwritingIntensity?: number;
   classicNotesImageModel?: 'emgen' | 'nano banana';
   documentPageSize?: 'A4' | 'A5' | 'Letter' | 'Legal' | 'A3';
+  pageOrientation?: 'portrait' | 'landscape';
   documentLength?: 'concise' | 'standard' | 'detailed' | 'comprehensive';
   aiReview?: DocumentAIReview;
   flashcardDeck?: FlashcardDeck;
@@ -220,6 +221,7 @@ export interface DocumentVersion {
   docId: string;
   title: string;
   content: string;
+  pageOrientation?: 'portrait' | 'landscape';
   lastModified: string;
   modifiedByUid: string;
   modifiedByName: string;
@@ -447,6 +449,8 @@ export interface ParentTeacherMessage {
   text: string;
   createdAt: string;
   read?: boolean;
+  audioUrl?: string;
+  audioDuration?: number;
 }
 
 export interface AppNotification {

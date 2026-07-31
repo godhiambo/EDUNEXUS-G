@@ -4,7 +4,7 @@ import VisualPhoneticsStudio from './VisualPhoneticsStudio';
 import ConversationalPodcastModal from './ConversationalPodcastModal';
 import ARHologramReaderModal from './ARHologramReaderModal';
 import { db, storage } from '../firebase';
-import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
@@ -71,6 +71,8 @@ import FlashcardDeckModal from './FlashcardDeckModal';
 import { FlashcardDeck, SavedDocument } from '../types';
 import { OPEN_BOOKS_CATALOG, OpenBook } from '../data/openBooksData';
 import OpenBookReaderModal from './OpenBookReaderModal';
+import UploadFullBookModal from './UploadFullBookModal';
+import Book3DCard from './Book3DCard';
 
 interface UploadedFolder {
   id: string;
@@ -338,6 +340,40 @@ export default function FileLibrary({ onSelectResourceForTutor }: FileLibraryPro
   const [activeReadingBook, setActiveReadingBook] = useState<OpenBook | null>(null);
   const [gutendexLiveResults, setGutendexLiveResults] = useState<any[]>([]);
   const [isSearchingGutendex, setIsSearchingGutendex] = useState<boolean>(false);
+  const [customBooks, setCustomBooks] = useState<OpenBook[]>([]);
+  const [isUploadFullBookModalOpen, setIsUploadFullBookModalOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    const fetchCustomBooks = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'global_books'));
+        const loaded: OpenBook[] = [];
+        if (!snap.empty) {
+          snap.forEach((d) => {
+            const data = d.data() as OpenBook;
+            if (data && data.title && data.chapters) {
+              loaded.push(data);
+            }
+          });
+        }
+        try {
+          const localCustom: OpenBook[] = JSON.parse(localStorage.getItem('edunexus_custom_global_books') || '[]');
+          if (Array.isArray(localCustom)) {
+            localCustom.forEach((lb) => {
+              if (!loaded.some((b) => b.id === lb.id)) loaded.push(lb);
+            });
+          }
+        } catch (e) {}
+        setCustomBooks(loaded);
+      } catch (err) {
+        try {
+          const localCustom: OpenBook[] = JSON.parse(localStorage.getItem('edunexus_custom_global_books') || '[]');
+          if (Array.isArray(localCustom)) setCustomBooks(localCustom);
+        } catch (e) {}
+      }
+    };
+    fetchCustomBooks();
+  }, []);
 
   const searchLiveGutendexBooks = async (queryStr: string) => {
     if (!queryStr.trim()) {
@@ -3269,9 +3305,24 @@ Safety rules: Clean hands, safe food handling.
             )}
 
             {loadingResources ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-2 text-slate-400">
-                <Loader2 className="w-6 h-6 animate-spin text-[#5f6f52]" />
-                <span className="text-xs font-bold">Synchronizing storage database...</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {[1, 2, 3, 4, 5, 6].map((idx) => (
+                  <div
+                    key={idx}
+                    className="file-card-item skeleton p-3 rounded-xl border border-slate-200 flex flex-col justify-between gap-3 min-h-[140px]"
+                    data-loading="true"
+                  >
+                    <div className="space-y-2">
+                      <div className="w-full h-16 rounded-lg bg-slate-300/40 skeleton-bar" />
+                      <div className="w-3/4 h-3.5 rounded bg-slate-300/50 skeleton-bar" />
+                      <div className="w-1/2 h-2.5 rounded bg-slate-300/40 skeleton-bar" />
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                      <div className="w-1/4 h-2.5 rounded bg-slate-300/40 skeleton-bar" />
+                      <div className="w-1/5 h-2.5 rounded bg-slate-300/40 skeleton-bar" />
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : filteredResources.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-slate-300 text-center px-4">
@@ -3319,19 +3370,28 @@ Safety rules: Clean hands, safe food handling.
                   }
                 }
 
+                const isItemLoading = res.status === 'processing' || (res as any).isSyncing;
+
                 return (
                   <motion.div
                     layout
                     initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
+                    animate={{ 
+                      opacity: 1, 
+                      y: 0,
+                      scale: isSelected ? 1.02 : 1
+                    }}
                     exit={{ opacity: 0, scale: 0.96 }}
+                    whileTap={{ scale: 0.96 }}
                     transition={{
                       layout: { duration: 0.25, ease: [0.4, 0, 0.2, 1] },
+                      scale: { type: 'spring', stiffness: 400, damping: 25 },
                       opacity: { duration: 0.2 }
                     }}
                     key={res.id}
                     onClick={() => handleSelectResource(res)}
-                    className={`file-card-item p-3 rounded-xl border transition-all duration-200 ease-in-out cursor-pointer text-xs flex flex-col gap-2 relative group hover:shadow-md hover:-translate-y-0.5 ${borderStyle}`}
+                    data-loading={isItemLoading ? 'true' : undefined}
+                    className={`file-card-item ${isItemLoading ? 'skeleton loading' : ''} ${isSelected ? 'selected' : ''} p-3 rounded-xl border transition-all duration-200 ease-in-out cursor-pointer text-xs flex flex-col gap-2 relative group hover:shadow-lg hover:-translate-y-1 ${borderStyle}`}
                   >
                     {enhancedView && (
                       <div className="w-full h-24 rounded-lg overflow-hidden bg-slate-50 border border-slate-150 relative mb-1 flex items-center justify-center group/thumb select-none shrink-0">
@@ -3838,9 +3898,24 @@ Safety rules: Clean hands, safe food handling.
 
           {/* Book Catalog Grid */}
           <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-            {/* Filtered Pre-Loaded Catalog */}
+            <div className="flex items-center justify-between bg-amber-50/60 p-3 rounded-2xl border border-amber-200/70">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-600" />
+                <span className="text-xs font-extrabold text-amber-900">Load & Index Custom Books for AI Access</span>
+              </div>
+              <button
+                onClick={() => setIsUploadFullBookModalOpen(true)}
+                className="bg-[#5f6f52] hover:bg-[#4d5a42] text-white px-3 py-1.5 rounded-xl font-bold text-xs transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                Load Full Book (.txt, .pdf, .docx)
+              </button>
+            </div>
+
+            {/* Filtered Pre-Loaded & Custom Catalog */}
             {(() => {
-              const filtered = OPEN_BOOKS_CATALOG.filter(b => {
+              const allBooksList = [...customBooks, ...OPEN_BOOKS_CATALOG];
+              const filtered = allBooksList.filter(b => {
                 const matchesCategory = openBookCategoryFilter === 'All' || b.category === openBookCategoryFilter;
                 const matchesQuery = !openBookSearchQuery || 
                   b.title.toLowerCase().includes(openBookSearchQuery.toLowerCase()) ||
@@ -3865,77 +3940,14 @@ Safety rules: Clean hands, safe food handling.
                   {filtered.map(book => {
                     const isAlreadyInLibrary = resources.some(r => r.downloadUrl === book.externalUrl || r.fileName.toLowerCase().includes(book.title.toLowerCase().slice(0, 10)));
                     return (
-                      <div
+                      <Book3DCard
                         key={book.id}
-                        className="bg-white rounded-2xl border border-slate-200 p-3.5 hover:border-[#5f6f52]/50 hover:shadow-md transition flex flex-col justify-between space-y-3 group"
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className={`w-12 h-16 rounded-xl bg-gradient-to-br ${book.coverBg} flex flex-col items-center justify-center text-xl shadow-sm shrink-0 font-bold text-white relative`}>
-                            <span>{book.coverEmoji}</span>
-                            <span className="text-[8px] font-extrabold uppercase mt-1 opacity-90">{book.language.slice(0, 3)}</span>
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200/60">
-                                {book.category}
-                              </span>
-                              <span className="text-[9px] font-semibold text-slate-400">
-                                {book.pageCount} pages
-                              </span>
-                            </div>
-
-                            <h4 className="font-extrabold text-xs text-slate-800 mt-1 group-hover:text-[#5f6f52] transition truncate" title={book.title}>
-                              {book.title}
-                            </h4>
-                            <p className="text-[10px] font-semibold text-slate-500 truncate">
-                              By {book.author}
-                            </p>
-                            <p className="text-[10px] text-slate-400 mt-1 line-clamp-2 leading-relaxed">
-                              {book.summary}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Badges & Action Buttons */}
-                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
-                          <div className="flex items-center gap-1.5 text-[9px] font-bold text-slate-500">
-                            <span className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">
-                              {book.gradeLevel}
-                            </span>
-                            <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-100">
-                              {book.license.split('(')[0]}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-1.5 ml-auto">
-                            <button
-                              type="button"
-                              onClick={() => setActiveReadingBook(book)}
-                              className="px-2.5 py-1 bg-[#5f6f52] hover:bg-[#4d5b42] text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer shadow-xs"
-                              title="Read complete ebook online with audio narration & font controls"
-                            >
-                              <BookOpen className="w-3 h-3" />
-                              <span>Read Online</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleImportOpenBookToLibrary(book)}
-                              disabled={isAlreadyInLibrary}
-                              className={`px-2 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer ${
-                                isAlreadyInLibrary
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 cursor-default'
-                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                              }`}
-                              title="Save into your local curriculum library for AI study tools"
-                            >
-                              {isAlreadyInLibrary ? <Check className="w-3 h-3" /> : <Download className="w-3 h-3" />}
-                              <span>{isAlreadyInLibrary ? 'Saved' : 'Import'}</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
+                        book={book}
+                        onRead={(b) => setActiveReadingBook(b)}
+                        onImport={(b) => handleImportOpenBookToLibrary(b)}
+                        isImported={isAlreadyInLibrary}
+                        variant="compact"
+                      />
                     );
                   })}
                 </div>
@@ -4660,6 +4672,41 @@ Safety rules: Clean hands, safe food handling.
                                 </>
                               )}
                             </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const tempBook: OpenBook = {
+                                  id: previewingResource.id,
+                                  title: previewingResource.title,
+                                  author: previewingResource.category || 'Curriculum Resource',
+                                  category: 'Literature & Classics',
+                                  subject: previewingResource.subject || 'Curriculum Studies',
+                                  gradeLevel: 'Grade 1 - 12',
+                                  language: 'English / Swahili',
+                                  coverEmoji: previewingResource.fileType === 'pdf' ? '📕' : previewingResource.fileType === 'docx' ? '📘' : '📜',
+                                  coverBg: 'from-amber-700 via-amber-800 to-amber-950',
+                                  summary: previewingResource.extractedText?.slice(0, 300) || 'Document Reader View',
+                                  pageCount: 1,
+                                  downloadFormats: ['PDF', 'Web Reader'],
+                                  externalUrl: '#',
+                                  license: 'EduNexus Digital Resource',
+                                  chapters: [
+                                    {
+                                      title: previewingResource.title,
+                                      content: previewingResource.extractedText || 'No extracted text available for this document.'
+                                    }
+                                  ]
+                                };
+                                setPreviewingResource(null);
+                                setActiveReadingBook(tempBook);
+                              }}
+                              className="px-3 py-1 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-amber-950 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer shadow-2xs ml-1"
+                              title="Open this document in the 3D Animated Reader with page reading awards"
+                            >
+                              <BookOpen className="w-3.5 h-3.5" />
+                              <span>3D Book Reader</span>
+                            </button>
                           </div>
                         </div>
 
@@ -4971,6 +5018,15 @@ Safety rules: Clean hands, safe food handling.
         book={activeReadingBook}
         onClose={() => setActiveReadingBook(null)}
         onImportToLibrary={handleImportOpenBookToLibrary}
+      />
+
+      {/* Upload Full Book for AI Access Modal */}
+      <UploadFullBookModal
+        isOpen={isUploadFullBookModalOpen}
+        onClose={() => setIsUploadFullBookModalOpen(false)}
+        onBookAdded={(newBook) => {
+          setCustomBooks((prev) => [newBook, ...prev]);
+        }}
       />
     </div>
     </div>

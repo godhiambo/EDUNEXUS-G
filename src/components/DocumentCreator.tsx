@@ -11,7 +11,7 @@ import {
   PromptTemplate,
   getCbcLessonDetails
 } from '../types';
-import { BookOpen, Sparkles, FileText, Settings, ArrowLeft, Lightbulb, Clock, Trash2, Save, X, FolderOpen, Bookmark, BookMarked, Tag, Home, Users, Mic, MicOff, Plus, RefreshCw, GitFork, Eye, Database, Grab, HelpCircle } from 'lucide-react';
+import { BookOpen, Sparkles, FileText, Settings, ArrowLeft, Lightbulb, Clock, Trash2, Save, X, FolderOpen, Bookmark, BookMarked, Tag, Home, Users, Mic, MicOff, Plus, RefreshCw, GitFork, Eye, Database, Grab, HelpCircle, RotateCcw, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { EditableSelect } from './EditableSelect';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -22,6 +22,7 @@ import { db, handleFirestoreError, OperationType, cleanUndefined } from '../fire
 import { collection, query, where, onSnapshot, setDoc, doc, deleteDoc } from 'firebase/firestore';
 import QuestionBank from './QuestionBank';
 import { QuestionBankItem } from '../types';
+import { useAutoRecovery } from '../hooks/useAutoRecovery';
 
 interface MicButtonWithIndicatorProps {
   field: 'topic' | 'subTopic' | 'customSubject' | 'extraPrompt' | 'hub';
@@ -826,6 +827,106 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
     setSelectedTags([...selectedTags, trimmed]);
     setNewTagInput('');
   };
+
+  // Auto-recovery state and hook setup (saves current form state every 30 seconds to localStorage)
+  const currentFormState = {
+    curriculum,
+    docType,
+    lessonLayout,
+    subject,
+    customSubject,
+    classLevel,
+    topic,
+    subTopic,
+    duration,
+    extraPrompt,
+    explainLikeMasterTeacher,
+    askMentor,
+    generateVocabulary,
+    generateDifferentiated,
+    generateParental,
+    generateDiagram,
+    diagramType,
+    lessonsPerWeek,
+    weeksPerTerm,
+    difficultyLevel,
+    paperStyle,
+    penColor,
+    handwritingIntensity,
+    classicNotesImageModel,
+    documentPageSize,
+    documentLength,
+    selectedTags,
+    selectedQuestions,
+  };
+
+  const hasContentCheck = React.useCallback((st: typeof currentFormState) => {
+    if (!st) return false;
+    return Boolean(
+      (st.topic && st.topic.trim().length > 0) ||
+      (st.subTopic && st.subTopic.trim().length > 0) ||
+      (st.extraPrompt && st.extraPrompt.trim().length > 0) ||
+      (st.customSubject && st.customSubject.trim().length > 0) ||
+      (st.subject && st.subject.trim().length > 0 && st.subject !== 'Other') ||
+      (st.selectedQuestions && st.selectedQuestions.length > 0) ||
+      (st.selectedTags && st.selectedTags.length > 0)
+    );
+  }, []);
+
+  const {
+    recoveryData,
+    showBanner: showRecoveryBanner,
+    lastSavedTime,
+    clearRecoveryData,
+    dismissBanner: dismissRecoveryBanner,
+  } = useAutoRecovery(
+    'edunexus_document_creator_autorecovery',
+    currentFormState,
+    hasContentCheck,
+    30000 // 30 seconds auto-save interval
+  );
+
+  const [restoredToastMessage, setRestoredToastMessage] = useState<string | null>(null);
+
+  const handleRestoreAutoRecovery = () => {
+    if (!recoveryData || !recoveryData.formState) return;
+    const st = recoveryData.formState;
+
+    if (st.curriculum) setCurriculum(st.curriculum);
+    if (st.docType) setDocType(st.docType);
+    if (st.lessonLayout) setLessonLayout(st.lessonLayout);
+    if (st.subject !== undefined) setSubject(st.subject);
+    if (st.customSubject !== undefined) setCustomSubject(st.customSubject);
+    if (st.classLevel !== undefined) setClassLevel(st.classLevel);
+    if (st.topic !== undefined) setTopic(st.topic);
+    if (st.subTopic !== undefined) setSubTopic(st.subTopic);
+    if (st.duration !== undefined) setDuration(st.duration);
+    if (st.extraPrompt !== undefined) setExtraPrompt(st.extraPrompt);
+    if (st.explainLikeMasterTeacher !== undefined) setExplainLikeMasterTeacher(st.explainLikeMasterTeacher);
+    if (st.askMentor !== undefined) setAskMentor(st.askMentor);
+    if (st.generateVocabulary !== undefined) setGenerateVocabulary(st.generateVocabulary);
+    if (st.generateDifferentiated !== undefined) setGenerateDifferentiated(st.generateDifferentiated);
+    if (st.generateParental !== undefined) setGenerateParental(st.generateParental);
+    if (st.generateDiagram !== undefined) setGenerateDiagram(st.generateDiagram);
+    if (st.diagramType) setDiagramType(st.diagramType);
+    if (st.lessonsPerWeek) setLessonsPerWeek(st.lessonsPerWeek);
+    if (st.weeksPerTerm) setWeeksPerTerm(st.weeksPerTerm);
+    if (st.difficultyLevel) setDifficultyLevel(st.difficultyLevel);
+    if (st.paperStyle) setPaperStyle(st.paperStyle);
+    if (st.penColor) setPenColor(st.penColor);
+    if (st.handwritingIntensity) setHandwritingIntensity(st.handwritingIntensity);
+    if (st.classicNotesImageModel) setClassicNotesImageModel(st.classicNotesImageModel);
+    if (st.documentPageSize) setDocumentPageSize(st.documentPageSize);
+    if (st.documentLength) setDocumentLength(st.documentLength);
+    if (st.selectedTags) setSelectedTags(st.selectedTags);
+    if (st.selectedQuestions) setSelectedQuestions(st.selectedQuestions);
+
+    clearRecoveryData();
+    setRestoredToastMessage('Form progress successfully restored from auto-saved session!');
+    setTimeout(() => {
+      setRestoredToastMessage(null);
+    }, 4500);
+  };
   
   const [tipIndex, setTipIndex] = useState(0);
 
@@ -1017,6 +1118,7 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
       await setDoc(doc(db, 'drafts', draftId), cleanUndefined(draftData));
       setSelectedDraftId(draftId);
       setSaveStatus('success');
+      clearRecoveryData();
       setTimeout(() => {
         setIsSaveDraftModalOpen(false);
         setSaveStatus('idle');
@@ -1168,6 +1270,7 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
     setSelectedTags([]);
     setPacingData(null);
     setPacingError(null);
+    clearRecoveryData();
   };
 
   const handleGenerateVocabulary = async () => {
@@ -1478,6 +1581,8 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
         }).join('\n\n');
     }
 
+    clearRecoveryData();
+
     onGenerate({
       docType,
       curriculum,
@@ -1590,6 +1695,19 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
               <span>{showQuestionBank ? 'Hide Question Bank' : 'Show Question Bank'}</span>
             </button>
           )}
+          {!isGenerating && (
+            <div className="flex items-center gap-1.5 bg-slate-100 text-slate-700 border border-slate-200 px-3 py-1 rounded-full text-xs font-medium" title="Saves your form progress every 30 seconds automatically to localStorage">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span>
+                {lastSavedTime
+                  ? `Auto-saved at ${lastSavedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                  : 'Auto-save active (30s)'}
+              </span>
+            </div>
+          )}
           <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-xs font-semibold">
             <Sparkles className="w-3.5 h-3.5 animate-pulse" />
             Curriculum-Aligned Generator
@@ -1625,6 +1743,114 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
         <div className="flex flex-col lg:flex-row gap-6 items-start w-full">
           {/* Main creator form container */}
           <div className="flex-1 w-full space-y-6 max-w-4xl">
+            {/* Auto-Recovery Success Notification Toast */}
+            {restoredToastMessage && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="bg-emerald-600 text-white text-xs font-semibold px-4 py-3 rounded-2xl shadow-md flex items-center justify-between"
+              >
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-100 shrink-0" />
+                  <span>{restoredToastMessage}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRestoredToastMessage(null)}
+                  className="text-white/80 hover:text-white p-1 rounded-lg transition"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </motion.div>
+            )}
+
+            {/* Auto-Recovery Prompt Banner for Interrupted Sessions */}
+            {showRecoveryBanner && recoveryData && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-gradient-to-r from-amber-50 via-orange-50/70 to-amber-50 border border-amber-200/80 rounded-2xl p-4 shadow-sm relative overflow-hidden"
+              >
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2.5 bg-amber-500/10 text-amber-700 rounded-xl shrink-0 border border-amber-200/60 mt-0.5 sm:mt-0">
+                      <RotateCcw className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-sm font-bold text-amber-950">Interrupted Session Detected</h4>
+                        <span className="text-[10px] font-extrabold px-2 py-0.5 bg-amber-200/80 text-amber-900 rounded-full uppercase tracking-wider">
+                          Auto-Saved Backup
+                        </span>
+                      </div>
+                      <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                        We found unsaved form progress from a previous session saved on{' '}
+                        <span className="font-semibold text-amber-950">
+                          {new Date(recoveryData.timestamp).toLocaleString(undefined, {
+                            dateStyle: 'medium',
+                            timeStyle: 'short',
+                          })}
+                        </span>
+                        . Would you like to restore it?
+                      </p>
+                      
+                      {/* Summary details of the auto-saved session */}
+                      <div className="flex items-center gap-1.5 mt-2.5 flex-wrap text-[11px]">
+                        {recoveryData.formState.topic && (
+                          <span className="bg-amber-100/90 border border-amber-200 text-amber-900 px-2 py-0.5 rounded-md font-medium">
+                            Topic: <strong className="font-bold">{recoveryData.formState.topic}</strong>
+                          </span>
+                        )}
+                        {recoveryData.formState.subject && (
+                          <span className="bg-amber-100/90 border border-amber-200 text-amber-900 px-2 py-0.5 rounded-md font-medium">
+                            Subject: <strong className="font-bold">{recoveryData.formState.subject === 'Other' ? recoveryData.formState.customSubject : recoveryData.formState.subject}</strong>
+                          </span>
+                        )}
+                        {recoveryData.formState.docType && (
+                          <span className="bg-amber-100/90 border border-amber-200 text-amber-900 px-2 py-0.5 rounded-md font-medium capitalize">
+                            Type: <strong className="font-bold">{recoveryData.formState.docType.replace('-', ' ')}</strong>
+                          </span>
+                        )}
+                        {recoveryData.formState.selectedQuestions && recoveryData.formState.selectedQuestions.length > 0 && (
+                          <span className="bg-amber-100/90 border border-amber-200 text-amber-900 px-2 py-0.5 rounded-md font-medium">
+                            Questions: <strong className="font-bold">{recoveryData.formState.selectedQuestions.length} saved</strong>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+                    <button
+                      type="button"
+                      onClick={handleRestoreAutoRecovery}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      Restore Session
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearRecoveryData}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-100 border border-amber-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-slate-400 hover:text-red-500" />
+                      Discard
+                    </button>
+                    <button
+                      type="button"
+                      onClick={dismissRecoveryBanner}
+                      className="p-1.5 text-amber-700 hover:text-amber-950 hover:bg-amber-100 rounded-lg transition"
+                      title="Dismiss prompt"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
             {/* Draft Manager Box */}
           {drafts.length > 0 && (
             <div className="bg-[#fcfbf7] border border-slate-200 rounded-2xl p-4 shadow-sm">

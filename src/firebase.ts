@@ -7,8 +7,8 @@ import {
   collection, 
   setDoc, 
   writeBatch,
-  enableMultiTabIndexedDbPersistence,
-  enableIndexedDbPersistence 
+  persistentLocalCache,
+  persistentMultipleTabManager
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { SavedDocument } from './types';
@@ -60,44 +60,29 @@ const databaseId =
   firebaseConfig.databaseId ||
   envFirebaseConfig.firestoreDatabaseId;
 
-export const db = databaseId
-  ? initializeFirestore(
-      app,
-      {
-        experimentalAutoDetectLongPolling: true,
-      },
-      databaseId
-    )
-  : initializeFirestore(app, {
-      experimentalAutoDetectLongPolling: true,
-    });
+const firestoreSettings = {
+  experimentalAutoDetectLongPolling: true,
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+};
 
-// Enable Firestore multi-tab offline persistence for seamless classroom connectivity
-if (typeof window !== 'undefined') {
-  enableMultiTabIndexedDbPersistence(db).catch((err) => {
-    if (err.code === 'failed-precondition') {
-      // Multiple tabs open; fall back to single tab persistence
-      enableIndexedDbPersistence(db).catch((e) => {
-        console.warn('[Firestore Offline Persistence Warning]', e);
-      });
-    } else if (err.code === 'unimplemented') {
-      console.warn('[Firestore Offline Persistence Unimplemented]', err);
-    }
-  });
-}
+export const db = databaseId
+  ? initializeFirestore(app, firestoreSettings, databaseId)
+  : initializeFirestore(app, firestoreSettings);
+
 export const auth = getAuth();
 export const storage = getStorage(app);
 
 // Non-blocking asynchronous connection check
 async function testConnection() {
   try {
-    // Non-blocking connection check if needed
+    await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.error("Please check your Firebase configuration.");
     }
   }
 }
+testConnection();
 
 export enum OperationType {
   CREATE = 'create',

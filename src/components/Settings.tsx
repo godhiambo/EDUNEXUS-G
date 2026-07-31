@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth, resolveDisplayName } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { LanguageSwitcher } from './LanguageSwitcher';
 import { useAccessibility, LearnerProfile, VOICE_PROFILES, VoiceProfile } from '../context/AccessibilityContext';
 import { db } from '../firebase';
 import { SavedDocument } from '../types';
@@ -43,7 +44,8 @@ import {
   Radio,
   Camera,
   CameraOff,
-  Video
+  Video,
+  KeyRound
 } from 'lucide-react';
 import AboutModal from './AboutModal';
 import AppIconShowcaseModal from './AppIconShowcaseModal';
@@ -70,7 +72,28 @@ interface SettingsProps {
 }
 
 export default function Settings({ documents = [] }: SettingsProps) {
-  const { user, profile } = useAuth();
+  const { user, profile, sendPasswordReset } = useAuth();
+  const [resetStatus, setResetStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+
+  const handleResetPasswordInSettings = async () => {
+    const targetEmail = profile?.email || user?.email;
+    if (!targetEmail) {
+      setResetStatus({ type: 'error', message: 'No registered email address found for this account.' });
+      return;
+    }
+    setResetStatus(null);
+    setIsResettingPassword(true);
+    try {
+      await sendPasswordReset(targetEmail);
+      setResetStatus({ type: 'success', message: `Password reset link sent to ${targetEmail}` });
+    } catch (err: any) {
+      console.error('Password reset in Settings failed:', err);
+      setResetStatus({ type: 'error', message: err?.message || 'Failed to send password reset email.' });
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
   const { language, aiLanguage, setLanguage, setAiLanguage, t } = useLanguage();
   const {
     fontSize,
@@ -576,6 +599,16 @@ export default function Settings({ documents = [] }: SettingsProps) {
           </div>
           <button
             type="button"
+            disabled={isResettingPassword}
+            onClick={handleResetPasswordInSettings}
+            className="flex items-center gap-1.5 px-3 py-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 hover:text-slate-900 rounded-xl text-xs font-bold transition shadow-2xs cursor-pointer shrink-0 disabled:opacity-50"
+            title="Send password reset link to your email"
+          >
+            <KeyRound className="w-4 h-4 text-[#5f6f52]" />
+            <span>{isResettingPassword ? 'Sending...' : 'Reset Password'}</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setIsAboutOpen(true)}
             className="flex items-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-[#5f6f52]/5 border border-[#e5e1da] text-[#5f6f52] hover:text-[#46553b] hover:border-[#5f6f52]/40 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer group shrink-0"
           >
@@ -584,6 +617,23 @@ export default function Settings({ documents = [] }: SettingsProps) {
           </button>
         </div>
       </div>
+
+      {resetStatus && (
+        <div className={`p-3.5 rounded-xl border text-xs flex items-center justify-between gap-2 shadow-xs transition-all ${
+          resetStatus.type === 'success' 
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-900 font-semibold' 
+            : 'bg-rose-50 border-rose-200 text-rose-900 font-semibold'
+        }`}>
+          <span>{resetStatus.message}</span>
+          <button 
+            type="button"
+            onClick={() => setResetStatus(null)}
+            className="text-xs underline font-bold cursor-pointer hover:opacity-80"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Tabs Menu */}
       <div className="flex border-b border-slate-200 gap-1 overflow-x-auto pb-px">
@@ -800,62 +850,12 @@ export default function Settings({ documents = [] }: SettingsProps) {
             </div>
           </div>
 
-          {/* Language and Workspace Block */}
-          <div className="bg-white border border-[#e5e1da] rounded-2xl shadow-sm p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-4">
-              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                <Globe className="w-4 h-4 text-[#5f6f52]" /> Language Prefs
-              </h4>
-              <div className="space-y-3">
-                <div className="space-y-1.5">
-                  <label className="text-[11px] text-slate-500 font-bold uppercase">UI Workspace Language</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => handleUpdateLanguage('en')}
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 ${
-                        language === 'en' ? 'bg-[#5f6f52] text-white border-transparent' : 'bg-white border-slate-200'
-                      }`}
-                    >
-                      🇬🇧 English
-                    </button>
-                    <button
-                      onClick={() => handleUpdateLanguage('sw')}
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 ${
-                        language === 'sw' ? 'bg-[#5f6f52] text-white border-transparent' : 'bg-white border-slate-200'
-                      }`}
-                    >
-                      🇰🇪 Swahili
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[11px] text-slate-500 font-bold uppercase">AI Generator Target Language</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => handleUpdateAiLanguage('en')}
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 ${
-                        aiLanguage === 'en' ? 'bg-[#5f6f52] text-white border-transparent' : 'bg-white border-slate-200'
-                      }`}
-                    >
-                      🇬🇧 English
-                    </button>
-                    <button
-                      onClick={() => handleUpdateAiLanguage('sw')}
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 ${
-                        aiLanguage === 'sw' ? 'bg-[#5f6f52] text-white border-transparent' : 'bg-white border-slate-200'
-                      }`}
-                    >
-                      🇰🇪 Swahili
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
+          {/* Dedicated Language Switcher Component */}
+          <LanguageSwitcher />
 
             {/* Sync Settings */}
-            <div className="space-y-4">
-              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+          <div className="bg-white border border-[#e5e1da] rounded-2xl shadow-sm p-6 space-y-4">
+            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
                 <Monitor className="w-4 h-4 text-[#5f6f52]" /> Interface & Syncing
               </h4>
               <div className="space-y-4">
@@ -1106,7 +1106,6 @@ export default function Settings({ documents = [] }: SettingsProps) {
               </div>
             </div>
           </div>
-        </div>
       )}
 
       {activeTab === 'accessibility' && (

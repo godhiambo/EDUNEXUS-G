@@ -325,11 +325,12 @@ export const LearningPathWorkspace: React.FC = () => {
   };
 
   const handleSaveFlashcardsToLibrary = async (deck: FlashcardDeck) => {
-    if (!profile?.uid) return;
+    if (!profile?.uid || !deck) return;
     const docId = deck.id || `flashcard-${Date.now()}`;
+    const cards = deck.cards || [];
     const savedDoc: SavedDocument = {
       id: docId,
-      title: deck.title,
+      title: deck.title || 'Flashcards',
       docType: 'flashcards',
       curriculum: 'cbc',
       subject: deck.subject || 'General',
@@ -337,10 +338,10 @@ export const LearningPathWorkspace: React.FC = () => {
       topic: deck.topic || 'Core Concept',
       subTopic: '',
       duration: '15 mins',
-      content: deck.cards.map((c, i) => `Card ${i + 1}: Q: ${c.front}\nA: ${c.back}`).join('\n\n'),
+      content: cards.map((c, i) => `Card ${i + 1}: Q: ${c?.front || ''}\nA: ${c?.back || ''}`).join('\n\n'),
       createdAt: new Date().toISOString(),
       lastModified: new Date().toISOString(),
-      tags: ['flashcards', 'supportive-scaffolding', 'low-confidence-support', deck.subject],
+      tags: ['flashcards', 'supportive-scaffolding', 'low-confidence-support', deck.subject || 'General'],
       category: 'Flashcards',
       lastModifiedByUid: profile.uid,
       lastModifiedByName: profile.displayName,

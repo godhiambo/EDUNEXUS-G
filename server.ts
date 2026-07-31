@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -17,6 +18,7 @@ import mammoth from 'mammoth';
 dotenv.config();
 
 const app = express();
+app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -879,6 +881,156 @@ Instructions:
 });
 
 // GET endpoint for API Health Monitor and Retry Registry statistics
+const serverQrMappings: Record<string, any> = {
+  'soc-bio72': {
+    qrCodeId: 'qr-soc-bio72',
+    shortId: 'soc-bio72',
+    title: 'Grade 7 Photosynthesis Socratic Reader',
+    description: 'Links page 72 of the Biology textbook directly to the Interactive Reader with a pre-configured Socratic tutor prompt.',
+    targetType: 'SOCRATIC_TUTOR',
+    physicalTouchpoint: 'CBC Biology Grade 7 Textbook - Page 72',
+    targetPayload: {
+      socratic: {
+        documentTitle: 'Photosynthesis & Cellular Respiration',
+        socraticPrompt: 'Guide the student through light-dependent reactions using step-by-step Socratic inquiry rather than giving direct answers.',
+        suggestedQuestions: [
+          'What happens to water molecules during sunlight absorption?',
+          'Why is chlorophyll essential for photon trapping?'
+        ],
+        initialMode: 'interactive_reader'
+      }
+    },
+    createdByUid: 'teacher-system',
+    createdByName: 'Mr. Omondi (Science Lead)',
+    scanCount: 42,
+    createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
+    updatedAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+    brandColor: '#5f6f52',
+    labelHeader: 'BIOLOGY PAGE 72 TOUCHPOINT',
+    expirationDate: '2026-12-31'
+  },
+  'path-math42': {
+    qrCodeId: 'qr-path-math42',
+    shortId: 'path-math42',
+    title: 'Fractions & Decimals Adaptive Node',
+    description: 'Scans worksheet to open the Adaptive Learning Path. Automatically activates low-difficulty root activities if student marks low confidence.',
+    targetType: 'ADAPTIVE_PATHWAY',
+    physicalTouchpoint: 'Grade 5 Math Practice Worksheet #4',
+    targetPayload: {
+      adaptive: {
+        subject: 'Mathematics',
+        topic: 'Fractions & Decimals',
+        subtopic: 'Adding Unlike Denominators',
+        nodeId: 'node-frac-101',
+        autoTriggerLowDifficulty: true,
+        rootActivitiesCount: 3,
+        scaffoldingNotes: 'Provides visual fraction strip manipulatives and step-by-step scaffolding for entry confidence.'
+      }
+    },
+    createdByUid: 'teacher-system',
+    createdByName: 'Mrs. Wanjiru (Math Dept)',
+    scanCount: 89,
+    createdAt: new Date(Date.now() - 86400000 * 10).toISOString(),
+    updatedAt: new Date(Date.now() - 86400000 * 1).toISOString(),
+    brandColor: '#10b981',
+    labelHeader: 'MATH WORKSHEET #4 ADAPTIVE NODE',
+    expirationDate: '2026-07-20'
+  },
+  'udl-dyslexia': {
+    qrCodeId: 'qr-udl-dyslexia',
+    shortId: 'udl-dyslexia',
+    title: 'Dyslexia & ADHD Touchpoint Scanner',
+    description: 'Scanned from desk sticker to force-load Dyslexia-friendly Comic Neue typography, relaxed line height, and ADHD micro-milestones.',
+    targetType: 'PRECONFIGURED_UDL',
+    physicalTouchpoint: 'Classroom Desk Sticker #12 (Inclusive Learning Corner)',
+    targetPayload: {
+      udl: {
+        useDyslexicFont: true,
+        lineSpacing: 'relaxed',
+        fontSize: 'large',
+        adhdMilestones: true,
+        highContrast: false,
+        eslTargetLang: 'en',
+        simplifyVocabulary: true
+      }
+    },
+    createdByUid: 'teacher-system',
+    createdByName: 'Ms. Achieng (SEN Specialist)',
+    scanCount: 134,
+    createdAt: new Date(Date.now() - 86400000 * 12).toISOString(),
+    updatedAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+    brandColor: '#f59e0b',
+    labelHeader: 'UDL ACCESSIBILITY TOUCHPOINT'
+  },
+  'parent-report': {
+    qrCodeId: 'qr-parent-report',
+    shortId: 'parent-report',
+    title: 'Take-Home Progress & Streaks Playbook',
+    description: 'Attached to take-home folders. Parents scan at home to view learning streaks, celebrate milestones, and adjust home accessibility profile.',
+    targetType: 'PARENT_PLAYBOOK',
+    physicalTouchpoint: 'Friday Take-Home Folder Tag',
+    targetPayload: {
+      parent: {
+        studentName: 'Amara Ochieng',
+        targetSection: 'progress_streaks',
+        customParentMessage: 'Welcome! Scan this QR code every Friday to celebrate Amara\'s weekly CBC learning milestones and sync home UDL accessibility profiles.'
+      }
+    },
+    createdByUid: 'teacher-system',
+    createdByName: 'Mr. Omondi (Grade 6 Lead)',
+    scanCount: 67,
+    createdAt: new Date(Date.now() - 86400000 * 15).toISOString(),
+    updatedAt: new Date(Date.now() - 86400000 * 4).toISOString(),
+    brandColor: '#f43f5e',
+    labelHeader: 'PARENT TAKE-HOME PLAYBOOK'
+  }
+};
+
+app.get('/api/qr/mappings', (req, res) => {
+  res.json({ mappings: Object.values(serverQrMappings) });
+});
+
+app.post('/api/qr/manage', (req, res) => {
+  const mapping = req.body;
+  if (!mapping || (!mapping.shortId && !mapping.qrCodeId)) {
+    return res.status(400).json({ error: 'Invalid QR mapping data' });
+  }
+  const key = (mapping.shortId || mapping.qrCodeId).toLowerCase();
+  serverQrMappings[key] = {
+    ...mapping,
+    updatedAt: new Date().toISOString()
+  };
+  res.json({ success: true, mapping: serverQrMappings[key] });
+});
+
+app.delete('/api/qr/manage/:id', (req, res) => {
+  const id = req.params.id.toLowerCase();
+  delete serverQrMappings[id];
+  for (const k of Object.keys(serverQrMappings)) {
+    if (serverQrMappings[k].qrCodeId === req.params.id) {
+      delete serverQrMappings[k];
+    }
+  }
+  res.json({ success: true });
+});
+
+app.get('/api/qr/resolve/:shortId', (req, res) => {
+  const shortId = req.params.shortId.toLowerCase();
+  let found = serverQrMappings[shortId];
+  if (!found) {
+    found = Object.values(serverQrMappings).find(
+      (m: any) => m.shortId.toLowerCase() === shortId || m.qrCodeId.toLowerCase() === shortId
+    );
+  }
+  if (!found) {
+    return res.status(404).json({ error: 'QR Code mapping not found' });
+  }
+  const isExpired = found.expirationDate ? new Date(found.expirationDate) < new Date() : false;
+  found.scanCount = (found.scanCount || 0) + 1;
+  found.updatedAt = new Date().toISOString();
+  res.json({ success: true, mapping: found, isExpired });
+});
+
 app.get('/api/health-metrics', (req, res) => {
   res.json(healthMetrics);
 });
@@ -2144,6 +2296,486 @@ Ensure:
   } catch (error: any) {
     console.error('Gemini Quiz Generation Error:', error);
     res.status(500).json({ error: error.message || 'Failed to generate quiz.' });
+  }
+});
+
+// Endpoint for generating a complete, print-ready Classroom Scavenger Hunt plan using Gemini
+app.post('/api/generate-scavenger-hunt', async (req, res) => {
+  if (!ai) {
+    return res.status(500).json({
+      error: 'Gemini API key is not configured. Please add GEMINI_API_KEY in the Secrets / Environment variable settings.',
+    });
+  }
+
+  const {
+    subject = 'Chemistry',
+    coreTopic = 'Periodic Table & Chemical Reactions',
+    numberOfStations = 5,
+    scale = 'Classroom-Based',
+    gradeLevel = 'Junior Secondary / Grade 8',
+    curriculumType = 'Kenyan CBC / Standard',
+    language = 'en',
+  } = req.body;
+
+  const stationCount = Math.min(8, Math.max(3, parseInt(numberOfStations) || 5));
+
+  const systemInstruction = `You are an Expert Creative Lesson Designer and Educational Technologist.
+Your task is to generate an interactive, high-engagement Classroom Scavenger Hunt plan that seamlessly bridges physical learning spaces with digital, accessible activities.
+The output MUST strictly be a JSON object with 4 primary components:
+1. "storylineAndMission": { "title": "...", "narrativeHook": "...", "missionObjective": "...", "teamRoles": ["...", "..."] }
+2. "stations": Array of exactly ${stationCount} objects, each with:
+   - "stationNumber": number
+   - "title": string
+   - "locationClueRiddle": clever riddle or brain-teaser directing students to find this physical station location (${scale})
+   - "coreTask": subject-specific, highly active puzzle, reading passage, or question to complete
+   - "digitalDestinationQR": REAL, valid, scannable HTTPS web URL (e.g., "https://phet.colorado.edu/en/simulations/filter?subjects=chemistry", "https://www.khanacademy.org/science", "https://www.geogebra.org/m/geometry", "https://en.wikipedia.org/wiki/Periodic_table", "https://earth.google.com/web", "https://www.bbc.co.uk/bitesize", or "https://www.worldhistory.org"). MUST strictly start with "https://" so smartphone camera scanners can immediately open the real web resource!
+   - "rewardMessageClue": code word, visual key, or riddle revealed only upon completing the task to unlock next coordinate
+3. "udlAndAccessibility": {
+   - "adhdFocusSupports": list/description of micro-milestone checklists and visual progress indicators
+   - "dyslexiaReadingAccommodations": formatting and font instructions for printed station materials
+   - "visualMotorAdaptations": physical touchpoint visibility, height, and tactile layout guidance
+}
+4. "educatorSetupChecklist": Array of step-by-step checklist items for generating, testing, and placing physical QR codes and managing paperless workflows.
+
+CRITICAL FORMATTING REQUIREMENT: Do NOT use any asterisks (*) or Markdown styling inside JSON strings. Return clean plain text inside strings.`;
+
+  const prompt = `Generate a complete, print-ready ${stationCount}-station Classroom Scavenger Hunt for:
+Subject: ${subject}
+Core Topic/Unit: ${coreTopic}
+Number of Stations: ${stationCount}
+Scale: ${scale} (Classroom-Based or School-Wide)
+Grade Level / Audience: ${gradeLevel}
+Curriculum: ${curriculumType}
+Language: ${language}
+
+Provide a rich, immersive narrative, highly specific subject puzzles at each station, actionable UDL supports, and an educator checklist.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            subject: { type: 'STRING' },
+            coreTopic: { type: 'STRING' },
+            numberOfStations: { type: 'INTEGER' },
+            scale: { type: 'STRING' },
+            storylineAndMission: {
+              type: 'OBJECT',
+              properties: {
+                title: { type: 'STRING' },
+                narrativeHook: { type: 'STRING' },
+                missionObjective: { type: 'STRING' },
+                teamRoles: {
+                  type: 'ARRAY',
+                  items: { type: 'STRING' },
+                },
+              },
+              required: ['title', 'narrativeHook', 'missionObjective', 'teamRoles'],
+            },
+            stations: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  stationNumber: { type: 'INTEGER' },
+                  title: { type: 'STRING' },
+                  locationClueRiddle: { type: 'STRING' },
+                  coreTask: { type: 'STRING' },
+                  digitalDestinationQR: { type: 'STRING' },
+                  rewardMessageClue: { type: 'STRING' },
+                },
+                required: [
+                  'stationNumber',
+                  'title',
+                  'locationClueRiddle',
+                  'coreTask',
+                  'digitalDestinationQR',
+                  'rewardMessageClue',
+                ],
+              },
+            },
+            udlAndAccessibility: {
+              type: 'OBJECT',
+              properties: {
+                adhdFocusSupports: { type: 'STRING' },
+                dyslexiaReadingAccommodations: { type: 'STRING' },
+                visualMotorAdaptations: { type: 'STRING' },
+              },
+              required: [
+                'adhdFocusSupports',
+                'dyslexiaReadingAccommodations',
+                'visualMotorAdaptations',
+              ],
+            },
+            educatorSetupChecklist: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+            },
+          },
+          required: [
+            'subject',
+            'coreTopic',
+            'numberOfStations',
+            'scale',
+            'storylineAndMission',
+            'stations',
+            'udlAndAccessibility',
+            'educatorSetupChecklist',
+          ],
+        },
+      },
+    });
+
+    let text = response.text || '';
+    const huntData = JSON.parse(text);
+    res.json({ scavengerHunt: huntData });
+  } catch (error: any) {
+    console.error('Gemini Scavenger Hunt Generation Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate scavenger hunt.' });
+  }
+});
+
+app.post('/api/virtual-field-trip/generate', async (req, res) => {
+  if (!ai) {
+    return res.status(500).json({
+      error: 'Gemini API key is not configured. Please add GEMINI_API_KEY in the Secrets / Environment variable settings.',
+    });
+  }
+
+  const { destination, country, subject, gradeLevel, targetLanguage, stopCount } = req.body;
+  const count = Math.min(5, Math.max(2, parseInt(stopCount) || 3));
+
+  const systemInstruction = `You are a World-Class Virtual Tour Architect, Multilingual Curriculum Specialist, and Socratic Pedagogical Guide.
+Your task is to generate a comprehensive, highly realistic, multi-stop Virtual Field Trip and Excursion Route.
+The trip MUST feature precise real-world GPS coordinates (latitude/longitude), step-by-step reading passages, foreign language directional cues, Socratic observation questions, and ADHD-friendly micro-milestone checkpoints.`;
+
+  const prompt = `Design a ${count}-stop Virtual Field Trip and Excursion for:
+Destination / Landmark: ${destination || 'Brussels & Grand Place'}
+Country: ${country || 'Belgium'}
+Subject: ${subject || 'European History & Geography'}
+Grade Level: ${gradeLevel || 'Grade 7-9'}
+Target Foreign Language Cues: ${targetLanguage || 'French'}
+
+Requirements:
+1. Provide trip title, destination, country, subject, grade level, and description.
+2. Provide exactly ${count} stops. For each stop:
+   - Provide precise latitude and longitude coordinates.
+   - Provide location name and suggested zoom level (16-18).
+   - Provide reading passage explaining historical, cultural, or scientific significance.
+   - Provide 1 to 2 foreign language cues with phrase, translation, phonetic spelling, and usage context.
+   - Provide step-by-step navigation instructions.
+   - Provide 2 Socratic guide prompts for the local tour guide AI.
+   - Provide 2 to 3 ADHD-friendly micro-milestone checkpoints with labels, hints, and reward points.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            title: { type: 'STRING' },
+            destination: { type: 'STRING' },
+            country: { type: 'STRING' },
+            subject: { type: 'STRING' },
+            gradeLevel: { type: 'STRING' },
+            description: { type: 'STRING' },
+            primaryLanguage: { type: 'STRING' },
+            stops: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  stopNumber: { type: 'INTEGER' },
+                  title: { type: 'STRING' },
+                  locationName: { type: 'STRING' },
+                  lat: { type: 'NUMBER' },
+                  lng: { type: 'NUMBER' },
+                  zoom: { type: 'INTEGER' },
+                  mapType: { type: 'STRING' },
+                  readingPassage: { type: 'STRING' },
+                  navigationInstruction: { type: 'STRING' },
+                  socraticGuidePrompts: {
+                    type: 'ARRAY',
+                    items: { type: 'STRING' },
+                  },
+                  foreignLanguageCues: {
+                    type: 'ARRAY',
+                    items: {
+                      type: 'OBJECT',
+                      properties: {
+                        phrase: { type: 'STRING' },
+                        language: { type: 'STRING' },
+                        translation: { type: 'STRING' },
+                        phoneticSpelling: { type: 'STRING' },
+                        usageContext: { type: 'STRING' },
+                      },
+                      required: ['phrase', 'language', 'translation', 'usageContext'],
+                    },
+                  },
+                  checkpoints: {
+                    type: 'ARRAY',
+                    items: {
+                      type: 'OBJECT',
+                      properties: {
+                        id: { type: 'STRING' },
+                        label: { type: 'STRING' },
+                        hint: { type: 'STRING' },
+                        isCompleted: { type: 'BOOLEAN' },
+                        rewardPoints: { type: 'INTEGER' },
+                      },
+                      required: ['id', 'label', 'isCompleted', 'rewardPoints'],
+                    },
+                  },
+                },
+                required: [
+                  'stopNumber',
+                  'title',
+                  'locationName',
+                  'lat',
+                  'lng',
+                  'zoom',
+                  'mapType',
+                  'readingPassage',
+                  'navigationInstruction',
+                  'socraticGuidePrompts',
+                  'foreignLanguageCues',
+                  'checkpoints',
+                ],
+              },
+            },
+          },
+          required: ['title', 'destination', 'country', 'subject', 'gradeLevel', 'description', 'primaryLanguage', 'stops'],
+        },
+      },
+    });
+
+    let text = response.text || '';
+    const tripData = JSON.parse(text);
+    tripData.id = `custom-trip-${Date.now()}`;
+    tripData.createdAt = new Date().toISOString();
+    tripData.coverImage = 'https://images.unsplash.com/photo-1502602898657-3e91760cbb34?auto=format&fit=crop&w=1200&q=80';
+    res.json({ fieldTrip: tripData });
+  } catch (error: any) {
+    console.error('Gemini Virtual Field Trip Generation Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate field trip.' });
+  }
+});
+
+app.post('/api/virtual-field-trip/generate-lesson-plan', async (req, res) => {
+  if (!ai) {
+    return res.status(500).json({
+      error: 'Gemini API key is not configured. Please add GEMINI_API_KEY in the Secrets / Environment variable settings.',
+    });
+  }
+
+  const { fieldTrip } = req.body;
+  if (!fieldTrip || !fieldTrip.title) {
+    return res.status(400).json({ error: 'Field trip object is required.' });
+  }
+
+  const prompt = `You are an expert curriculum designer and master educator specializing in Competency-Based Education (CBC), Universal Design for Learning (UDL), and Experiential Field Trips.
+
+Generate a comprehensive, structured Virtual Field Trip Lesson Plan for educators based on the following excursion parameters:
+
+Title: ${fieldTrip.title}
+Destination: ${fieldTrip.destination} (${fieldTrip.country})
+Subject: ${fieldTrip.subject}
+Grade Level: ${fieldTrip.gradeLevel}
+Description: ${fieldTrip.description}
+Primary Language: ${fieldTrip.primaryLanguage || 'English'}
+Stops Included: ${fieldTrip.stops?.map((s: any) => `Stop ${s.stopNumber}: ${s.title} (${s.locationName})`).join(' | ')}
+
+Generate a complete, highly detailed lesson plan in JSON format conforming strictly to the requested schema. Ensure rich detail, practical teacher script, Socratic inquiry prompts, assessment rubrics, differentiation strategies, and CBC competency connections.`;
+
+  try {
+    const response = await generateContentWithFallback({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            lessonTitle: { type: 'STRING' },
+            subject: { type: 'STRING' },
+            gradeLevel: { type: 'STRING' },
+            durationMinutes: { type: 'INTEGER' },
+            overview: { type: 'STRING' },
+            learningOutcomes: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+            },
+            cbcCompetencies: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+            },
+            materialsAndEquipment: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+            },
+            preTripPreparation: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+            },
+            stopByStopGuidance: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  stopNumber: { type: 'INTEGER' },
+                  stopTitle: { type: 'STRING' },
+                  teacherScript: { type: 'STRING' },
+                  socraticQuestions: {
+                    type: 'ARRAY',
+                    items: { type: 'STRING' },
+                  },
+                  studentActionItem: { type: 'STRING' },
+                },
+                required: ['stopNumber', 'stopTitle', 'teacherScript', 'socraticQuestions', 'studentActionItem'],
+              },
+            },
+            postTripAssessment: {
+              type: 'OBJECT',
+              properties: {
+                exitSlipPrompt: { type: 'STRING' },
+                rubricCriteria: {
+                  type: 'ARRAY',
+                  items: {
+                    type: 'OBJECT',
+                    properties: {
+                      criterion: { type: 'STRING' },
+                      beginning: { type: 'STRING' },
+                      proficient: { type: 'STRING' },
+                      exemplary: { type: 'STRING' },
+                    },
+                    required: ['criterion', 'beginning', 'proficient', 'exemplary'],
+                  },
+                },
+                extensionActivities: {
+                  type: 'ARRAY',
+                  items: { type: 'STRING' },
+                },
+              },
+              required: ['exitSlipPrompt', 'rubricCriteria', 'extensionActivities'],
+            },
+            differentiationStrategies: {
+              type: 'OBJECT',
+              properties: {
+                forSupport: { type: 'STRING' },
+                forExtension: { type: 'STRING' },
+              },
+              required: ['forSupport', 'forExtension'],
+            },
+          },
+          required: [
+            'lessonTitle',
+            'subject',
+            'gradeLevel',
+            'durationMinutes',
+            'overview',
+            'learningOutcomes',
+            'cbcCompetencies',
+            'materialsAndEquipment',
+            'preTripPreparation',
+            'stopByStopGuidance',
+            'postTripAssessment',
+            'differentiationStrategies',
+          ],
+        },
+      },
+    });
+
+    let text = response.text || '';
+    const lessonPlan = JSON.parse(text);
+    res.json({ lessonPlan });
+  } catch (error: any) {
+    console.error('Gemini Lesson Plan Generation Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate lesson plan.' });
+  }
+});
+
+app.post('/api/chat/socratic-tutor', async (req, res) => {
+  if (!ai) {
+    return res.status(500).json({
+      error: 'Gemini API key is not configured. Please add GEMINI_API_KEY in the Secrets / Environment variable settings.',
+    });
+  }
+
+  const {
+    documentTitle,
+    stopTitle,
+    locationName,
+    readingPassage,
+    destination,
+    subject,
+    socraticGuidePrompts,
+    userPrompt,
+    chatHistory,
+    language
+  } = req.body;
+
+  const systemInstruction = `[SYSTEM ROLE]
+You are the EduNexus Virtual tour Guide for Virtual Field Trips and Industry Tours. Your purpose is to facilitate active observation and critical thinking as students complete a virtual field trip.
+
+[IDENTITY REQUIREMENT]
+Always refer to yourself or open your response as "Welcome to EduNexus Virtual tour Guide" or as the "EduNexus Virtual tour Guide". NEVER refer to yourself as a "sidebar" or "tour guide sidebar".
+
+[GUIDING PHILOSOPHY]
+Do NOT directly tell the student what is happening, how the machinery/facility works, or define the industrial/cultural processes for them. Instead, prompt them to analyze what they see in their split-screen Interactive Reader and video/map workspace. Use guided Socratic questions to help them deduce the design, engineering, economics, history, or science of the facility on their own.
+
+[CONSTRAINTS & COMPREHENSIVE ACCESSIBILITY (UDL)]
+To eliminate visual, cognitive, and language barriers, structure all interactions to support Universal Design for Learning (UDL) guidelines:
+1. ADHD-Friendly Focus Scaffolding: Avoid long walls of text. Keep responses chunked, scannable, and actionable. You MUST include a brief, clear "🎯 Focus Challenge" or micro-goal in every message (e.g., "🎯 Focus Challenge: Find two key structural features in the passage or map").
+2. Dyslexia-Friendly Layout & Typography: Format responses with bold lead-ins, high-contrast structural bullet points, clean spacing, and simple sentences.
+3. ESL / Multilingual Scaffolding: Filter out unnecessarily complex jargon. When key technical or cultural terms are introduced (e.g., "pneumatic actuator", "quality control buffer", "facade"), offer optional, instant translations or phonetic pronunciations in French, Spanish, or Swahili.
+4. Multi-Modal Visual Cues: Continually reference specific visual elements in the student's split-screen layout (e.g., "Look at the reading passage on the right," "Check the GPS map coordinates," or "Examine the layout shape on the map").
+
+${language === 'sw' ? 'CRITICAL REQUIREMENT: Render your response in standard, encouraging Swahili (Kiswahili) while adhering strictly to all UDL guidelines.' : ''}
+CRITICAL FORMATTING REQUIREMENT: Do NOT use any asterisks (*) or hash tags (#) in your text output under any circumstances. Keep responses clean, concise, and beautifully structured.`;
+
+  let prompt = `Excursion Context:
+- Venue / Industry: ${documentTitle || destination || 'Virtual Field Trip'}
+- Stop Location: ${locationName || stopTitle || 'Current Milestone'}
+${subject ? `- Subject Area: ${subject}` : ''}
+${readingPassage ? `- Reading Passage Content:\n"${readingPassage.substring(0, 1500)}"` : ''}
+${socraticGuidePrompts && socraticGuidePrompts.length > 0 ? `- Target Socratic Prompts:\n${JSON.stringify(socraticGuidePrompts)}` : ''}
+
+`;
+
+  if (chatHistory && Array.isArray(chatHistory) && chatHistory.length > 0) {
+    prompt += `Recent Chat History:\n${chatHistory.slice(-6).map((m: any) => `${m.sender === 'student' || m.role === 'user' ? 'Student' : 'Tour Guide'}: ${m.text}`).join('\n')}\n\n`;
+  }
+
+  prompt += `Student Response / Input: "${userPrompt || 'I am observing the map and reading passage.'}"
+
+Formulate a concise, supportive Socratic response as the EduNexus Virtual Industry Tour Guide, adhering strictly to the UDL guidelines and including a "🎯 Focus Challenge" micro-goal.`;
+
+  try {
+    const response = await generateContentWithFallback({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        systemInstruction,
+        temperature: 0.35,
+      }
+    });
+
+    let reply = response.text || 'Great observation! Look closely at the map on the left and the passage text. 🎯 Focus Challenge: What key element or pattern explains what you see?';
+    reply = reply.replace(/[*#]/g, '').trim();
+
+    res.json({ reply });
+  } catch (error: any) {
+    console.error('Socratic Tutor API Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate Socratic tour guide response.' });
   }
 });
 
@@ -4602,10 +5234,34 @@ app.post('/api/tutor-chat', async (req, res) => {
     });
   }
 
-  const { message, history, subject, topic, scaffoldingLevel, documentContext, persona, isCbcMode, cbcSubject, cbcStrand, cbcSubStrand, cbcConcept, systemPrompt, cbcSocraticMode, difficultyLevel } = req.body;
+  const {
+    message,
+    history,
+    recent_chat_history,
+    subject,
+    topic,
+    scaffoldingLevel,
+    documentContext,
+    document_context,
+    persona,
+    isCbcMode,
+    cbcSubject,
+    cbcStrand,
+    cbcSubStrand,
+    cbcConcept,
+    systemPrompt,
+    cbcSocraticMode,
+    difficultyLevel,
+    targetLanguage,
+    language,
+  } = req.body;
+
   if (!message) {
     return res.status(400).json({ error: 'Missing required parameter: message' });
   }
+
+  const activeDocumentContext = document_context || documentContext || '';
+  const activeChatHistory = recent_chat_history || history || [];
 
   const cleanScaffolding = scaffoldingLevel || 'medium';
   const cleanDifficulty = difficultyLevel || 'intermediate';
@@ -4646,10 +5302,51 @@ app.post('/api/tutor-chat', async (req, res) => {
 - Style: Demands clear logical consistency and proof for assertions. Encourages the student to double check their logic, identify counter-examples, and strive for mathematical or factual exactness.`;
   }
 
+  const dynamicContextBlock = `
+[DYNAMIC VARIABLE INJECTION]
+1. document_context (Active Page / Reading Material in Interactive Reader):
+${activeDocumentContext ? activeDocumentContext : '(No active document page context attached)'}
+
+2. recent_chat_history (Recent Study Room Channel & Dialogue History):
+${Array.isArray(activeChatHistory) && activeChatHistory.length > 0
+  ? activeChatHistory.map((h: any) => `${h.speaker || h.role || 'Participant'}: ${h.text || h.message || ''}`).join('\n')
+  : '(No recent study room chat history)'}
+`;
+
+  const socraticGroupTemplate = `
+[EDUNEXUS SOCRATIC AI TUTOR: SYSTEM PROMPT TEMPLATE (GROUP STUDY EDITION)]
+System Role: Socratic AI Study Room Tutor
+Platform: EduNexus (Pedagogical Workspace)
+
+[OBJECTIVE]
+You are a highly engaging Socratic AI tutor embedded within the EduNexus Interactive Reader sidebar and Pedagogical Workspace. Your primary purpose is to facilitate learning, critical thinking, and collaboration in a digital study room. Do NOT directly give students the answers to their homework, exam questions, or reading comprehension prompts. Instead, use Socratic questioning to guide them to discover the answers themselves.
+
+[COLLABORATIVE ROOM RULES]
+1. Encourage Group Synthesis: Since this is a shared collaborative document environment, address the group as a whole when appropriate. Frame questions that prompt students to build on, critique, or synthesize each other's pinned comments, edits, and shared ideas.
+2. Scaffold Peer Assessments: Actively guide students in conducting constructive peer-to-peer evaluations on shared files.
+3. Maintain Contextual Awareness: Read and analyze the loaded document text, highlighted snippets, and live comment threads to keep your Socratic prompts strictly relevant to the specific passage they are studying.
+
+[COGNITIVE & ACCESSIBILITY FORMATTING (UDL)]
+To ensure you remove cognitive and learning barriers for all students, structure your output to support Universal Design for Learning (UDL) guidelines:
+- ADHD/Cognitive Scaffolding: Avoid long walls of text. Present your Socratic questions and hints using structured bullet points, clear micro-milestone sub-steps, and visual checklists.
+- ESL & Dyslexia Support: Keep your vocabulary direct, clean, and easily translatable, filtering out overly complex syntax.
+- Screen-Reader Optimization: Use clean, nested Markdown headers and structural tags so screen-reading engines can easily parse your responses.
+
+[SOCRATIC STRATEGY WORKFLOW]
+- Step 1 (Acknowledge & Validate): Start by validating the student's question or observation. Point out what was smart or interesting about their current angle of thought.
+- Step 2 (Break Down the Problem): If a student asks a complex question, break it into smaller, manageable cognitive milestones. Ask them to solve the first micro-step.
+- Step 3 (The Counter-Question/Hint): Provide a subtle clue, an analogy, or a real-life example that highlights the underlying principle. Follow it immediately with an open-ended question that prompts them to apply this logic (e.g., "If X is true in this paragraph, what does that imply for Y?").
+- Step 4 (The Group Nudge): Invite another study room participant to jump in when appropriate (e.g., "Who can build on what Sarah just edited in paragraph 3?").
+
+[PERSISTENT PROMPT WEIGHTING & SOCRATIC GUARDRAILS]
+This system prompt is persistently weighted across all API calls. You must NEVER generate direct copy-paste solutions or final answers for students. Maintain these Socratic guardrails at all times.
+`;
+
   let systemInstruction = '';
+
   if (isCbcMode) {
     const customPromptHeader = systemPrompt ? `SYSTEM DIRECTIVE AND CURRICULUM PATH:\n${systemPrompt}\n\n` : '';
-    
+
     const guidanceSection = cbcSocraticMode === 'direct'
       ? `- You MUST provide clear, direct, and immediate explanations. 
 - When the student asks a question, seeks clarification, or is stuck, explain the concept fully and directly upfront without withholding the answer or being cryptic.
@@ -4661,7 +5358,11 @@ app.post('/api/tutor-chat', async (req, res) => {
 - The user-selected scaffolding level is "${cleanScaffolding}". Adjust the size of the steps accordingly (high: extremely granular; medium: step-by-step; low: higher-level hints).
 - If the student struggles or shows confusion, offer to explain the concept using a vivid, relatable analogy from daily Kenyan life (e.g., using market pricing, buying things at duka, m-pesa transactions, farming, matatus, athletics/running, or community activities).`;
 
-    systemInstruction = `${customPromptHeader}You are the EduNexus AI Tutor (also known as NextED AI Tutor), an expert specialist in the Kenyan Competency-Based Curriculum (CBC) and a Learning Design specialist. You maintain a professional, encouraging, and patient tone consistent with a warm, caring teacher at St. Mary's Girls Secondary School in Kenya. Your objective is to empower students to master all subjects.
+    systemInstruction = `${customPromptHeader}${socraticGroupTemplate}
+
+${dynamicContextBlock}
+
+You are the EduNexus AI Tutor (also known as NextED AI Tutor), an expert specialist in the Kenyan Competency-Based Curriculum (CBC) and a Learning Design specialist. You maintain a professional, encouraging, and patient tone consistent with a warm, caring teacher at St. Mary's Girls Secondary School in Kenya. Your objective is to empower students to master all subjects.
 
 OPERATIONAL WORKFLOW:
 1. INITIAL INQUIRY & KNOWLEDGE ASSESSMENT:
@@ -4677,13 +5378,10 @@ OPERATIONAL WORKFLOW:
 ${difficultyInstruction}
 ${guidanceSection}
 
-3. SOURCE GROUNDING:
-- Everything you teach must be grounded in the provided curriculum documents if available. If a query falls outside the selected topic, gently steer the student back to their chosen path.
+3. SOURCE GROUNDING & DYNAMIC CONTEXT:
+- Everything you teach must be grounded in the active document context (document_context) and recent study room chat history (recent_chat_history). If a query falls outside the selected topic or active document, gently steer the student back.
 - Keep responses offline-friendly, structured, and concise. Avoid suggesting external websites or high-bandwidth video sources unless they are strictly from the PhET (https://phet.colorado.edu/) or OpenStax (https://openstax.org/) allowed lists.
 - Always cite your sources from the provided documents.
-
-CONTEXTUAL KNOWLEDGE BASE:
-${documentContext ? `Use the following curriculum material as your reference context for teaching:\n${documentContext}\n` : 'Use general standard Kenyan CBC curriculum standards.'}
 
 RESPONSE FORMAT:
 You MUST respond with a valid, clean JSON object matching the following structure:
@@ -4715,7 +5413,11 @@ CRITICAL FORMATTING RULES:
 - In the "conceptVisualization" graph, make sure to generate between 2 to 6 relevant nodes and connections illustrating the core concept(s) discussed in this turn.
 - Return ONLY the JSON object. Do not wrap in markdown code blocks like \`\`\`json.`;
   } else {
-    systemInstruction = `You are a world-class AI Pedagogical Tutor working in the style of the following Persona:
+    systemInstruction = `${socraticGroupTemplate}
+
+${dynamicContextBlock}
+
+You are a world-class AI Pedagogical Tutor working in the style of the following Persona:
 ${personaInstruction}
 
 Your goal is to guide students to deep understanding of ${cleanSubject} concepts (especially ${cleanTopic}) using three core pillars of instruction:
@@ -4745,9 +5447,6 @@ ${difficultyInstruction}
   - GeoGebra (https://www.geogebra.org/) for interactive geometry, algebra, and physics graphs.
 - Recommend a resource by name, describe exactly how it will help them visualize the concept, and provide the correct hyperlink.
 - You MUST also generate a updated concept visualization graph representing the connection of active concepts being discussed in this lesson turn. This graph will be dynamically rendered in the client.
-
-CONTEXTUAL KNOWLEDGE BASE:
-${documentContext ? `Use the following curriculum material as your reference context for teaching:\n${documentContext}\n` : 'Use general standard international curriculum standards.'}
 
 RESPONSE FORMAT:
 You MUST respond with a valid, clean JSON object matching the following structure:
@@ -4780,21 +5479,29 @@ CRITICAL FORMATTING RULES:
 - Return ONLY the JSON object. Do not wrap in markdown code blocks like \`\`\`json.`;
   }
 
+  const activeTargetLang = targetLanguage || language || 'en';
+  if (activeTargetLang && activeTargetLang !== 'en') {
+    systemInstruction += `\n\nCRITICAL MULTILINGUAL INSTRUCTION: The user/student has set their target language preference to "${activeTargetLang}". You MUST output all text strings in the JSON response (specifically the "message", "scaffoldingStep", and descriptions inside "conceptVisualization") in "${activeTargetLang}". Whether the language is an international language (Kiswahili, French, Spanish, Arabic, Portuguese, German) or a local/regional language (Luganda, Kikuyu, Dholuo, Sheng, Kinyarwanda, Amharic), provide accurate, natural, and student-friendly explanations in "${activeTargetLang}".`;
+  }
+
   try {
     // Format history for Gemini API
     const formattedContents = [];
-    if (history && Array.isArray(history)) {
-      for (const h of history) {
-        formattedContents.push({
-          role: h.role === 'user' ? 'user' : 'model',
-          parts: [{ text: h.text }]
-        });
+    if (Array.isArray(activeChatHistory)) {
+      for (const h of activeChatHistory) {
+        const textContent = h.text || h.message || '';
+        if (textContent) {
+          formattedContents.push({
+            role: h.role === 'user' || h.speaker === 'user' || !h.role ? 'user' : 'model',
+            parts: [{ text: textContent }],
+          });
+        }
       }
     }
     // Add current user message
     formattedContents.push({
       role: 'user',
-      parts: [{ text: message }]
+      parts: [{ text: message }],
     });
 
     console.log(`[AI Tutor] Processing Socratic query with persona [${cleanPersona}] on subject: ${cleanSubject}, topic: ${cleanTopic}`);

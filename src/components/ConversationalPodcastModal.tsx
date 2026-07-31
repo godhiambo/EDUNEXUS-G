@@ -10,6 +10,7 @@ import {
   Volume2,
   VolumeX,
   Mic,
+  MicOff,
   Sparkles,
   Zap,
   HelpCircle,
@@ -97,8 +98,117 @@ export default function ConversationalPodcastModal({
   const [isAskingPanel, setIsAskingPanel] = useState<boolean>(false);
   const [askError, setAskError] = useState<string | null>(null);
 
+  // Voice Question Recording States
+  const [isListening, setIsListening] = useState<boolean>(false);
+  const [speechSupported, setSpeechSupported] = useState<boolean>(true);
+  const [interimTranscript, setInterimTranscript] = useState<string>('');
+  const recognitionRef = useRef<any>(null);
+
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  // Check SpeechRecognition support
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      setSpeechSupported(!!SpeechRecognition);
+    }
+  }, []);
+
+  const stopListening = useCallback(() => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {
+        // ignore error
+      }
+      recognitionRef.current = null;
+    }
+    setIsListening(false);
+    setInterimTranscript('');
+  }, []);
+
+  const startListening = useCallback(() => {
+    setAskError(null);
+    if (typeof window === 'undefined') return;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setSpeechSupported(false);
+      setAskError('Voice speech recognition is not supported in this browser. Please type your question.');
+      return;
+    }
+
+    // Stop podcast audio speech synthesis if active
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsPlaying(false);
+
+    try {
+      const rec = new SpeechRecognition();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = 'en-US';
+
+      rec.onstart = () => {
+        setIsListening(true);
+        setInterimTranscript('');
+      };
+
+      rec.onresult = (event: any) => {
+        let currentInterim = '';
+        let currentFinal = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const trans = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            currentFinal += trans;
+          } else {
+            currentInterim += trans;
+          }
+        }
+
+        if (currentFinal) {
+          setStudentQuestion(prev => {
+            const trimmed = prev.trim();
+            return trimmed ? `${trimmed} ${currentFinal.trim()}` : currentFinal.trim();
+          });
+        }
+        setInterimTranscript(currentInterim);
+      };
+
+      rec.onerror = (event: any) => {
+        console.warn('Speech recognition error:', event.error);
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          setAskError('Microphone permission was denied. Please allow microphone access in your browser settings.');
+        } else if (event.error !== 'no-speech') {
+          setAskError(`Voice recognition error: ${event.error}`);
+        }
+        stopListening();
+      };
+
+      rec.onend = () => {
+        setIsListening(false);
+        setInterimTranscript('');
+      };
+
+      recognitionRef.current = rec;
+      rec.start();
+    } catch (err: any) {
+      console.error('Failed to start speech recognition:', err);
+      setAskError('Failed to activate microphone. Please try typing your question.');
+      setIsListening(false);
+    }
+  }, [stopListening]);
+
+  const toggleVoiceInput = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  };
 
   // Sync ESL profile state when context changes
   useEffect(() => {
@@ -176,15 +286,16 @@ export default function ConversationalPodcastModal({
     }
   }, [isOpen, podcastData, isLoading, handleSynthesizePodcast]);
 
-  // Stop speech when modal closes
+  // Stop speech & voice recording when modal closes
   useEffect(() => {
     if (!isOpen) {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       }
       setIsPlaying(false);
+      stopListening();
     }
-  }, [isOpen]);
+  }, [isOpen, stopListening]);
 
   // Speech Synthesis player function for a specific line
   const speakLine = useCallback((lineIndex: number) => {
@@ -264,6 +375,11 @@ export default function ConversationalPodcastModal({
     setIsAskingPanel(true);
     setAskError(null);
 
+    // Stop active voice recording if listening
+    if (isListening) {
+      stopListening();
+    }
+
     // Stop current speech playback temporarily
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
@@ -317,7 +433,7 @@ export default function ConversationalPodcastModal({
     } finally {
       setIsAskingPanel(false);
     }
-  }, [studentQuestion, podcastData, isAskingPanel, studentName, materialTitle, materialsText, speakerTarget, speakLine]);
+  }, [studentQuestion, podcastData, isAskingPanel, studentName, materialTitle, materialsText, speakerTarget, speakLine, isListening, stopListening]);
 
   const togglePlayPause = () => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window) || !podcastData) return;
@@ -656,9 +772,13 @@ export default function ConversationalPodcastModal({
               {/* Join Live Panel Interactivity Section */}
               <div className="bg-gradient-to-r from-emerald-950/60 via-slate-900 to-indigo-950/60 border border-emerald-500/30 rounded-2xl p-4 space-y-3 shadow-lg">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                      <Mic className="w-4 h-4 animate-pulse" />
+                  <div className="flex items-center gap-2.5">
+                    <div className={`p-2 rounded-xl transition-all ${
+                      isListening
+                        ? 'bg-rose-500/30 text-rose-300 border border-rose-500/50 animate-pulse shadow-md shadow-rose-500/20'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    }`}>
+                      {isListening ? <Mic className="w-4 h-4 animate-bounce text-rose-400" /> : <Mic className="w-4 h-4" />}
                     </div>
                     <div>
                       <h4 className="font-extrabold text-xs text-white flex items-center gap-1.5">
@@ -666,9 +786,14 @@ export default function ConversationalPodcastModal({
                         <span className="px-1.5 py-0.5 rounded text-[9px] font-mono uppercase font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                           LIVE Q&A
                         </span>
+                        {speechSupported && (
+                          <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono uppercase font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                            🎙️ Voice Input Ready
+                          </span>
+                        )}
                       </h4>
                       <p className="text-[11px] text-slate-300">
-                        Ask a question or seek clarity directly from Dr. Sarah & Host Alex during the episode.
+                        Speak using your microphone or type a question for Dr. Sarah & Host Alex.
                       </p>
                     </div>
                   </div>
@@ -686,12 +811,35 @@ export default function ConversationalPodcastModal({
                       key={idx}
                       disabled={isAskingPanel}
                       onClick={() => handleAskPanelist(preset)}
-                      className="px-2.5 py-1 rounded-xl bg-slate-950/80 hover:bg-emerald-950 hover:text-emerald-300 text-slate-300 border border-slate-800 text-[10px] font-medium transition cursor-pointer disabled:opacity-50"
+                      className="px-2.5 py-1 rounded-xl bg-slate-950/80 hover:bg-emerald-950 hover:text-emerald-300 text-slate-300 border border-slate-800 text-[10px] font-medium transition cursor-pointer disabled:opacity-50 flex items-center gap-1"
                     >
-                      💡 {preset}
+                      <span>💡</span>
+                      <span>{preset}</span>
                     </button>
                   ))}
                 </div>
+
+                {/* Live Voice Active Recording Banner */}
+                {isListening && (
+                  <div className="p-2.5 bg-rose-950/60 border border-rose-500/50 rounded-xl flex items-center justify-between gap-3 text-xs text-rose-200 animate-pulse shadow-md shadow-rose-950/50">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping shrink-0" />
+                      <span className="font-extrabold text-[10px] uppercase tracking-wider text-rose-300 shrink-0">
+                        🔴 Microphone Active:
+                      </span>
+                      <span className="italic font-medium text-slate-100 truncate">
+                        {interimTranscript ? `"${interimTranscript}"` : 'Listening... Speak your question into your mic'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={stopListening}
+                      className="px-2 py-0.5 bg-rose-900 hover:bg-rose-800 text-rose-100 rounded-lg text-[10px] font-bold border border-rose-600/50 shrink-0 cursor-pointer"
+                    >
+                      Done Speaking
+                    </button>
+                  </div>
+                )}
 
                 {/* Live Question Input Form */}
                 <form
@@ -730,17 +878,66 @@ export default function ConversationalPodcastModal({
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={studentQuestion}
-                      onChange={(e) => setStudentQuestion(e.target.value)}
-                      placeholder="Ask the panelists a question or seek clarity on a concept..."
+                    <div className="relative flex-1 flex items-center">
+                      <input
+                        type="text"
+                        value={studentQuestion}
+                        onChange={(e) => setStudentQuestion(e.target.value)}
+                        placeholder={
+                          isListening
+                            ? "Listening to voice... Speak clearly into microphone"
+                            : "Type question or click mic to ask with voice..."
+                        }
+                        disabled={isAskingPanel}
+                        className={`w-full bg-slate-950/90 border rounded-xl pl-3 pr-10 py-2 text-xs text-white placeholder-slate-500 focus:outline-none transition disabled:opacity-50 ${
+                          isListening
+                            ? 'border-rose-500 ring-2 ring-rose-500/30 bg-rose-950/20'
+                            : 'border-slate-800 focus:border-emerald-500'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={toggleVoiceInput}
+                        disabled={isAskingPanel}
+                        title={isListening ? "Stop Microphone" : "Ask Question with Voice"}
+                        className={`absolute right-1.5 p-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                          isListening
+                            ? 'bg-rose-600 text-white animate-pulse shadow-md shadow-rose-500/50'
+                            : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-800'
+                        }`}
+                      >
+                        {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+
+                    {/* Dedicated Microphone Voice Recording Toggle Button */}
+                    <button
+                      type="button"
+                      onClick={toggleVoiceInput}
                       disabled={isAskingPanel}
-                      className="flex-1 bg-slate-950/90 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none transition disabled:opacity-50"
-                    />
+                      title={isListening ? "Stop Voice Recording" : "Start Voice Recording"}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                        isListening
+                          ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30 animate-pulse'
+                          : 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30'
+                      }`}
+                    >
+                      {isListening ? (
+                        <>
+                          <MicOff className="w-3.5 h-3.5" />
+                          <span>Stop Mic</span>
+                        </>
+                      ) : (
+                        <>
+                          <Mic className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="hidden sm:inline">Voice Input</span>
+                        </>
+                      )}
+                    </button>
+
                     <button
                       type="submit"
-                      disabled={!studentQuestion.trim() || isAskingPanel}
+                      disabled={(!studentQuestion.trim() && !interimTranscript.trim()) || isAskingPanel}
                       className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-extrabold text-xs rounded-xl shadow-md transition cursor-pointer flex items-center gap-1.5 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {isAskingPanel ? (

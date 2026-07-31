@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { handleResponseJson } from '../utils/api';
 import { db, cleanUndefined, compressObject } from '../firebase';
@@ -9,6 +9,8 @@ import { INITIAL_DOCUMENTS } from '../data/seedDocs';
 import { triggerAutoBackupIfEnabled } from '../lib/googleWorkspace';
 import { OPEN_BOOKS_CATALOG, OpenBook } from '../data/openBooksData';
 import OpenBookReaderModal from './OpenBookReaderModal';
+import UploadFullBookModal from './UploadFullBookModal';
+import Book3DCard from './Book3DCard';
 import {
   Search,
   Sparkles,
@@ -135,6 +137,8 @@ export default function GlobalResources() {
   const [isDifficultyDropdownOpen, setIsDifficultyDropdownOpen] = useState(false);
   const [selectedBookForModal, setSelectedBookForModal] = useState<OpenBook | null>(null);
   const [savedBookIds, setSavedBookIds] = useState<string[]>([]);
+  const [customBooks, setCustomBooks] = useState<OpenBook[]>([]);
+  const [isUploadBookModalOpen, setIsUploadBookModalOpen] = useState<boolean>(false);
 
   // AI Recommendation States & Matching
   const [userDocTopics, setUserDocTopics] = useState<Array<{ title: string; subject: string; topic: string; keywords: string[] }>>([]);
@@ -280,6 +284,42 @@ export default function GlobalResources() {
     };
 
     loadUserDocumentsAndTopics();
+
+    const loadCustomGlobalBooks = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'global_books'));
+        const loadedBooks: OpenBook[] = [];
+        if (!snap.empty) {
+          snap.forEach((docSnap) => {
+            const data = docSnap.data() as OpenBook;
+            if (data && data.title && data.chapters) {
+              loadedBooks.push(data);
+            }
+          });
+        }
+
+        try {
+          const localCustom: OpenBook[] = JSON.parse(localStorage.getItem('edunexus_custom_global_books') || '[]');
+          if (Array.isArray(localCustom)) {
+            localCustom.forEach((lb) => {
+              if (!loadedBooks.some((b) => b.id === lb.id)) {
+                loadedBooks.push(lb);
+              }
+            });
+          }
+        } catch (e) {}
+
+        setCustomBooks(loadedBooks);
+      } catch (err) {
+        console.warn("Firestore global_books fetch notice:", err);
+        try {
+          const localCustom: OpenBook[] = JSON.parse(localStorage.getItem('edunexus_custom_global_books') || '[]');
+          if (Array.isArray(localCustom)) setCustomBooks(localCustom);
+        } catch (e) {}
+      }
+    };
+
+    loadCustomGlobalBooks();
   }, []);
 
   const getAiRecommendationInfo = (
@@ -763,7 +803,8 @@ ${chapterPreviews}
     );
   });
 
-  const rawFilteredBooks = OPEN_BOOKS_CATALOG.filter(book => {
+  const allAvailableBooks = [...customBooks, ...OPEN_BOOKS_CATALOG];
+  const rawFilteredBooks = allAvailableBooks.filter(book => {
     if (contentTypeFilter === 'resources') return false;
 
     if (categoryFilter !== 'All') {
@@ -852,6 +893,18 @@ ${chapterPreviews}
           <p className="text-sm md:text-base text-slate-100 max-w-2xl leading-relaxed">
             Search and scan real-time databases, curriculum platforms, and global repositories. Instantly source high-quality simulators, worksheets, and assessment content to enrich your lessons.
           </p>
+          <div className="pt-2 flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => setIsUploadBookModalOpen(true)}
+              className="bg-amber-400 hover:bg-amber-300 text-slate-900 px-5 py-2.5 rounded-2xl font-extrabold text-xs transition shadow-lg flex items-center gap-2 cursor-pointer transform hover:scale-105"
+            >
+              <BookOpen className="w-4 h-4 text-slate-900" />
+              <span>➕ Load Full Book for AI Access</span>
+              <span className="bg-slate-900 text-white text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-wide">
+                AI Indexed
+              </span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1392,12 +1445,21 @@ ${chapterPreviews}
             {/* OPEN-ACCESS BOOKS SECTION */}
             {(contentTypeFilter === 'all' || contentTypeFilter === 'books') && filteredBooks.length > 0 && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-2 flex-wrap gap-2">
                   <h3 className="text-sm font-extrabold uppercase tracking-wider text-amber-900 flex items-center gap-2">
                     <BookOpen className="w-4 h-4 text-amber-700" />
-                    <span>Open-Access Textbooks & Classic Books ({filteredBooks.length})</span>
+                    <span>Open-Access Textbooks & Loaded Books ({filteredBooks.length})</span>
                   </h3>
-                  <span className="text-xs text-slate-400 font-medium">Free Public Domain & CC Licensed</span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setIsUploadBookModalOpen(true)}
+                      className="bg-[#5f6f52] hover:bg-[#4d5a42] text-white px-3.5 py-1.5 rounded-xl font-bold text-xs transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                      Load Full Book for AI Access
+                    </button>
+                    <span className="text-xs text-slate-400 font-medium hidden sm:inline">Free Public Domain & AI Indexed</span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -1405,169 +1467,24 @@ ${chapterPreviews}
                     const isSaved = savedBookIds.includes(book.id);
                     const recInfo = getAiRecommendationInfo(book.title, book.subject, book.summary, book.author);
                     const bookDifficulty = getItemDifficulty(book);
-                    const difficultyColors = {
-                      Beginner: 'bg-emerald-50 text-emerald-800 border-emerald-200/90',
-                      Intermediate: 'bg-amber-50 text-amber-900 border-amber-200/90',
-                      Advanced: 'bg-purple-50 text-purple-900 border-purple-200/90'
-                    };
                     return (
                       <motion.div
                         key={book.id}
                         initial={{ opacity: 0, y: 14, x: 10 }}
                         animate={{ opacity: 1, y: 0, x: 0 }}
                         transition={{ duration: 0.28, delay: Math.min(idx * 0.035, 0.22), ease: 'easeOut' }}
-                        className="bg-white border border-slate-200 hover:border-amber-400 hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02] transform transition-all duration-300 rounded-3xl p-5 flex flex-col justify-between group relative overflow-hidden"
                       >
-                        <div className="space-y-3">
-                          {/* Cover Banner */}
-                          <div className={`bg-gradient-to-r ${book.coverBg} text-white p-4 rounded-2xl flex items-center justify-between relative overflow-hidden shadow-xs`}>
-                            <span className="text-3xl drop-shadow-sm">{book.coverEmoji}</span>
-                            <span className="text-[9px] uppercase font-bold tracking-widest bg-black/25 backdrop-blur-xs text-white px-2.5 py-1 rounded-full border border-white/20">
-                              {book.license.split(' ')[0]}
-                            </span>
-                          </div>
-
-                          {/* AI Recommendation Badge */}
-                          {recInfo && (
-                            <div className="bg-gradient-to-r from-amber-500 via-indigo-600 to-purple-600 p-[1px] rounded-2xl shadow-2xs">
-                              <div className="bg-gradient-to-r from-amber-50 via-indigo-50/90 to-purple-50 text-indigo-950 px-3 py-1.5 rounded-[15px] flex items-center justify-between gap-1.5 text-xs font-bold border border-indigo-200/60">
-                                <div className="flex items-center gap-1.5 shrink-0 text-indigo-900">
-                                  <Sparkles className="w-3.5 h-3.5 text-amber-500 fill-amber-400 animate-pulse" />
-                                  <span className="font-extrabold text-[10px] uppercase tracking-wider text-indigo-900">AI Recommended</span>
-                                </div>
-                                <span className="text-[10px] text-indigo-700 font-medium truncate max-w-[170px]" title={recInfo.reason}>
-                                  {recInfo.reason}
-                                </span>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Metadata */}
-                          <div className="flex items-center justify-between gap-2 text-[10px] font-bold text-slate-500 flex-wrap">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <motion.button
-                                type="button"
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.92 }}
-                                onClick={() => handleSubjectTagClick(book.subject)}
-                                title={`Click to filter resources by "${book.subject}"`}
-                                className={`px-2.5 py-1 rounded-full border transition-all cursor-pointer flex items-center gap-1.5 group/pill ${
-                                  searchFilter.trim().toLowerCase() === book.subject.trim().toLowerCase()
-                                    ? 'bg-amber-700 text-white border-amber-700 shadow-xs ring-2 ring-amber-500/20'
-                                    : 'bg-amber-50 text-amber-900 border-amber-200/80 hover:bg-amber-100 hover:border-amber-300 hover:shadow-2xs'
-                                }`}
-                              >
-                                <Tag className={`w-3 h-3 text-amber-600 transition-transform ${
-                                  searchFilter.trim().toLowerCase() === book.subject.trim().toLowerCase()
-                                    ? 'text-white'
-                                    : 'group-hover/pill:scale-110'
-                                }`} />
-                                <span>{book.subject}</span>
-                              </motion.button>
-
-                              <span className={`px-2 py-0.5 rounded-full border text-[10px] font-extrabold flex items-center gap-1 ${difficultyColors[bookDifficulty]}`}>
-                                <Gauge className="w-2.5 h-2.5 shrink-0" />
-                                <span>{bookDifficulty}</span>
-                              </span>
-                            </div>
-                            <span className="text-slate-400 font-mono">{book.pageCount} pages</span>
-                          </div>
-
-                          {/* Title & Author */}
-                          <div>
-                            <h4 className="text-base font-bold text-slate-900 leading-snug group-hover:text-amber-800 transition-colors line-clamp-2">
-                              {book.title}
-                            </h4>
-                            <p className="text-xs text-slate-500 font-medium flex items-center gap-1 mt-0.5">
-                              <User className="w-3 h-3 text-slate-400 shrink-0" /> {book.author}
-                            </p>
-                          </div>
-
-                          {/* Summary */}
-                          <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed">
-                            {book.summary}
-                          </p>
-                        </div>
-
-                        {/* Actions */}
-                        <div className="pt-4 mt-4 border-t border-slate-100 flex flex-wrap items-center gap-2">
-                          <button
-                            onClick={() => setSelectedBookForModal(book)}
-                            className="flex-1 min-w-[110px] bg-amber-600 hover:bg-amber-700 text-white rounded-xl py-2 px-3 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
-                          >
-                            <BookOpen className="w-3.5 h-3.5" />
-                            <span>Read / Preview</span>
-                          </button>
-
-                          <button
-                            onClick={() => handleToggleOfflineDownload({
-                              idOrUrl: book.id,
-                              type: 'book',
-                              title: book.title,
-                              categoryOrSubject: book.subject,
-                              description: book.summary,
-                              bookData: book
-                            })}
-                            className={`rounded-xl py-2 px-3 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 ${
-                              offlineDownloadedKeys.includes(book.id)
-                                ? 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300 shadow-2xs'
-                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/80'
-                            }`}
-                            title={offlineDownloadedKeys.includes(book.id) ? "Saved in browser local storage for offline reading (Click to remove)" : "Save book content to local browser storage & download guide for offline access"}
-                          >
-                            {offlineDownloadedKeys.includes(book.id) ? (
-                              <>
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                <span>Offline Ready</span>
-                              </>
-                            ) : (
-                              <>
-                                <Download className="w-3.5 h-3.5 text-slate-600 shrink-0" />
-                                <span>Offline Download</span>
-                              </>
-                            )}
-                          </button>
-
-                          <button
-                            onClick={() => {
-                              setShareItem({
-                                type: 'book',
-                                title: book.title,
-                                url: book.externalUrl || window.location.href,
-                                subjectOrCategory: book.subject,
-                                description: book.summary,
-                                authorOrType: book.author,
-                                bookData: book
-                              });
-                              setShareSuccessMsg(null);
-                              setShareNote('');
-                            }}
-                            className="p-2 py-2 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 transition flex items-center justify-center gap-1 text-xs font-bold cursor-pointer shrink-0"
-                            title="Share textbook link or send to Collaboration Hub"
-                          >
-                            <Share2 className="w-3.5 h-3.5" />
-                            <span>Share</span>
-                          </button>
-
-                          {!isStudent && (
-                            <button
-                              onClick={() => handleImportBookToMaterials(book)}
-                              disabled={isSaved}
-                              className={`rounded-xl py-2 px-3 text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer shrink-0 ${
-                                isSaved
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                              }`}
-                              title="Import book to My Materials"
-                            >
-                              {isSaved ? (
-                                <BookmarkCheck className="w-3.5 h-3.5 text-emerald-600" />
-                              ) : (
-                                <BookmarkPlus className="w-3.5 h-3.5 text-slate-600" />
-                              )}
-                            </button>
-                          )}
-                        </div>
+                        <Book3DCard
+                          book={book}
+                          onRead={(b) => setSelectedBookForModal(b)}
+                          onImport={!isStudent ? (b) => handleImportBookToMaterials(b) : undefined}
+                          isImported={isSaved}
+                          recInfo={recInfo}
+                          bookDifficulty={bookDifficulty}
+                          searchFilter={searchFilter}
+                          onSubjectTagClick={handleSubjectTagClick}
+                          variant="grid"
+                        />
                       </motion.div>
                     );
                   })}
@@ -1815,6 +1732,15 @@ ${chapterPreviews}
         book={selectedBookForModal}
         onClose={() => setSelectedBookForModal(null)}
         onImportToLibrary={(book) => handleImportBookToMaterials(book)}
+      />
+
+      {/* UPLOAD FULL BOOK FOR AI ACCESS MODAL */}
+      <UploadFullBookModal
+        isOpen={isUploadBookModalOpen}
+        onClose={() => setIsUploadBookModalOpen(false)}
+        onBookAdded={(newBook) => {
+          setCustomBooks((prev) => [newBook, ...prev]);
+        }}
       />
 
       {/* SHARE RESOURCE / BOOK MODAL */}

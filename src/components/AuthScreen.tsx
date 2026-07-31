@@ -4,6 +4,7 @@ import { firebaseAuthDomain, firebaseProjectId } from '../firebase';
 import { UserRole } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { AuthBackgroundPattern, GeometricPatternType } from './AuthBackgroundPattern';
+import PasswordResetModal from './PasswordResetModal';
 import { 
   GraduationCap, 
   Mail, 
@@ -27,6 +28,7 @@ export default function AuthScreen() {
     registerWithEmail, 
     loginWithProvider, 
     loginOffline,
+    sendPasswordReset,
     loading: authLoading 
   } = useAuth();
   const [isRegistering, setIsRegistering] = useState(false);
@@ -40,6 +42,10 @@ export default function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [hasInteractedForm, setHasInteractedForm] = useState(false);
+
+  // Forgot password states
+  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
   const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'your-domain.com';
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://your-domain.com';
 
@@ -158,6 +164,12 @@ export default function AuthScreen() {
     if (err.code === 'auth/invalid-credential') return 'Invalid email or password.';
     if (err.code === 'auth/email-already-in-use') return 'This email is already registered.';
     if (err.code === 'auth/weak-password') return 'Password must be at least 6 characters.';
+    if (err.code === 'auth/user-not-found') return 'No registered account found with this email address. Please check your spelling or create a new account.';
+    if (err.code === 'auth/invalid-email') return 'Please enter a valid email address.';
+    if (err.code === 'auth/too-many-requests') return 'Too many password reset requests. Please wait a few minutes before trying again.';
+    if (err.code === 'auth/network-request-failed' || (err.message && err.message.toLowerCase().includes('network-request-failed'))) {
+      return 'Network connection error: Unable to reach authentication services. Please verify your internet connection or use Offline Demo / Guest mode below.';
+    }
     if (err.code === 'auth/unauthorized-domain' || (err.message && err.message.toLowerCase().includes('unauthorized-domain'))) {
       return `The active domain ${currentHost} is not yet authorized in your Firebase project. Please authorize this domain in both the Firebase Console and Google Cloud Console OAuth credentials.`;
     }
@@ -646,6 +658,18 @@ export default function AuthScreen() {
               <label className="text-[10px] uppercase font-extrabold tracking-wider text-slate-500">
                 PASSWORD
               </label>
+              {!isRegistering && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResetEmail(email || '');
+                    setShowForgotPasswordModal(true);
+                  }}
+                  className="text-[10.5px] font-extrabold text-[#5f6f52] hover:text-[#4d5a42] hover:underline cursor-pointer transition-colors"
+                >
+                  Forgot Password?
+                </button>
+              )}
             </div>
             <div className="relative group">
               <Lock className="w-4 h-4 text-slate-400 group-focus-within:text-emerald-600 absolute left-3.5 top-1/2 -translate-y-1/2 transition-colors" />
@@ -817,6 +841,13 @@ export default function AuthScreen() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Password Reset Modal Component */}
+      <PasswordResetModal
+        isOpen={showForgotPasswordModal}
+        onClose={() => setShowForgotPasswordModal(false)}
+        initialEmail={resetEmail}
+      />
 
     </div>
   );

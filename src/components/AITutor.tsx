@@ -55,6 +55,7 @@ import {
 } from 'lucide-react';
 import { SavedDocument, PersonalizedLearningPath, FlashcardDeck } from '../types';
 import { LearningPathWorkspace } from './LearningPathWorkspace';
+import TutorDashboard from './TutorDashboard';
 import FlashcardDeckModal from './FlashcardDeckModal';
 import { cbcSubjectsData } from '../data/cbcData';
 import { EditableSelect } from './EditableSelect';
@@ -62,6 +63,7 @@ import { db, auth, storage, handleFirestoreError, OperationType, cleanUndefined 
 import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { SetupForm } from './SetupForm';
 import { handleResponseJson } from '../utils/api';
 
@@ -134,6 +136,7 @@ interface AITutorProps {
 }
 
 export default function AITutor({ documents, initialSelectedResourceId }: AITutorProps) {
+  const { aiLanguage } = useLanguage();
   // Session History State
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     if (typeof window !== 'undefined') {
@@ -250,8 +253,8 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
   });
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   
-  // Student Personalized Learning Path State
-  const [tutorMode, setTutorMode] = useState<'socratic' | 'cbc-tutor' | 'learning-path'>('socratic');
+  // Student Personalized Learning Path & Socratic Dashboard State
+  const [tutorMode, setTutorMode] = useState<'socratic' | 'cbc-tutor' | 'dashboard' | 'learning-path'>('socratic');
 
   // Full screen widget toggle state
   const [fullscreenWidget, setFullscreenWidget] = useState<string | null>(null);
@@ -324,7 +327,9 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
           subtopic: cbcConcept || 'Contextual Review',
           content: activeContent,
           cardCount: 6,
-          isLowDifficultySupport: false
+          isLowDifficultySupport: false,
+          language: aiLanguage,
+          targetLanguage: aiLanguage
         })
       });
       const data = await handleResponseJson(res);
@@ -340,11 +345,12 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
   };
 
   const handleSaveFlashcardsToLibrary = async (deck: FlashcardDeck) => {
-    if (!profile?.uid) return;
+    if (!profile?.uid || !deck) return;
+    const cards = deck?.cards ?? [];
     const docId = deck.id || `flashcard-${Date.now()}`;
     const savedDoc: SavedDocument = {
       id: docId,
-      title: deck.title,
+      title: deck.title || 'Flashcard Deck',
       docType: 'flashcards',
       curriculum: 'cbc',
       subject: deck.subject || 'General',
@@ -352,14 +358,17 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
       topic: deck.topic || 'Socratic Lesson',
       subTopic: '',
       duration: '15 mins',
-      content: deck.cards.map((c, i) => `Card ${i + 1}: Q: ${c.front}\nA: ${c.back}${c.hint ? `\nHint: ${c.hint}` : ''}`).join('\n\n'),
+      content: cards.map((c, i) => `Card ${i + 1}: Q: ${c?.front || ''}\nA: ${c?.back || ''}${c?.hint ? `\nHint: ${c.hint}` : ''}`).join('\n\n'),
       createdAt: new Date().toISOString(),
       lastModified: new Date().toISOString(),
-      tags: ['flashcards', 'socratic-ai', 'file-library', deck.subject],
+      tags: ['flashcards', 'socratic-ai', 'file-library', deck.subject || 'General'],
       category: 'Flashcards',
       lastModifiedByUid: profile.uid,
-      lastModifiedByName: profile.displayName,
-      flashcardDeck: deck,
+      lastModifiedByName: profile.displayName || 'Teacher',
+      flashcardDeck: {
+        ...deck,
+        cards: cards,
+      },
     };
 
     await setDoc(doc(db, 'documents', docId), savedDoc as any);
@@ -1145,6 +1154,9 @@ ${dialogueStyleInstruction}`;
       rec.onerror = (event: any) => {
         console.error('Speech recognition error:', event.error);
         setIsListening(false);
+        if (event.error === 'not-allowed') {
+          alert('Microphone access was denied. Please allow microphone permissions in your browser to use voice-to-text input.');
+        }
       };
 
       rec.onend = () => {
@@ -1290,7 +1302,9 @@ ${dialogueStyleInstruction}`;
           cbcSubStrand: isCbcSession ? cbcSubStrand : undefined,
           cbcConcept: isCbcSession ? cbcConcept : undefined,
           systemPrompt: isCbcSession ? cbcSystemPrompt : undefined,
-          cbcSocraticMode: isCbcSession ? cbcSocraticMode : undefined
+          cbcSocraticMode: isCbcSession ? cbcSocraticMode : undefined,
+          targetLanguage: aiLanguage,
+          language: aiLanguage
         })
       });
 
@@ -1413,55 +1427,73 @@ ${dialogueStyleInstruction}`;
 
   return (
     <div className="flex flex-col gap-4 h-[calc(100vh-200px)] min-h-[600px] overflow-hidden">
-      {/* Mode Navigation Tabs */}
-      <div className="flex flex-col sm:flex-row justify-between items-center bg-white border border-[#e5e1da] rounded-2xl p-3 shadow-xs gap-3 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#5f6f52]/10 border border-[#5f6f52]/20 flex items-center justify-center text-[#5f6f52]">
-            <GraduationCap className="w-5 h-5" />
+      {/* Mode Navigation Header */}
+      <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center bg-white border border-[#e5e1da] rounded-2xl p-3.5 sm:p-4 shadow-2xs gap-3 shrink-0 transition-all duration-200">
+        <div className="flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#5f6f52]/15 to-[#5f6f52]/5 border border-[#5f6f52]/25 flex items-center justify-center text-[#5f6f52] shrink-0 shadow-2xs">
+            <GraduationCap className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="font-serif font-bold text-sm text-slate-800 leading-tight">AI Student Companion</h2>
-            <p className="text-[10px] text-slate-400 font-medium">Tailored study strategies, active recall, and course mapping</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="font-serif font-bold text-base text-slate-900 leading-tight">EduNexus AI Tutor</h2>
+              <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#5f6f52]/10 text-[#5f6f52] border border-[#5f6f52]/20 tracking-wider">
+                Socratic Active Recall Engine
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+              Interactive Socratic Pedagogy, Adaptive AI Guidance & Curriculum Workspace
+            </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-          <div className="flex bg-slate-100 p-1 rounded-xl">
+        <div className="flex items-center gap-2 flex-wrap md:flex-nowrap justify-between md:justify-end">
+          <div className="flex bg-slate-100/90 p-1 rounded-xl border border-slate-200/60 shadow-2xs">
             <button
               onClick={() => {
                 setTutorMode('socratic');
               }}
-              className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
                 tutorMode === 'socratic'
-                  ? 'bg-[#5f6f52] text-white shadow-xs'
-                  : 'text-slate-600 hover:text-[#5f6f52]'
+                  ? 'bg-[#5f6f52] text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-[#5f6f52] hover:bg-slate-200/50'
               }`}
             >
               <Cpu className="w-3.5 h-3.5" />
-              Socratic Conversation
+              <span>Socratic Dialogue</span>
+            </button>
+            <button
+              onClick={() => setTutorMode('dashboard')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                tutorMode === 'dashboard'
+                  ? 'bg-[#5f6f52] text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-[#5f6f52] hover:bg-slate-200/50'
+              }`}
+            >
+              <Gauge className="w-3.5 h-3.5" />
+              <span>Tutor Dashboard</span>
             </button>
             <button
               onClick={() => {
                 setTutorMode('cbc-tutor');
               }}
-              className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
                 tutorMode === 'cbc-tutor'
-                  ? 'bg-[#5f6f52] text-white shadow-xs'
-                  : 'text-slate-600 hover:text-[#5f6f52]'
+                  ? 'bg-[#5f6f52] text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-[#5f6f52] hover:bg-slate-200/50'
               }`}
             >
               <GraduationCap className="w-3.5 h-3.5" />
-              EduNexus AI Tutor
+              <span>EduNexus CBC Tutor</span>
             </button>
             <button
               onClick={() => setTutorMode('learning-path')}
-              className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
                 tutorMode === 'learning-path'
-                  ? 'bg-[#5f6f52] text-white shadow-xs'
-                  : 'text-slate-600 hover:text-[#5f6f52]'
+                  ? 'bg-[#5f6f52] text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-[#5f6f52] hover:bg-slate-200/50'
               }`}
             >
               <Compass className="w-3.5 h-3.5" />
-              Personalized Learning Path
+              <span>Learning Path</span>
             </button>
           </div>
 
@@ -1469,16 +1501,16 @@ ${dialogueStyleInstruction}`;
             <button
               type="button"
               onClick={() => setFullscreenWidget(fullscreenWidget === 'chat' ? null : 'chat')}
-              className={`px-3 py-2 rounded-xl text-xs font-extrabold tracking-wider uppercase transition flex items-center gap-1.5 cursor-pointer shadow-xs border ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold tracking-wider uppercase transition flex items-center gap-1.5 cursor-pointer shadow-2xs border ${
                 fullscreenWidget === 'chat'
-                  ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100 hover:text-red-700'
+                  ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100 hover:text-rose-700'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-[#5f6f52]/5 hover:text-[#5f6f52] hover:border-slate-300'
               }`}
               title={fullscreenWidget === 'chat' ? "Minimize Window" : "Maximize Socratic Conversation to Full Screen"}
             >
               {fullscreenWidget === 'chat' ? (
                 <>
-                  <Minimize2 className="w-3.5 h-3.5 text-red-500 animate-pulse" />
+                  <Minimize2 className="w-3.5 h-3.5 text-rose-500 animate-pulse" />
                   <span>Exit Full Screen</span>
                 </>
               ) : (
@@ -2608,31 +2640,39 @@ ${dialogueStyleInstruction}`;
                 onSubmit={(e) => { e.preventDefault(); handleSend(); }}
                 className="flex items-center gap-2"
               >
-                {/* Speech Microphone trigger button */}
+                {/* Voice-to-Text Microphone trigger button */}
                 <button
                   type="button"
+                  id="ai-tutor-mic-input-btn"
                   onClick={isListening ? stopListening : startListening}
                   disabled={isProcessing}
-                  className={`p-2.5 rounded-xl border transition-all duration-300 cursor-pointer flex items-center justify-center shadow-xs relative ${
+                  className={`px-3 py-2.5 rounded-xl border transition-all duration-300 cursor-pointer flex items-center justify-center gap-1.5 shadow-xs relative shrink-0 ${
                     isListening
-                      ? 'bg-red-500 border-red-400 text-white hover:bg-red-600 ring-2 ring-red-200'
+                      ? 'bg-rose-600 border-rose-500 text-white hover:bg-rose-700 ring-4 ring-rose-200 animate-pulse'
                       : !speechSupported
                       ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed opacity-60'
-                      : 'bg-slate-50 border-slate-200 text-slate-500 hover:text-[#5f6f52] hover:border-slate-300 hover:bg-slate-100'
+                      : 'bg-[#5f6f52]/10 border-[#5f6f52]/30 text-[#5f6f52] hover:bg-[#5f6f52]/20 hover:border-[#5f6f52]/50'
                   }`}
                   title={
                     !speechSupported
                       ? 'Speech recognition not supported in your browser or iframe environment'
                       : isListening
-                      ? 'Stop Recording'
-                      : 'Speak response'
+                      ? 'Recording audio... Click to stop listening'
+                      : 'Click to speak your question to AI Tutor (Voice-to-Text)'
                   }
                 >
-                  <Mic className={`w-4 h-4 ${isListening ? 'scale-110' : ''}`} />
+                  {isListening ? (
+                    <MicOff className="w-4 h-4 text-white animate-bounce" />
+                  ) : (
+                    <Mic className="w-4 h-4" />
+                  )}
+                  <span className="text-[11px] font-bold hidden sm:inline">
+                    {isListening ? 'Listening...' : 'Voice'}
+                  </span>
                   {isListening && (
-                    <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600"></span>
+                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-600"></span>
                     </span>
                   )}
                 </button>
@@ -3192,6 +3232,35 @@ ${dialogueStyleInstruction}`;
 
       </div>
       </div>
+      ) : tutorMode === 'dashboard' ? (
+        <div className="flex-1 overflow-y-auto min-h-0 pr-1 pb-4">
+          <TutorDashboard
+            subject={subject}
+            topic={topic}
+            scaffoldingLevel={scaffoldingLevel}
+            persona={persona}
+            activeStep={activeStep}
+            misconceptions={misconceptions}
+            suggestedResources={suggestedResources}
+            conceptMap={conceptMap}
+            messages={messages}
+            onSelectTopic={(t) => {
+              setTopic(t);
+              setTutorMode('socratic');
+            }}
+            onSelectPrompt={(p) => {
+              setInputMessage(p);
+              setTutorMode('socratic');
+            }}
+            onChangeScaffolding={(scaff) => setScaffoldingLevel(scaff)}
+            onChangePersona={(p) => setPersona(p)}
+            onSwitchToChat={() => setTutorMode('socratic')}
+            onResetSession={() => {
+              setMisconceptions([]);
+              setActiveStep('Session metrics reset to baseline');
+            }}
+          />
+        </div>
       ) : (
         <LearningPathWorkspace />
       )}

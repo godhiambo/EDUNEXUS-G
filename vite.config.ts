@@ -6,17 +6,27 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
+    define: {
+      'process.env.GOOGLE_MAPS_PLATFORM_KEY': JSON.stringify(process.env.GOOGLE_MAPS_PLATFORM_KEY || '')
+    },
     resolve: {
+      dedupe: ['react', 'react-dom'],
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
     },
     server: {
-      // Set DISABLE_HMR=true when you need to suspend hot reload in constrained/dev environments.
-      // File watching is disabled in that mode to reduce CPU churn.
       hmr: process.env.DISABLE_HMR !== 'true',
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+    },
+    build: {
+      target: 'es2022',
+      cssCodeSplit: true,
+      minify: 'esbuild' as const,
+      chunkSizeWarningLimit: 2000,
+    },
+    optimizeDeps: {
+      include: ['react', 'react-dom', 'lucide-react', 'motion/react', 'firebase/app', 'firebase/firestore', 'firebase/auth'],
     },
   };
 });

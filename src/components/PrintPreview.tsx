@@ -21,6 +21,7 @@ import { extractDocumentHeadings } from '../utils/toc';
 interface PrintPreviewProps {
   document: SavedDocument;
   onClose: () => void;
+  onUpdate?: (updatedDoc: SavedDocument) => void;
 }
 
 type PaperSize = 'a4' | 'letter';
@@ -30,9 +31,23 @@ type ColorMode = 'color' | 'grayscale';
 type FontFamily = 'sans' | 'serif' | 'mono';
 type FontSize = 'small' | 'medium' | 'large' | 'xlarge';
 
-export default function PrintPreview({ document: docObj, onClose }: PrintPreviewProps) {
+export default function PrintPreview({ document: docObj, onClose, onUpdate }: PrintPreviewProps) {
   const headings = extractDocumentHeadings(docObj.content);
   const [paperSize, setPaperSize] = useState<PaperSize>('a4');
+  const [orientation, setOrientation] = useState<'portrait' | 'landscape'>(
+    docObj.pageOrientation || 'portrait'
+  );
+
+  const handleOrientationChange = (newOrientation: 'portrait' | 'landscape') => {
+    setOrientation(newOrientation);
+    if (onUpdate && docObj) {
+      onUpdate({
+        ...docObj,
+        pageOrientation: newOrientation,
+        lastModified: new Date().toISOString()
+      });
+    }
+  };
   const [marginSize, setMarginSize] = useState<MarginSize>('normal');
   const [printTheme, setPrintTheme] = useState<PrintTheme>(
     docObj.docType === 'lesson-notes' || docObj.docType === 'worksheet' ? 'lined' : 'digital'
@@ -77,11 +92,12 @@ export default function PrintPreview({ document: docObj, onClose }: PrintPreview
 
   // Paper preview style dimensions (maintains aspect ratios for visual simulation)
   const getPaperDimensions = () => {
-    // Utilize space optimally and don't preserve empty bottom paper space
-    if (paperSize === 'a4') {
-      return 'w-full max-w-[800px] min-h-[250px] pb-12';
+    if (orientation === 'landscape') {
+      return 'w-full max-w-[1080px] min-h-[360px] pb-12';
     } else {
-      return 'w-full max-w-[816px] min-h-[250px] pb-12';
+      return paperSize === 'a4'
+        ? 'w-full max-w-[800px] min-h-[250px] pb-12'
+        : 'w-full max-w-[816px] min-h-[250px] pb-12';
     }
   };
 
@@ -122,7 +138,7 @@ export default function PrintPreview({ document: docObj, onClose }: PrintPreview
 
           /* Force page size layout rules */
           @page {
-            size: ${paperSize === 'a4' ? 'A4' : 'letter'};
+            size: ${paperSize === 'a4' ? 'A4' : 'letter'} ${orientation};
             margin: 0;
           }
 
@@ -231,8 +247,9 @@ export default function PrintPreview({ document: docObj, onClose }: PrintPreview
               <label className="text-[11px] font-bold text-slate-400 uppercase">Paper Size</label>
               <div className="grid grid-cols-2 gap-2">
                 <button
+                  type="button"
                   onClick={() => setPaperSize('a4')}
-                  className={`py-2 px-3 text-xs font-bold rounded-xl border transition ${
+                  className={`py-2 px-3 text-xs font-bold rounded-xl border transition cursor-pointer ${
                     paperSize === 'a4' 
                       ? 'bg-slate-800 border-[#5f6f52] text-white' 
                       : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:bg-slate-850'
@@ -241,14 +258,46 @@ export default function PrintPreview({ document: docObj, onClose }: PrintPreview
                   📄 A4 (Standard)
                 </button>
                 <button
+                  type="button"
                   onClick={() => setPaperSize('letter')}
-                  className={`py-2 px-3 text-xs font-bold rounded-xl border transition ${
+                  className={`py-2 px-3 text-xs font-bold rounded-xl border transition cursor-pointer ${
                     paperSize === 'letter' 
                       ? 'bg-slate-800 border-[#5f6f52] text-white' 
                       : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:bg-slate-850'
                   }`}
                 >
                   📄 US Letter
+                </button>
+              </div>
+            </div>
+
+            {/* Orientation */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-slate-400 uppercase">Page Orientation</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleOrientationChange('portrait')}
+                  className={`py-2 px-3 text-xs font-bold rounded-xl border transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    orientation === 'portrait' 
+                      ? 'bg-slate-800 border-[#5f6f52] text-white shadow-xs' 
+                      : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Portrait</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOrientationChange('landscape')}
+                  className={`py-2 px-3 text-xs font-bold rounded-xl border transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    orientation === 'landscape' 
+                      ? 'bg-slate-800 border-[#5f6f52] text-white shadow-xs' 
+                      : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5 rotate-90" />
+                  <span>Landscape</span>
                 </button>
               </div>
             </div>

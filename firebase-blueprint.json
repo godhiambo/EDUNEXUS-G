@@ -434,6 +434,48 @@
         "cbcSocraticMode": { "type": "string" }
       },
       "required": ["id", "userId", "subject", "topic"]
+    },
+    "fieldTripStickyNote": {
+      "title": "Field Trip Collaborative Sticky Note",
+      "description": "Real-time collaborative digital sticky note dropped on virtual field trip map coordinates or stage overlays by students and teachers.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "routeId": { "type": "string" },
+        "stopNumber": { "type": "integer" },
+        "locationName": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "xPercentage": { "type": "number" },
+        "yPercentage": { "type": "number" },
+        "text": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "color": { "type": "string" },
+        "category": { "type": "string" },
+        "likesCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "routeId", "stopNumber", "text", "authorName", "createdAt"]
+    },
+    "fieldTripSession": {
+      "title": "Field Trip Teacher-Led Live Session",
+      "description": "Real-time synchronization state for teacher-led virtual field trip broadcasts, milestone lock states, and location coordinates.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "routeId": { "type": "string" },
+        "isTeacherLedModeActive": { "type": "boolean" },
+        "teacherUid": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "currentStopIndex": { "type": "integer" },
+        "mapViewMode": { "type": "string" },
+        "activeAnnotationId": { "type": "string" },
+        "spotlightMessage": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "routeId", "isTeacherLedModeActive", "currentStopIndex"]
     }
   },
   "firestore": {
@@ -520,6 +562,14 @@
     "/personalizedLearningPaths/{pathId}": {
       "schema": "personalizedLearningPath",
       "description": "Store custom generated personal learning paths for teachers and students."
+    },
+    "/fieldTripStickyNotes/{noteId}": {
+      "schema": "fieldTripStickyNote",
+      "description": "Real-time collaborative digital sticky notes dropped on virtual field trip map coordinates or stage overlays."
+    },
+    "/fieldTripSessions/{sessionId}": {
+      "schema": "fieldTripSession",
+      "description": "Live teacher-led virtual field trip session state for real-time student location synchronization and navigation locking."
     }
   }
 }

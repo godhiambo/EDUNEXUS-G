@@ -41,6 +41,23 @@ interface ModuleDetail {
 
 const APP_MODULES: ModuleDetail[] = [
   {
+    id: 'qr-linkage-module',
+    title: 'QR Linkage & Physical Touchpoint Mapping Studio',
+    category: 'Classroom Integration',
+    iconName: 'Printer',
+    summary: 'Dynamic QR redirection engine bridging physical textbooks, worksheets, and desk stickers with Socratic AI, UDL, and Adaptive Learning Paths.',
+    capabilities: [
+      'Dynamic QR redirection schema (/api/qr/resolve/:shortId)',
+      'Socratic AI Tutor physical textbook page linking',
+      'Adaptive Pathway node activation with auto low-difficulty scaffolding',
+      'Pre-configured UDL accessibility profile triggers (Dyslexia font, relaxed spacing, ADHD milestones, ESL translation)',
+      'Parent Playbook take-home folder progress sync',
+      'Printable cut-out label sheet generator & camera barcode reader'
+    ],
+    functionality: 'Maintains dynamic mappings between short IDs and JSON payloads in PostgreSQL/Firestore, enabling instant target updates without reprinting physical QR code stickers.',
+    adminControls: 'Administrators can view real-time scan metrics, inspect relational database DDL schemas, and update physical touchpoint parameters.'
+  },
+  {
     id: 'curriculum-engine',
     title: 'Curriculum Engine & CBC Dashboard',
     category: 'Core Academic',

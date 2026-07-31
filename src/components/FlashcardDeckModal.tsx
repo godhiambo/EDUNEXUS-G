@@ -160,7 +160,7 @@ export const FlashcardDeckModal: React.FC<FlashcardDeckModalProps> = ({
   const tierCounts = useMemo(() => {
     const counts = { struggling: 0, learning: 0, mastered: 0 };
     if (!deck?.cards) return counts;
-    deck.cards.forEach(card => {
+    (deck.cards || []).forEach(card => {
       const tier = getCardMasteryTier(card, sm2CardMap, masteredIds);
       if (tier === 'STRUGGLING') counts.struggling++;
       else if (tier === 'LEARNING') counts.learning++;
@@ -172,8 +172,8 @@ export const FlashcardDeckModal: React.FC<FlashcardDeckModalProps> = ({
   // Stable pseudo-random weights per card when shuffle mode is enabled
   const shuffleWeights = useMemo(() => {
     const weights: Record<string, number> = {};
-    if (!deck.cards) return weights;
-    deck.cards.forEach((card, idx) => {
+    if (!deck?.cards) return weights;
+    (deck.cards || []).forEach((card, idx) => {
       const str = `${card.id}-${shuffleSeed}-${idx}`;
       let hash = 0;
       for (let i = 0; i < str.length; i++) {
@@ -183,7 +183,7 @@ export const FlashcardDeckModal: React.FC<FlashcardDeckModalProps> = ({
       weights[card.id] = hash;
     });
     return weights;
-  }, [deck.cards, shuffleSeed]);
+  }, [deck?.cards, shuffleSeed]);
 
   const handleToggleShuffle = () => {
     setIsShuffled(prev => !prev);
@@ -246,7 +246,7 @@ export const FlashcardDeckModal: React.FC<FlashcardDeckModalProps> = ({
 
     // Populate missing cards with initial SM-2 defaults
     const updatedMap = { ...initialMap };
-    deck.cards.forEach(card => {
+    (deck?.cards ?? []).forEach(card => {
       if (!updatedMap[card.id]) {
         updatedMap[card.id] = {
           repetition: card.repetition ?? 0,
@@ -275,7 +275,7 @@ export const FlashcardDeckModal: React.FC<FlashcardDeckModalProps> = ({
 
   // Queue ordering based on SM-2 due dates, Smart Sort tier preferences, and shuffle
   const cardQueue = useMemo(() => {
-    let rawCards = deck.cards || [];
+    let rawCards = deck?.cards || [];
 
     // Filter by specific mastery tier if selected
     if (smartSortMode === 'STRUGGLING') {
@@ -341,7 +341,7 @@ export const FlashcardDeckModal: React.FC<FlashcardDeckModalProps> = ({
 
       return (shuffleWeights[a.id] || 0) - (shuffleWeights[b.id] || 0);
     });
-  }, [deck.cards, sm2CardMap, masteredIds, useSpacedRepetition, isShuffled, shuffleWeights, smartSortMode]);
+  }, [deck?.cards, sm2CardMap, masteredIds, useSpacedRepetition, isShuffled, shuffleWeights, smartSortMode]);
 
   const totalCards = cardQueue.length;
   const currentCard: Flashcard | undefined = cardQueue[currentIndex];
@@ -386,7 +386,7 @@ export const FlashcardDeckModal: React.FC<FlashcardDeckModalProps> = ({
       setIsFinished(true);
       const { updatedData } = awardStudentXp(
         100,
-        `Completed Deck: "${deck.title}"`,
+        `Completed Deck: "${deck?.title || 'Deck'}"`,
         'deck_completed'
       );
       setCurrentXpData(updatedData);
@@ -579,7 +579,7 @@ export const FlashcardDeckModal: React.FC<FlashcardDeckModalProps> = ({
       // Attach latest SM-2 card data when saving
       const updatedDeck = {
         ...deck,
-        cards: deck.cards.map(card => {
+        cards: (deck?.cards ?? []).map(card => {
           const sm2 = sm2CardMap[card.id];
           return sm2 ? { ...card, ...sm2 } : card;
         })
@@ -837,7 +837,7 @@ export const FlashcardDeckModal: React.FC<FlashcardDeckModalProps> = ({
                   className="bg-transparent border-0 font-bold text-slate-800 dark:text-white focus:outline-none cursor-pointer pr-1"
                   title="Filter or group cards automatically by mastery proficiency tiers"
                 >
-                  <option value="ALL">All Cards ({deck.cards.length})</option>
+                  <option value="ALL">All Cards ({deck?.cards?.length ?? 0})</option>
                   <option value="SMART_GROUP">🧠 Smart Group (Struggling First)</option>
                   <option value="STRUGGLING">🔥 Struggling ({tierCounts.struggling})</option>
                   <option value="LEARNING">📖 Learning ({tierCounts.learning})</option>
@@ -1082,33 +1082,33 @@ export const FlashcardDeckModal: React.FC<FlashcardDeckModalProps> = ({
                     Deck Composition Summary:
                   </span>
                   <span className="font-mono font-black text-slate-700 bg-slate-200/80 px-2 py-0.5 rounded-md text-[11px]">
-                    {deck.cards.length} Total Cards
+                    {deck?.cards?.length ?? 0} Total Cards
                   </span>
                 </div>
 
                 {/* Segmented Composition Percentage Breakdown Bar */}
-                {deck.cards.length > 0 && (
+                {(deck?.cards?.length ?? 0) > 0 && (
                   <div className="flex items-center gap-2">
                     <div className="w-36 sm:w-48 h-2.5 bg-slate-200 rounded-full overflow-hidden flex shadow-inner">
                       {tierCounts.struggling > 0 && (
                         <div
                           className="bg-rose-500 h-full transition-all duration-300"
-                          style={{ width: `${(tierCounts.struggling / deck.cards.length) * 100}%` }}
-                          title={`Struggling: ${tierCounts.struggling} cards (${Math.round((tierCounts.struggling / deck.cards.length) * 100)}%)`}
+                          style={{ width: `${(tierCounts.struggling / (deck?.cards?.length || 1)) * 100}%` }}
+                          title={`Struggling: ${tierCounts.struggling} cards (${Math.round((tierCounts.struggling / (deck?.cards?.length || 1)) * 100)}%)`}
                         />
                       )}
                       {tierCounts.learning > 0 && (
                         <div
                           className="bg-indigo-500 h-full transition-all duration-300"
-                          style={{ width: `${(tierCounts.learning / deck.cards.length) * 100}%` }}
-                          title={`Learning: ${tierCounts.learning} cards (${Math.round((tierCounts.learning / deck.cards.length) * 100)}%)`}
+                          style={{ width: `${(tierCounts.learning / (deck?.cards?.length || 1)) * 100}%` }}
+                          title={`Learning: ${tierCounts.learning} cards (${Math.round((tierCounts.learning / (deck?.cards?.length || 1)) * 100)}%)`}
                         />
                       )}
                       {tierCounts.mastered > 0 && (
                         <div
                           className="bg-emerald-500 h-full transition-all duration-300"
-                          style={{ width: `${(tierCounts.mastered / deck.cards.length) * 100}%` }}
-                          title={`Mastered: ${tierCounts.mastered} cards (${Math.round((tierCounts.mastered / deck.cards.length) * 100)}%)`}
+                          style={{ width: `${(tierCounts.mastered / (deck?.cards?.length || 1)) * 100}%` }}
+                          title={`Mastered: ${tierCounts.mastered} cards (${Math.round((tierCounts.mastered / (deck?.cards?.length || 1)) * 100)}%)`}
                         />
                       )}
                     </div>
@@ -1134,7 +1134,7 @@ export const FlashcardDeckModal: React.FC<FlashcardDeckModalProps> = ({
                   }`}
                 >
                   <Layers className="w-3.5 h-3.5" />
-                  <span>All Cards ({deck.cards.length})</span>
+                  <span>All Cards ({deck?.cards?.length ?? 0})</span>
                 </button>
 
                 <button
@@ -1724,7 +1724,7 @@ export const FlashcardDeckModal: React.FC<FlashcardDeckModalProps> = ({
                   }}
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black cursor-pointer transition shadow-sm"
                 >
-                  View All Cards ({deck.cards.length})
+                  View All Cards ({deck?.cards?.length ?? 0})
                 </button>
               </div>
             )}

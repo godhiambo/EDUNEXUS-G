@@ -38,7 +38,15 @@ import {
   Square,
   HelpCircle,
   ExternalLink,
-  Activity
+  Activity,
+  Mic,
+  MicOff,
+  Play,
+  Pause,
+  Volume2,
+  Radio,
+  FileAudio,
+  RotateCcw
 } from 'lucide-react';
 
 export default function ParentTeacherPortal() {
@@ -56,8 +64,148 @@ export default function ParentTeacherPortal() {
   // Filter state
   const [filterByDocId, setFilterByDocId] = useState<string>('All');
 
-  // Offline Parenting Brief state
+  // Offline Parenting Brief & portal tab state
   const [portalTab, setPortalTab] = useState<'messaging' | 'briefs'>('messaging');
+
+  // Voice-to-Text (Speech Recognition) state
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
+
+  // Record Voice Audio state
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
+  const [recordedAudioDuration, setRecordedAudioDuration] = useState(0);
+  const [isPlayingPreview, setIsPlayingPreview] = useState(false);
+
+  // Active playing audio message in chat thread
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<any>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const chatAudioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
+
+  useEffect(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      setSpeechSupported(true);
+    }
+  }, []);
+
+  // Voice-to-Text Speech Recognition Handler
+  const startListening = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('Speech recognition (Voice-to-Text) is not supported by your browser.');
+      return;
+    }
+    try {
+      const rec = new SpeechRecognition();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = 'en-US';
+
+      rec.onstart = () => setIsListening(true);
+      rec.onresult = (event: any) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        if (transcript) {
+          setNewMessageText((prev) => (prev ? prev + ' ' + transcript : transcript));
+        }
+      };
+      rec.onerror = (event: any) => {
+        console.error('Voice-to-text error:', event.error);
+        setIsListening(false);
+        if (event.error === 'not-allowed') {
+          alert('Microphone access was denied. Please allow microphone permissions in your browser settings.');
+        }
+      };
+      rec.onend = () => setIsListening(false);
+      rec.start();
+    } catch (err) {
+      console.error('Failed to start speech recognition:', err);
+      setIsListening(false);
+    }
+  };
+
+  const stopListening = () => {
+    setIsListening(false);
+  };
+
+  // Record Voice Audio Handlers
+  const startVoiceRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = () => {
+          const base64data = reader.result as string;
+          setRecordedAudioUrl(base64data);
+        };
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecordingAudio(true);
+      setRecordingDuration(0);
+      setRecordedAudioUrl(null);
+
+      timerRef.current = setInterval(() => {
+        setRecordingDuration((prev) => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error('Failed to start voice recording:', err);
+      alert('Could not access microphone for voice recording. Please check your browser permissions.');
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (mediaRecorderRef.current && isRecordingAudio) {
+      mediaRecorderRef.current.stop();
+      setIsRecordingAudio(false);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      setRecordedAudioDuration(recordingDuration);
+    }
+  };
+
+  const cancelVoiceRecording = () => {
+    if (mediaRecorderRef.current && isRecordingAudio) {
+      mediaRecorderRef.current.stop();
+      setIsRecordingAudio(false);
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setRecordedAudioUrl(null);
+    setRecordingDuration(0);
+    setRecordedAudioDuration(0);
+  };
+
+  const formatAudioTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
   const [completedDocs, setCompletedDocs] = useState<Record<string, boolean>>(() => {
     try {
       const saved = localStorage.getItem('parent_completed_docs');
@@ -232,10 +380,10 @@ export default function ParentTeacherPortal() {
     });
   }, [messages, selectedPartner, profile]);
 
-  // Send a new message
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessageText.trim() || !profile || !selectedPartner) return;
+  // Send a new message (text or voice note)
+  const handleSendMessage = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if ((!newMessageText.trim() && !recordedAudioUrl) || !profile || !selectedPartner) return;
 
     const linkedDoc = documents.find(d => d.id === selectedDocRef);
 
@@ -248,21 +396,30 @@ export default function ParentTeacherPortal() {
       recipientRole: selectedPartner.role,
       docId: selectedDocRef || undefined,
       docTitle: linkedDoc?.title || undefined,
-      text: newMessageText.trim(),
+      text: newMessageText.trim() ? newMessageText.trim() : (recordedAudioUrl ? '🎙️ Voice Note' : ''),
       createdAt: new Date().toISOString(),
       read: false
     };
 
+    if (recordedAudioUrl) {
+      messageData.audioUrl = recordedAudioUrl;
+      messageData.audioDuration = recordedAudioDuration || recordingDuration;
+    }
+
     try {
       const msgCol = collection(db, 'parent_teacher_messages');
       await addDoc(msgCol, cleanUndefined(messageData));
+
       setNewMessageText('');
       setSelectedDocRef('');
+      setRecordedAudioUrl(null);
+      setRecordingDuration(0);
+      setRecordedAudioDuration(0);
 
       // Log activity
       logActivity(
         'feedback',
-        `Sent real-time message to ${selectedPartner.displayName} (${selectedPartner.role}) regarding: ${linkedDoc?.title || 'General consultation'}`,
+        `Sent ${recordedAudioUrl ? 'voice message' : 'message'} to ${selectedPartner.displayName} (${selectedPartner.role}) regarding: ${linkedDoc?.title || 'General consultation'}`,
         profile,
         selectedDocRef || null,
         linkedDoc?.title || null
@@ -548,14 +705,91 @@ export default function ParentTeacherPortal() {
                             </div>
                           )}
 
+                          {/* Voice Note Audio Player if present */}
+                          {msg.audioUrl && (
+                            <div className={`p-3 rounded-2xl border shadow-xs mb-1 min-w-[220px] max-w-full ${
+                              isOwn 
+                                ? 'bg-[#4d5a42] text-white border-[#5f6f52]' 
+                                : 'bg-white text-slate-800 border-slate-200'
+                            }`}>
+                              <div className="flex items-center gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const audio = chatAudioRefs.current[msg.id];
+                                    if (!audio) return;
+                                    if (playingMessageId === msg.id) {
+                                      audio.pause();
+                                      setPlayingMessageId(null);
+                                    } else {
+                                      if (playingMessageId && chatAudioRefs.current[playingMessageId]) {
+                                        chatAudioRefs.current[playingMessageId]?.pause();
+                                      }
+                                      audio.play();
+                                      setPlayingMessageId(msg.id);
+                                    }
+                                  }}
+                                  className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-xs transition-transform transform active:scale-95 cursor-pointer ${
+                                    isOwn 
+                                      ? 'bg-white text-[#5f6f52] hover:bg-slate-100' 
+                                      : 'bg-[#5f6f52] text-white hover:bg-[#4d5a42]'
+                                  }`}
+                                  title={playingMessageId === msg.id ? "Pause Voice Note" : "Play Voice Note"}
+                                >
+                                  {playingMessageId === msg.id ? (
+                                    <Pause className="w-4 h-4 fill-current" />
+                                  ) : (
+                                    <Play className="w-4 h-4 fill-current ml-0.5" />
+                                  )}
+                                </button>
+
+                                <div className="flex-1 space-y-1 min-w-0">
+                                  <div className="flex items-center justify-between text-[10px] font-bold">
+                                    <span className="flex items-center gap-1">
+                                      <Radio className={`w-3 h-3 ${playingMessageId === msg.id ? 'animate-pulse text-rose-400' : ''}`} />
+                                      Voice Note
+                                    </span>
+                                    <span className="font-mono text-[9px] opacity-80">
+                                      {msg.audioDuration ? formatAudioTime(msg.audioDuration) : '0:15'}
+                                    </span>
+                                  </div>
+
+                                  {/* Waveform graphic */}
+                                  <div className="flex items-center gap-0.5 h-3">
+                                    {[35, 75, 40, 95, 60, 100, 50, 85, 45, 80, 30, 70, 90, 45, 85, 60].map((h, idx) => (
+                                      <div
+                                        key={idx}
+                                        className={`flex-1 rounded-full transition-all duration-300 ${
+                                          isOwn ? 'bg-white/80' : 'bg-[#5f6f52]/80'
+                                        } ${playingMessageId === msg.id ? 'animate-pulse' : 'opacity-40'}`}
+                                        style={{
+                                          height: playingMessageId === msg.id ? `${Math.max(25, (h * (idx % 3 + 1)) % 100)}%` : `${h * 0.35}%`
+                                        }}
+                                      />
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <audio
+                                  ref={(el) => { chatAudioRefs.current[msg.id] = el; }}
+                                  src={msg.audioUrl}
+                                  onEnded={() => setPlayingMessageId(null)}
+                                  className="hidden"
+                                />
+                              </div>
+                            </div>
+                          )}
+
                           {/* Chat text box */}
-                          <div className={`p-3 rounded-2xl text-xs leading-relaxed ${
-                            isOwn 
-                              ? 'bg-[#5f6f52] text-white rounded-tr-xs shadow-xs' 
-                              : 'bg-[#f4f1ea] text-slate-800 rounded-tl-xs shadow-xs border border-[#e5e1da]'
-                          }`}>
-                            <p className="whitespace-pre-wrap">{msg.text}</p>
-                          </div>
+                          {msg.text && (
+                            <div className={`p-3 rounded-2xl text-xs leading-relaxed ${
+                              isOwn 
+                                ? 'bg-[#5f6f52] text-white rounded-tr-xs shadow-xs' 
+                                : 'bg-[#f4f1ea] text-slate-800 rounded-tl-xs shadow-xs border border-[#e5e1da]'
+                            }`}>
+                              <p className="whitespace-pre-wrap">{msg.text}</p>
+                            </div>
+                          )}
 
                           {/* Message meta */}
                           <div className="flex items-center gap-1.5 px-1.5">
@@ -564,11 +798,11 @@ export default function ParentTeacherPortal() {
                               {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
                             {isOwn && (
-                              <span className="text-slate-400">
+                              <span className="text-slate-400" title={msg.read ? "Read" : "Sent"}>
                                 {msg.read ? (
-                                  <CheckCircle className="w-3 h-3 text-[#5f6f52]" title="Read" />
+                                  <CheckCircle className="w-3 h-3 text-[#5f6f52]" />
                                 ) : (
-                                  <Check className="w-3 h-3 text-slate-300" title="Sent" />
+                                  <Check className="w-3 h-3 text-slate-300" />
                                 )}
                               </span>
                             )}
@@ -583,27 +817,197 @@ export default function ParentTeacherPortal() {
                 {/* Input Footer Form */}
                 <form onSubmit={handleSendMessage} className="p-4 border-t border-[#f4f1ea] bg-white space-y-3">
                   {/* Reference Document Dropdown (Parents can tag a curriculum sheet they are viewing or want to comment on) */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center gap-1 shrink-0">
-                      <FileText className="w-3 h-3" />
-                      Reference Document:
-                    </span>
-                    <select
-                      value={selectedDocRef}
-                      onChange={(e) => setSelectedDocRef(e.target.value)}
-                      className="text-[10px] p-1.5 rounded-lg border border-slate-200 bg-[#fdfbf7] focus:outline-none focus:ring-1 focus:ring-[#5f6f52] max-w-full sm:max-w-xs"
-                    >
-                      <option value="">-- No reference (General Consultation) --</option>
-                      {documents.map((doc) => (
-                        <option key={doc.id} value={doc.id}>
-                          [{doc.docType.replace('-', ' ').toUpperCase()}] {doc.title}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center gap-1 shrink-0">
+                        <FileText className="w-3 h-3" />
+                        Reference Document:
+                      </span>
+                      <select
+                        value={selectedDocRef}
+                        onChange={(e) => setSelectedDocRef(e.target.value)}
+                        className="text-[10px] p-1.5 rounded-lg border border-slate-200 bg-[#fdfbf7] focus:outline-none focus:ring-1 focus:ring-[#5f6f52] max-w-full sm:max-w-xs"
+                      >
+                        <option value="">-- No reference (General Consultation) --</option>
+                        {documents.map((doc) => (
+                          <option key={doc.id} value={doc.id}>
+                            [{doc.docType.replace('-', ' ').toUpperCase()}] {doc.title}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Status Pill for Listening */}
+                    {isListening && (
+                      <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-ping" />
+                        Listening... Speak clearly into microphone
+                      </span>
+                    )}
                   </div>
 
-                  {/* Message Input text area & Submit button */}
-                  <div className="flex items-end gap-2.5">
+                  {/* ACTIVE VOICE RECORDING PANEL */}
+                  {isRecordingAudio && (
+                    <div className="p-3 bg-rose-50/70 border border-rose-200 rounded-xl flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-rose-600 text-white flex items-center justify-center animate-pulse ring-4 ring-rose-200 shrink-0">
+                          <Mic className="w-4 h-4 animate-bounce" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-extrabold text-rose-700">Recording Voice Note...</span>
+                            <span className="text-xs font-mono font-bold text-rose-600 bg-white px-2 py-0.5 rounded-md border border-rose-200 shadow-2xs">
+                              {formatAudioTime(recordingDuration)}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-rose-500">Speak your question or advice clearly</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={stopVoiceRecording}
+                          className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-xs flex items-center gap-1 cursor-pointer"
+                        >
+                          <Square className="w-3.5 h-3.5 fill-current" />
+                          Done
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelVoiceRecording}
+                          className="bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* RECORDED VOICE NOTE PREVIEW BAR */}
+                  {recordedAudioUrl && !isRecordingAudio && (
+                    <div className="p-3 bg-[#5f6f52]/10 border border-[#5f6f52]/30 rounded-xl flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (previewAudioRef.current) {
+                              if (isPlayingPreview) {
+                                previewAudioRef.current.pause();
+                                setIsPlayingPreview(false);
+                              } else {
+                                previewAudioRef.current.play();
+                                setIsPlayingPreview(true);
+                              }
+                            }
+                          }}
+                          className="w-9 h-9 rounded-full bg-[#5f6f52] text-white flex items-center justify-center hover:bg-[#4d5a42] transition cursor-pointer shrink-0 shadow-xs"
+                        >
+                          {isPlayingPreview ? (
+                            <Pause className="w-4 h-4 fill-current" />
+                          ) : (
+                            <Play className="w-4 h-4 fill-current ml-0.5" />
+                          )}
+                        </button>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-extrabold text-[#5f6f52] flex items-center gap-1">
+                              <FileAudio className="w-4 h-4 text-[#5f6f52]" />
+                              Voice Recording Ready
+                            </span>
+                            <span className="text-[10px] font-mono font-bold bg-white text-[#5f6f52] px-2 py-0.5 rounded-md border border-[#5f6f52]/20">
+                              {formatAudioTime(recordedAudioDuration)}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500">Click play to listen back or send directly below</p>
+                        </div>
+                        <audio
+                          ref={previewAudioRef}
+                          src={recordedAudioUrl}
+                          onEnded={() => setIsPlayingPreview(false)}
+                          className="hidden"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleSendMessage()}
+                          className="bg-[#5f6f52] hover:bg-[#4d5a42] text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          Send Voice Note
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRecordedAudioUrl(null);
+                            setRecordedAudioDuration(0);
+                            setRecordingDuration(0);
+                          }}
+                          className="bg-white hover:bg-slate-100 text-slate-500 border border-slate-200 p-1.5 rounded-lg transition cursor-pointer"
+                          title="Discard Recording"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Message Input text area, Voice buttons & Submit button */}
+                  <div className="flex items-end gap-2">
+                    {/* Voice-to-Text Button */}
+                    <button
+                      type="button"
+                      id="parent-voice-to-text-btn"
+                      onClick={isListening ? stopListening : startListening}
+                      className={`px-3 py-2.5 rounded-xl border transition-all duration-300 cursor-pointer flex items-center justify-center gap-1.5 shadow-xs shrink-0 relative ${
+                        isListening
+                          ? 'bg-rose-600 border-rose-500 text-white hover:bg-rose-700 ring-2 ring-rose-200 animate-pulse'
+                          : !speechSupported
+                          ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed opacity-60'
+                          : 'bg-[#5f6f52]/10 border-[#5f6f52]/30 text-[#5f6f52] hover:bg-[#5f6f52]/20'
+                      }`}
+                      title={
+                        !speechSupported
+                          ? 'Voice-to-text is not supported in this browser'
+                          : isListening
+                          ? 'Recording text... Click to stop listening'
+                          : 'Click to speak your message (Voice-to-Text)'
+                      }
+                    >
+                      {isListening ? (
+                        <MicOff className="w-4 h-4 text-white animate-bounce" />
+                      ) : (
+                        <Mic className="w-4 h-4" />
+                      )}
+                      <span className="text-[11px] font-bold hidden sm:inline">
+                        {isListening ? 'Listening...' : 'Voice-to-Text'}
+                      </span>
+                    </button>
+
+                    {/* Record Voice Note Button */}
+                    <button
+                      type="button"
+                      id="parent-record-voice-btn"
+                      onClick={isRecordingAudio ? stopVoiceRecording : startVoiceRecording}
+                      disabled={isRecordingAudio}
+                      className={`px-3 py-2.5 rounded-xl border transition-all duration-300 cursor-pointer flex items-center justify-center gap-1.5 shadow-xs shrink-0 ${
+                        isRecordingAudio
+                          ? 'bg-rose-600 border-rose-500 text-white animate-pulse'
+                          : recordedAudioUrl
+                          ? 'bg-amber-500 border-amber-400 text-white'
+                          : 'bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100'
+                      }`}
+                      title="Record and send a voice audio clip to teacher"
+                    >
+                      <Radio className="w-4 h-4" />
+                      <span className="text-[11px] font-bold hidden sm:inline">
+                        {isRecordingAudio ? 'Recording...' : recordedAudioUrl ? 'Audio Ready' : 'Record Voice'}
+                      </span>
+                    </button>
+
                     <textarea
                       value={newMessageText}
                       onChange={(e) => setNewMessageText(e.target.value)}
@@ -617,10 +1021,12 @@ export default function ParentTeacherPortal() {
                         }
                       }}
                     />
+
                     <button
                       type="submit"
-                      disabled={!newMessageText.trim()}
+                      disabled={!newMessageText.trim() && !recordedAudioUrl}
                       className="bg-[#5f6f52] hover:bg-[#4d5a42] text-white p-3 rounded-xl transition shadow-md disabled:bg-slate-200 disabled:text-slate-400 cursor-pointer shrink-0"
+                      title="Send message"
                     >
                       <Send className="w-4 h-4" />
                     </button>

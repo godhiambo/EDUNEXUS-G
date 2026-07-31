@@ -354,6 +354,31 @@ export default function DocumentViewer({
     return new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' });
   });
   const [isPrintLayoutPreview, setIsPrintLayoutPreview] = useState(false);
+  const [documentOrientation, setDocumentOrientation] = useState<'portrait' | 'landscape'>(
+    document.pageOrientation || 'portrait'
+  );
+  const [printLayoutOrientation, setPrintLayoutOrientation] = useState<'portrait' | 'landscape'>(
+    document.pageOrientation || 'portrait'
+  );
+
+  useEffect(() => {
+    if (document.pageOrientation) {
+      setDocumentOrientation(document.pageOrientation);
+      setPrintLayoutOrientation(document.pageOrientation);
+    }
+  }, [document.id, document.pageOrientation]);
+
+  const handleOrientationToggle = (newOrientation: 'portrait' | 'landscape') => {
+    setDocumentOrientation(newOrientation);
+    setPrintLayoutOrientation(newOrientation);
+    if (onUpdate && document) {
+      onUpdate({
+        ...document,
+        pageOrientation: newOrientation,
+        lastModified: new Date().toISOString()
+      });
+    }
+  };
   const [printLayoutMargin, setPrintLayoutMargin] = useState<'narrow' | 'normal' | 'wide'>('normal');
   const [printLayoutFont, setPrintLayoutFont] = useState<'sans' | 'serif' | 'mono'>('sans');
   const [printLayoutColorMode, setPrintLayoutColorMode] = useState<'color' | 'grayscale'>('color');
@@ -638,8 +663,8 @@ Example JSON output format:
         topic: revisionDeck.topic,
         subTopic: '',
         duration: '',
-        content: `# ${revisionDeck.title}\n\nDedicated revision deck containing ${revisionDeck.cards.length} academic vocabulary cards for topic: ${revisionDeck.topic}.\n\n` +
-          revisionDeck.cards.map((c: any) => `### ${c.front}\n${c.back}\n`).join('\n---\n'),
+        content: `# ${revisionDeck.title}\n\nDedicated revision deck containing ${revisionDeck.cards?.length || 0} academic vocabulary cards for topic: ${revisionDeck.topic}.\n\n` +
+          (revisionDeck.cards || []).map((c: any) => `### ${c?.front || ''}\n${c?.back || ''}\n`).join('\n---\n'),
         createdAt: revisionDeck.createdAt,
         lastModified: new Date().toISOString(),
         tags: ['flashcards', 'academic-vocabulary', 'revision', revisionDeck.subject],
@@ -4522,8 +4547,9 @@ ${profile?.displayName || 'Classroom Teacher'}
   };
 
   const handleDownloadPDF = () => {
+    const pdfOrientation = isPrintLayoutPreview ? printLayoutOrientation : documentOrientation;
     const doc = new jsPDF({
-      orientation: 'portrait',
+      orientation: pdfOrientation,
       unit: 'mm',
       format: 'a4'
     });
@@ -8188,6 +8214,19 @@ ${profile?.displayName || 'Classroom Teacher'}
                       </select>
                     </div>
 
+                    {/* Page Orientation selector */}
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[9px] uppercase font-bold text-slate-400">Orientation</span>
+                      <select
+                        value={printLayoutOrientation}
+                        onChange={(e) => handleOrientationToggle(e.target.value as any)}
+                        className="bg-white border border-slate-200 rounded-lg p-1 text-[10px] font-bold focus:outline-none focus:border-rose-500"
+                      >
+                        <option value="portrait">📄 Portrait</option>
+                        <option value="landscape">📜 Landscape</option>
+                      </select>
+                    </div>
+
                     {/* Action Button */}
                     <button
                       onClick={() => window.print()}
@@ -8212,7 +8251,8 @@ ${profile?.displayName || 'Classroom Teacher'}
                     printLayoutColorMode === 'grayscale' ? 'grayscale' : ''
                   }`}
                   style={{
-                    maxWidth: '100%',
+                    maxWidth: printLayoutOrientation === 'landscape' ? '1100px' : '820px',
+                    width: '100%',
                     boxSizing: 'border-box'
                   }}
                 >
@@ -8403,6 +8443,36 @@ ${profile?.displayName || 'Classroom Teacher'}
                       <span className="text-[10px] font-bold text-[#5f6f52] bg-[#5f6f52]/10 px-1.5 py-0.5 rounded border border-[#5f6f52]/25 font-mono select-none">
                         {documentFontSize.toFixed(2)}rem
                       </span>
+                    </div>
+
+                    {/* Page Orientation Toggle Toolbar */}
+                    <div className="flex items-center gap-1 p-0.5 bg-slate-100 rounded-lg border border-slate-200 no-print" id="orientation-control-toolbar">
+                      <button
+                        type="button"
+                        title="Portrait Mode"
+                        onClick={() => handleOrientationToggle('portrait')}
+                        className={`px-2 py-1.5 rounded-md text-xs font-bold transition duration-200 cursor-pointer flex items-center gap-1 ${
+                          documentOrientation === 'portrait'
+                            ? 'bg-[#5f6f52] text-white shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                        }`}
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline text-[10px]">Portrait</span>
+                      </button>
+                      <button
+                        type="button"
+                        title="Landscape Mode"
+                        onClick={() => handleOrientationToggle('landscape')}
+                        className={`px-2 py-1.5 rounded-md text-xs font-bold transition duration-200 cursor-pointer flex items-center gap-1 ${
+                          documentOrientation === 'landscape'
+                            ? 'bg-[#5f6f52] text-white shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                        }`}
+                      >
+                        <FileText className="w-3.5 h-3.5 rotate-90" />
+                        <span className="hidden sm:inline text-[10px]">Landscape</span>
+                      </button>
                     </div>
 
                     {/* Alignment Control Toolbar */}
@@ -8740,7 +8810,7 @@ ${profile?.displayName || 'Classroom Teacher'}
                     )}
 
                     <motion.div
-                      key={`doc-body-${document.id || document.title}-${selectedDifferentiatedView}`}
+                      key={`doc-body-${document.id || document.title}-${selectedDifferentiatedView}-${documentOrientation}`}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
@@ -8748,9 +8818,27 @@ ${profile?.displayName || 'Classroom Teacher'}
                       onMouseMove={handleAccessibilityMouseMove}
                       onDoubleClick={handleDocumentDoubleClick}
                       onMouseUp={handleTextSelection}
-                      className={`relative rounded-2xl transition-colors duration-300 p-4 ${getAccessibilityBgClass()} ${isDyslexiaMode ? 'dyslexia-font' : ''}`}
+                      className={`relative rounded-2xl transition-all duration-300 p-4 md:p-6 mx-auto ${
+                        documentOrientation === 'landscape' ? 'max-w-[1150px] shadow-sm border border-slate-200/70 bg-white/95' : ''
+                      } ${getAccessibilityBgClass()} ${isDyslexiaMode ? 'dyslexia-font' : ''}`}
                       style={{ fontFamily: isDyslexiaMode ? '"Comic Sans MS", "Chalkboard SE", "Inter", sans-serif' : undefined }}
                     >
+                      {/* Landscape Orientation Indicator Badge */}
+                      {documentOrientation === 'landscape' && (
+                        <div className="mb-4 pb-2 border-b border-slate-100 flex items-center justify-between no-print">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#5f6f52]/10 border border-[#5f6f52]/20 text-[#5f6f52] text-[10px] font-extrabold uppercase tracking-wider">
+                            <FileText className="w-3 h-3 rotate-90" />
+                            Landscape View Mode Active (1150px Wide Canvas)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleOrientationToggle('portrait')}
+                            className="text-[10px] font-bold text-slate-400 hover:text-slate-600 underline cursor-pointer"
+                          >
+                            Switch to Portrait
+                          </button>
+                        </div>
+                      )}
                       {/* Floating Sticky Annotation Tool Popover */}
                       {floatingToolPos && floatingSelectedText && (
                         <div
@@ -11338,6 +11426,7 @@ ${profile?.displayName || 'Classroom Teacher'}
       {isPrintPreviewOpen && (
         <PrintPreview
           document={document}
+          onUpdate={onUpdate}
           onClose={() => setIsPrintPreviewOpen(false)}
         />
       )}

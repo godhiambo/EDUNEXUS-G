@@ -13,15 +13,11 @@ import { triggerAutoBackupIfEnabled } from './lib/googleWorkspace';
 import { collection, onSnapshot, setDoc, doc, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
 import NotificationCenter from './components/NotificationCenter';
 import { getStoredNotifications, checkUpcomingLessons } from './lib/notificationService';
-import PilotFeedbackModal from './components/PilotFeedbackModal';
-import SidebarTimerWidget from './components/SidebarTimerWidget';
 import { motion, AnimatePresence } from 'motion/react';
 import { Image as ImageIcon } from 'lucide-react';
-import VoiceNavigation from './components/VoiceNavigation';
-import AppIconShowcaseModal from './components/AppIconShowcaseModal';
 import NetworkStatusBadge from './components/NetworkStatusBadge';
 
-// Lazy-loaded major route components for chunk splitting & fast initial paint
+// Lazy-loaded major route components & modals for chunk splitting & fast initial paint
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const DocumentCreator = lazy(() => import('./components/DocumentCreator'));
 const DocumentViewer = lazy(() => import('./components/DocumentViewer'));
@@ -39,20 +35,13 @@ const ImageStudio = lazy(() => import('./components/ImageStudio'));
 const VideoStudio = lazy(() => import('./components/VideoStudio'));
 const LearnersPerformance = lazy(() => import('./components/LearnersPerformance'));
 const VisualPhoneticsStudio = lazy(() => import('./components/VisualPhoneticsStudio'));
-
-function ViewLoadingFallback() {
-  return (
-    <div className="w-full h-72 md:h-96 bg-white/70 backdrop-blur-md rounded-3xl border border-slate-200/80 p-8 flex flex-col items-center justify-center space-y-4 animate-pulse shadow-xs">
-      <div className="w-12 h-12 rounded-2xl bg-[#5f6f52]/15 border border-[#5f6f52]/20 flex items-center justify-center text-[#5f6f52]">
-        <Sparkles className="w-6 h-6 animate-spin" />
-      </div>
-      <div className="space-y-2 text-center">
-        <div className="h-4 w-40 bg-slate-200 rounded-full mx-auto" />
-        <div className="h-3 w-56 bg-slate-100 rounded-full mx-auto" />
-      </div>
-    </div>
-  );
-}
+const QRMappingDashboard = lazy(() => import('./components/QRMappingDashboard'));
+const VirtualFieldTripStudio = lazy(() => import('./components/VirtualFieldTripStudio').then(m => ({ default: m.VirtualFieldTripStudio })));
+const PilotFeedbackModal = lazy(() => import('./components/PilotFeedbackModal'));
+const SidebarTimerWidget = lazy(() => import('./components/SidebarTimerWidget'));
+const VoiceNavigation = lazy(() => import('./components/VoiceNavigation'));
+const AppIconShowcaseModal = lazy(() => import('./components/AppIconShowcaseModal'));
+import { ScannedStationPortalModal } from './components/ScannedStationPortalModal';
 
 import {
   Menu,
@@ -70,6 +59,7 @@ import {
   LogOut,
   Shield,
   Globe,
+  Compass,
   Users,
   Settings as SettingsIcon,
   Mic,
@@ -79,8 +69,24 @@ import {
   Save,
   Video,
   Award,
-  X
+  X,
+  QrCode
 } from 'lucide-react';
+
+function ViewLoadingFallback() {
+  return (
+    <div className="w-full h-72 md:h-96 bg-white/70 backdrop-blur-md rounded-3xl border border-slate-200/80 p-8 flex flex-col items-center justify-center space-y-4 animate-pulse shadow-xs">
+      <div className="w-12 h-12 rounded-2xl bg-[#5f6f52]/15 border border-[#5f6f52]/20 flex items-center justify-center text-[#5f6f52]">
+        <Sparkles className="w-6 h-6 animate-spin" />
+      </div>
+      <div className="space-y-2 text-center">
+        <div className="h-4 w-40 bg-slate-200 rounded-full mx-auto" />
+        <div className="h-3 w-56 bg-slate-100 rounded-full mx-auto" />
+      </div>
+    </div>
+  );
+}
+
 
 export default function App() {
   return (
@@ -99,7 +105,7 @@ function AppContent() {
   const { t, language, aiLanguage, setLanguage, setAiLanguage } = useLanguage();
   const [documents, setDocuments] = useState<SavedDocument[]>([]);
   const [isDocsLoading, setIsDocsLoading] = useState<boolean>(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'create' | 'view' | 'admin' | 'settings' | 'resources' | 'collaboration' | 'voice-notes' | 'tutor' | 'assessment-generator' | 'file-library' | 'image-studio' | 'video-studio' | 'performance' | 'phonetics'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'create' | 'view' | 'admin' | 'settings' | 'resources' | 'collaboration' | 'voice-notes' | 'tutor' | 'assessment-generator' | 'file-library' | 'image-studio' | 'video-studio' | 'performance' | 'phonetics' | 'qr-mapping' | 'virtual-field-trip'>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [tutorResourceId, setTutorResourceId] = useState<string>('');
   const [selectedDoc, setSelectedDoc] = useState<SavedDocument | null>(null);
@@ -218,6 +224,50 @@ function AppContent() {
   const [isPilotFeedbackOpen, setIsPilotFeedbackOpen] = useState(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
   const [isAppIconModalOpen, setIsAppIconModalOpen] = useState(false);
+
+  // Scanned QR Portal Modal State (auto-opens when scanning physical QR code with camera)
+  const [scannedModalOpen, setScannedModalOpen] = useState(false);
+  const [scannedStationData, setScannedStationData] = useState<{
+    stationNumber?: string;
+    subject?: string;
+    topic?: string;
+    task?: string;
+    rewardKey?: string;
+    riddle?: string;
+  } | undefined>(undefined);
+  const [scannedShortId, setScannedShortId] = useState<string | undefined>(undefined);
+
+  // Auto-detect scanned QR parameters on application load
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const station = params.get('station');
+    const qr = params.get('qr');
+    const fieldtrip = params.get('fieldtrip') || params.get('trip');
+    const pathname = window.location.pathname;
+
+    if (fieldtrip) {
+      setActiveTab('virtual-field-trip');
+    } else if (station) {
+      setScannedStationData({
+        stationNumber: station,
+        subject: params.get('subject') || 'CBC Curriculum',
+        topic: params.get('topic') || 'Scavenger Hunt Station',
+        task: params.get('task') || '',
+        rewardKey: params.get('key') || '',
+        riddle: params.get('riddle') || ''
+      });
+      setScannedModalOpen(true);
+    } else if (qr) {
+      setScannedShortId(qr);
+      setScannedModalOpen(true);
+    } else if (pathname.startsWith('/qr/')) {
+      const shortIdFromPath = pathname.replace('/qr/', '').trim();
+      if (shortIdFromPath) {
+        setScannedShortId(shortIdFromPath);
+        setScannedModalOpen(true);
+      }
+    }
+  }, []);
 
   const handleSignOutClick = () => {
     // Check if user has already submitted the pilot feedback
@@ -794,6 +844,7 @@ function AppContent() {
           docId: updatedDoc.id,
           title: previousDoc.title,
           content: previousDoc.content,
+          pageOrientation: previousDoc.pageOrientation || 'portrait',
           lastModified: previousDoc.lastModified || previousDoc.createdAt || new Date().toISOString(),
           modifiedByUid: 'system',
           modifiedByName: 'Original Creator',
@@ -810,6 +861,7 @@ function AppContent() {
         docId: updatedDoc.id,
         title: updatedDoc.title,
         content: updatedDoc.content,
+        pageOrientation: updatedDoc.pageOrientation || 'portrait',
         lastModified: new Date().toISOString(),
         modifiedByUid: profile?.uid || 'unknown',
         modifiedByName: profile?.displayName || 'Unknown Teacher',
@@ -818,12 +870,20 @@ function AppContent() {
       };
 
       await setDoc(doc(db, 'documents', updatedDoc.id, 'versions', versionId), cleanUndefined(compressObject(newVersion)));
-      const savedDocWithPlaceholder = await saveDocumentWithImageChunks(updatedDoc.id, updatedDoc);
+
+      const docToSave: SavedDocument = {
+        ...updatedDoc,
+        pageOrientation: updatedDoc.pageOrientation || 'portrait',
+        lastModified: new Date().toISOString()
+      };
+
+      const savedDocWithPlaceholder = await saveDocumentWithImageChunks(docToSave.id, docToSave);
 
       // Trigger automated backup to Google Drive if enabled
       triggerAutoBackupIfEnabled(savedDocWithPlaceholder);
 
       setSelectedDoc(savedDocWithPlaceholder);
+      setDocuments(prev => prev.map(d => d.id === savedDocWithPlaceholder.id ? savedDocWithPlaceholder : d));
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `documents/${updatedDoc.id}`);
     }
@@ -980,14 +1040,16 @@ function AppContent() {
             />
 
             {/* Voice-Activated Tab Navigation System */}
-            <VoiceNavigation
-              onTabChange={(tab) => setActiveTab(tab)}
-              onNewDoc={startNewGeneration}
-              onShortcutsToggle={(open) => setIsShortcutsModalOpen(open)}
-              onPlayChime={playChime}
-              onLogout={handleSignOutClick}
-              currentTab={activeTab}
-            />
+            <Suspense fallback={null}>
+              <VoiceNavigation
+                onTabChange={(tab) => setActiveTab(tab)}
+                onNewDoc={startNewGeneration}
+                onShortcutsToggle={(open) => setIsShortcutsModalOpen(open)}
+                onPlayChime={playChime}
+                onLogout={handleSignOutClick}
+                currentTab={activeTab}
+              />
+            </Suspense>
 
             <button
               onClick={() => setIsShortcutsModalOpen(true)}
@@ -1195,6 +1257,30 @@ function AppContent() {
                     <span className="text-base">🗣️</span>
                     <span>Visual Phonetics</span>
                   </button>
+
+                  <button
+                    onClick={() => setActiveTab('qr-mapping')}
+                    className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
+                      activeTab === 'qr-mapping'
+                        ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold border-[#5f6f52]/20'
+                        : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
+                    }`}
+                  >
+                    <QrCode className="w-4.5 h-4.5 text-[#5f6f52]" />
+                    <span>QR Mapping & Scavenger Hunts</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('virtual-field-trip')}
+                    className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
+                      activeTab === 'virtual-field-trip'
+                        ? 'bg-amber-100 text-amber-950 font-semibold border-amber-300'
+                        : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
+                    }`}
+                  >
+                    <Compass className="w-4.5 h-4.5 text-amber-600" />
+                    <span>Virtual Field Trips</span>
+                  </button>
                 </>
               )}
 
@@ -1263,7 +1349,9 @@ function AppContent() {
             </div>
           </div>
 
-          <SidebarTimerWidget />
+          <Suspense fallback={null}>
+            <SidebarTimerWidget />
+          </Suspense>
 
           <div className="mt-auto p-4 bg-[#fefae0] rounded-2xl border border-[#e9edc9]">
             <p className="text-xs font-bold text-[#5f6f52] mb-1 flex items-center gap-1">
@@ -1292,6 +1380,7 @@ function AppContent() {
                  {activeTab === 'tutor' && 'EduNexus AI Tutor'}
                 {activeTab === 'assessment-generator' && 'AI Assessment Item Generator'}
                 {activeTab === 'file-library' && 'Curriculum & Teaching Material File Library'}
+                {activeTab === 'qr-mapping' && 'QR Touchpoint Mapping & Scavenger Hunt Studio'}
               </h1>
               <p className="text-[#7a7a7a] text-sm">
                 {activeTab === 'dashboard' && 'Access and organize your curriculum-aligned lesson plans, rubrics, and materials.'}
@@ -1305,6 +1394,7 @@ function AppContent() {
                 {activeTab === 'tutor' && 'Deepen student conceptual mastery step-by-step through Socratic scaffolding, error triangulation, and interactive simulations.'}
                 {activeTab === 'assessment-generator' && 'Generate rigorous, curriculum-scaffolded assessment items with diagnostic feedback and in-place fine-tuning.'}
                 {activeTab === 'file-library' && 'Browse, search, and manage teacher-uploaded curriculum guides, syllabi, and reference sheets.'}
+                {activeTab === 'qr-mapping' && 'Design complete, print-ready classroom scavenger hunts for all subjects and map digital QR touchpoints.'}
               </p>
             </div>
           </header>
@@ -1441,6 +1531,32 @@ function AppContent() {
 
               {activeTab === 'phonetics' && (
                 <VisualPhoneticsStudio />
+              )}
+
+              {activeTab === 'qr-mapping' && (
+                <QRMappingDashboard
+                  documents={documents}
+                  onNavigateToTutor={(documentId, prompt) => {
+                    setActiveTab('tutor');
+                  }}
+                  onNavigateToAdaptivePath={(subject, topic, lowDifficulty) => {
+                    setActiveTab('dashboard');
+                  }}
+                  onNavigateToParentPlaybook={(studentName, section) => {
+                    setActiveTab('dashboard');
+                  }}
+                  onSelectDocForReader={(docToOpen) => {
+                    setSelectedDoc(docToOpen);
+                    setActiveTab('view');
+                  }}
+                  onClose={() => setActiveTab('dashboard')}
+                />
+              )}
+
+              {activeTab === 'virtual-field-trip' && (
+                <VirtualFieldTripStudio
+                  onOpenQRMapping={() => setActiveTab('qr-mapping')}
+                />
               )}
             </Suspense>
           </div>
@@ -1975,6 +2091,21 @@ function AppContent() {
                         <Award className="w-4.5 h-4.5 text-[#5f6f52]" />
                         <span>Learners' Performance</span>
                       </button>
+
+                      <button
+                        onClick={() => {
+                          setActiveTab('qr-mapping');
+                          setIsMobileMenuOpen(false);
+                        }}
+                        className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer w-full text-left ${
+                          activeTab === 'qr-mapping'
+                            ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
+                            : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
+                        }`}
+                      >
+                        <QrCode className="w-4.5 h-4.5 text-[#5f6f52]" />
+                        <span>QR Mapping & Scavenger Hunts</span>
+                      </button>
                     </>
                   )}
 
@@ -2052,7 +2183,9 @@ function AppContent() {
               {/* Classroom Pacing Widget on Mobile Drawer */}
               <div className="pt-2 border-t border-[#e5e1da]/60">
                 <p className="text-[10px] font-extrabold text-[#a9b388] uppercase tracking-[0.2em] mb-2">Classroom Utilities</p>
-                <SidebarTimerWidget />
+                <Suspense fallback={null}>
+                  <SidebarTimerWidget />
+                </Suspense>
               </div>
             </div>
           </motion.div>
@@ -2060,26 +2193,45 @@ function AppContent() {
       )}
     </AnimatePresence>
 
-    {/* Pilot Program Evaluation Form Modal */}
-    <PilotFeedbackModal 
-      isOpen={isPilotFeedbackOpen} 
-      onClose={() => {
-        setIsPilotFeedbackOpen(false);
-        // Standard exit - log out
-        logout();
-      }} 
-      onSuccess={() => {
-        setIsPilotFeedbackOpen(false);
-        // Successful submit - log out
-        logout();
-      }} 
-    />
+    <Suspense fallback={null}>
+      {/* Pilot Program Evaluation Form Modal */}
+      <PilotFeedbackModal 
+        isOpen={isPilotFeedbackOpen} 
+        onClose={() => {
+          setIsPilotFeedbackOpen(false);
+          // Standard exit - log out
+          logout();
+        }} 
+        onSuccess={() => {
+          setIsPilotFeedbackOpen(false);
+          // Successful submit - log out
+          logout();
+        }} 
+      />
 
-    {/* Desktop & Phone App Icon Showcase Modal */}
-    <AppIconShowcaseModal
-      isOpen={isAppIconModalOpen}
-      onClose={() => setIsAppIconModalOpen(false)}
-    />
+      {/* Desktop & Phone App Icon Showcase Modal */}
+      <AppIconShowcaseModal
+        isOpen={isAppIconModalOpen}
+        onClose={() => setIsAppIconModalOpen(false)}
+      />
+
+      {/* Scanned QR Portal Modal for Mobile Camera Scanning */}
+      <ScannedStationPortalModal
+        isOpen={scannedModalOpen}
+        onClose={() => setScannedModalOpen(false)}
+        stationData={scannedStationData}
+        shortId={scannedShortId}
+        onLaunchTutor={(docTitle, socraticPrompt) => {
+          setActiveTab('tutor');
+        }}
+        onLaunchAdaptive={(subject, topic) => {
+          setActiveTab('resources');
+        }}
+        onLaunchParentPlaybook={() => {
+          setActiveTab('admin');
+        }}
+      />
+    </Suspense>
     </>
   );
 }

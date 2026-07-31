@@ -3,7 +3,32 @@ import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from './AuthContext';
 
-export type Language = 'en' | 'sw';
+export type Language = string;
+
+export interface LanguageOption {
+  code: string;
+  name: string;
+  nativeName: string;
+  flag: string;
+  category: 'International' | 'Local & Regional';
+  description: string;
+}
+
+export const SUPPORTED_LANGUAGES: LanguageOption[] = [
+  { code: 'en', name: 'English', nativeName: 'English', flag: '🇬🇧', category: 'International', description: 'Global Academic & Institutional Standard' },
+  { code: 'sw', name: 'Swahili / Kiswahili', nativeName: 'Kiswahili', flag: '🇰🇪', category: 'Local & Regional', description: 'East African Community Official & National Language' },
+  { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷', category: 'International', description: 'Francophone Africa Academic & Regional Standard' },
+  { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸', category: 'International', description: 'Global Modern Language Standard' },
+  { code: 'ar', name: 'Arabic', nativeName: 'العربية', flag: '🇸🇦', category: 'International', description: 'North & East African Academic & Classical Language' },
+  { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇵🇹', category: 'International', description: 'Lusophone Africa Standard (Angola, Mozambique)' },
+  { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪', category: 'International', description: 'European Science & Technical Language' },
+  { code: 'lg', name: 'Luganda', nativeName: 'Oluganda', flag: '🇺🇬', category: 'Local & Regional', description: 'Inter-Regional Ugandan Language' },
+  { code: 'ki', name: 'Kikuyu', nativeName: 'Gĩkũyũ', flag: '🇰🇪', category: 'Local & Regional', description: 'Central Kenya Regional Language' },
+  { code: 'luo', name: 'Dholuo', nativeName: 'Dholuo', flag: '🇰🇪', category: 'Local & Regional', description: 'Lake Victoria Basin Regional Language' },
+  { code: 'sheng', name: 'Sheng', nativeName: 'Sheng', flag: '🇰🇪', category: 'Local & Regional', description: 'Contemporary Urban Youth & Student Register' },
+  { code: 'rw', name: 'Kinyarwanda', nativeName: 'Ikinyarwanda', flag: '🇷🇼', category: 'Local & Regional', description: 'Rwandan National Language' },
+  { code: 'am', name: 'Amharic', nativeName: 'አማርኛ', flag: '🇪🇹', category: 'Local & Regional', description: 'Ethiopian & Horn of Africa Working Language' }
+];
 
 interface LanguageContextType {
   language: Language;

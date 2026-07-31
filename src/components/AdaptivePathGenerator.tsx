@@ -89,7 +89,8 @@ export const AdaptivePathGenerator: React.FC<AdaptivePathGeneratorProps> = ({
     let dueReviewCards = 0;
     const subjectDeckCounts: Record<string, { total: number; mastered: number; due: number }> = {};
 
-    for (const deck of flashcardDecks) {
+    for (const deck of (flashcardDecks || [])) {
+      if (!deck) continue;
       const subj = deck.subject || 'General';
       if (!subjectDeckCounts[subj]) {
         subjectDeckCounts[subj] = { total: 0, mastered: 0, due: 0 };
@@ -593,7 +594,7 @@ export const AdaptivePathGenerator: React.FC<AdaptivePathGeneratorProps> = ({
                           <button
                             type="button"
                             onClick={() => {
-                              const existingDeck = flashcardDecks.find(d => d.subject.toLowerCase() === step.subject.toLowerCase()) || {
+                              const existingDeck = (flashcardDecks || []).find(d => d && d.subject && d.subject.toLowerCase() === step.subject.toLowerCase()) || {
                                 id: `deck-${Date.now()}`,
                                 title: `${step.subject} - ${step.topic}`,
                                 subject: step.subject,

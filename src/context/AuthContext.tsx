@@ -5,6 +5,7 @@ import {
   User as FirebaseUser,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
   signInWithPopup,
   GoogleAuthProvider,
   OAuthProvider
@@ -87,6 +88,7 @@ interface AuthContextType {
   isActionAllowed: (action: AllowedAction, targetUid?: string) => boolean;
   adminAddUser: (email: string, displayName: string, role: UserRole) => Promise<void>;
   incrementUserWarnings: (uid: string) => Promise<void>;
+  sendPasswordReset: (email: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -354,6 +356,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginWithEmail = async (email: string, pass: string) => {
     try {
       await signInWithEmailAndPassword(auth, email, pass);
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  const sendPasswordReset = async (email: string) => {
+    if (!email || !email.trim()) {
+      throw new Error('Please enter your email address to receive a password reset link.');
+    }
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
     } catch (err) {
       throw err;
     }
@@ -774,7 +787,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       updateSystemPolicies,
       isActionAllowed,
       adminAddUser,
-      incrementUserWarnings
+      incrementUserWarnings,
+      sendPasswordReset
     }}>
       {children}
     </AuthContext.Provider>
