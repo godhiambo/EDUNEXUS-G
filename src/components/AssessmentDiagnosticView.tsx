@@ -810,7 +810,7 @@ export default function AssessmentDiagnosticView({
                               dataKey="struggleRate" 
                               radius={[0, 4, 4, 0]} 
                               barSize={10}
-                              onClick={(data) => {
+                              onClick={(data: any) => {
                                 if (data) {
                                   setSelectedModalTopic({
                                     concept: data.concept,

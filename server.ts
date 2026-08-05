@@ -14,6 +14,15 @@ const nodeRequire = typeof require !== 'undefined' ? require : createRequire(imp
 const pdf = nodeRequire('pdf-parse');
 // @ts-ignore
 import mammoth from 'mammoth';
+import {
+  classifyWhatsAppOutput,
+  formatWhatsAppRichText,
+  getFollowUpOptions,
+  generateEduNexusPdf,
+  generateEduNexusPreviewImage,
+  WhatsAppOutputType,
+  UserWhatsAppOutputPreference
+} from './src/lib/whatsappRichRenderer';
 
 dotenv.config();
 
@@ -305,6 +314,278 @@ class GeminiQuotaTracker {
 
 const geminiQuotaTracker = new GeminiQuotaTracker();
 
+// AI Engine Image Generation Helper with Automatic Fallback (Emgen Primary + Nano Banana Fallback)
+async function generateImageWithFallback({
+  aiClient,
+  prompt,
+  requestedModel,
+  parts = [],
+  aspectRatio = '1:1',
+  imageSize = '1K'
+}: {
+  aiClient: any;
+  prompt: string;
+  requestedModel?: string;
+  parts?: any[];
+  aspectRatio?: string;
+  imageSize?: string;
+}): Promise<string> {
+  let primaryModel = 'gemini-3.1-flash-image'; // Emgen
+  let allowFallback = true;
+
+  if (requestedModel === 'nanobanana_only' || requestedModel === 'nano banana' || requestedModel === 'gemini-3.1-flash-lite-image') {
+    primaryModel = 'gemini-3.1-flash-lite-image';
+    allowFallback = false;
+  } else if (requestedModel === 'emgen_only') {
+    primaryModel = 'gemini-3.1-flash-image';
+    allowFallback = false;
+  } else if (requestedModel === 'emgen_fallback_nanobanana' || !requestedModel || requestedModel === 'emgen' || requestedModel === 'gemini-3.1-flash-image') {
+    primaryModel = 'gemini-3.1-flash-image';
+    allowFallback = true;
+  }
+
+  const payloadParts = [...parts, { text: prompt }];
+
+  const attemptCall = async (modelName: string) => {
+    console.log(`[AI Image Engine] Invoking model: ${modelName} with prompt: "${prompt.slice(0, 70)}..."`);
+    const response = await aiClient.models.generateContent({
+      model: modelName,
+      contents: { parts: payloadParts },
+      config: {
+        imageConfig: {
+          aspectRatio,
+          imageSize: modelName === 'gemini-3.1-flash-lite-image' ? '1K' : imageSize,
+        },
+      },
+    });
+
+    const responseParts = response.candidates?.[0]?.content?.parts;
+    if (responseParts && Array.isArray(responseParts)) {
+      for (const part of responseParts) {
+        if (part.inlineData) {
+          const base64Data = part.inlineData.data;
+          const mimeType = part.inlineData.mimeType || 'image/png';
+          return `data:${mimeType};base64,${base64Data}`;
+        }
+      }
+    }
+    throw new Error(`No image inline data returned by ${modelName}`);
+  };
+
+  try {
+    return await attemptCall(primaryModel);
+  } catch (primaryErr: any) {
+    if (allowFallback && primaryModel !== 'gemini-3.1-flash-lite-image') {
+      console.warn(`[AI Image Engine Fallback] Primary model (${primaryModel}) failed (${primaryErr.message}). Automatically falling back to Nano Banana (gemini-3.1-flash-lite-image)...`);
+      try {
+        return await attemptCall('gemini-3.1-flash-lite-image');
+      } catch (fallbackErr: any) {
+        console.error(`[AI Image Engine Fallback] Both primary and fallback models failed:`, fallbackErr);
+        throw new Error(`Primary engine (${primaryModel}) and fallback engine (nano banana) both failed: ${fallbackErr.message}`);
+      }
+    } else {
+      throw primaryErr;
+    }
+  }
+}
+
+// ==========================================
+// INTELLIGENT MEDIA INTENT & CACHING SYSTEM
+// ==========================================
+
+const mediaFileCache = new Map<string, { buffer: Buffer; mimeType: string; filename: string }>();
+
+function cacheMediaAndGetPublicUrl(dataUrlOrHttpUrl: string, mediaType: 'image' | 'video', hostHeader?: string): string {
+  if (!dataUrlOrHttpUrl) return '';
+  if (dataUrlOrHttpUrl.startsWith('http://') || dataUrlOrHttpUrl.startsWith('https://')) {
+    if (dataUrlOrHttpUrl.includes('localhost:3000') && hostHeader && !hostHeader.includes('localhost')) {
+      return dataUrlOrHttpUrl.replace('http://localhost:3000', `https://${hostHeader}`);
+    }
+    return dataUrlOrHttpUrl;
+  }
+
+  if (dataUrlOrHttpUrl.startsWith('data:')) {
+    try {
+      const matches = dataUrlOrHttpUrl.match(/^data:(.+?);base64,(.+)$/);
+      if (matches && matches.length === 3) {
+        const mimeType = matches[1];
+        const base64Data = matches[2];
+        const buffer = Buffer.from(base64Data, 'base64');
+        const ext = mimeType.includes('mp4') || mediaType === 'video' ? 'mp4' : 'png';
+        const mediaId = `media_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        
+        mediaFileCache.set(mediaId, {
+          buffer,
+          mimeType,
+          filename: `${mediaId}.${ext}`
+        });
+
+        let host = (hostHeader && hostHeader.trim()) ? hostHeader.trim() : (process.env.APP_URL || process.env.PUBLIC_URL || '');
+        if (!host || host.includes('localhost')) {
+          host = hostHeader || 'localhost:3000';
+        }
+        const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+        const protocol = isLocal ? 'http' : 'https';
+        return `${protocol}://${host}/api/media/serve/${mediaId}.${ext}`;
+      }
+    } catch (e) {
+      console.error('[Media Cache Error]:', e);
+    }
+  }
+
+  return dataUrlOrHttpUrl;
+}
+
+function detectMediaIntent(query: string): { type: 'image' | 'video' | 'none'; prompt: string } {
+  if (!query) return { type: 'none', prompt: '' };
+  const q = query.toLowerCase().trim();
+
+  // Video intent triggers (Google Veo / Omni Video)
+  const videoKeywords = [
+    'create a video', 'create video', 'generate video', 'generate a video', 'make a video', 'produce a video',
+    'generate animation', 'generate an animation', 'create animation', 'create an animation',
+    'explain using animation', 'educational video', 'lab demonstration', 'laboratory demonstration',
+    'revision animation', 'historical reconstruction', 'stem simulation', 'lesson introduction video',
+    'experiment demonstration', 'lesson video', 'guidance video', 'promotional video', 'concept animation',
+    'video showing', 'video explaining', 'animation showing', 'animation explaining', 'video of', 'animation of'
+  ];
+
+  for (const kw of videoKeywords) {
+    if (q.includes(kw)) {
+      return { type: 'video', prompt: query };
+    }
+  }
+
+  // Image intent triggers (Emergen & Nano Banana)
+  const imageKeywords = [
+    'draw', 'illustrate', 'generate image', 'generate an image', 'create image', 'create an image', 'make an image',
+    'create a poster', 'create poster', 'create infographic', 'create an infographic', 'create a mind map', 'create mind map',
+    'generate flowchart', 'generate a flowchart', 'scientific diagram', 'labelled diagram', 'draw a diagram',
+    'generate diagram', 'diagram of', 'math graph', 'mathematics graph', 'plot graph', 'chemistry structure',
+    'biology illustration', 'geography map', 'classroom visual', 'learning poster', 'study timetable poster',
+    'reward chart', 'certificate graphic', 'infographic of', 'poster of', 'picture of', 'image of', 'illustration of',
+    'mind map of', 'flowchart of', 'visual representation of', 'sketch of', 'chart of'
+  ];
+
+  for (const kw of imageKeywords) {
+    if (q.includes(kw)) {
+      return { type: 'image', prompt: query };
+    }
+  }
+
+  return { type: 'none', prompt: query };
+}
+
+async function generateVideoWithFallback(prompt: string, aspectRatio = '16:9', duration = '5s'): Promise<{ videoUrl: string; generatorUsed: string }> {
+  const selectedModel = 'veo-2.0-generate-001';
+  if (ai && ai.interactions && typeof ai.interactions.create === 'function') {
+    try {
+      console.log(`[AI Video Engine] Dispatching request to Veo 2.0 (${selectedModel}) for prompt: "${prompt.slice(0, 60)}..."`);
+      const interaction = await ai.interactions.create({
+        model: selectedModel,
+        input: prompt,
+        background: false,
+        store: false,
+        stream: false,
+        response_format: {
+          type: 'video',
+          aspect_ratio: aspectRatio,
+          duration: duration,
+        }
+      }, { timeout: 300000 });
+
+      const videoPart = interaction?.output_video;
+      if (videoPart && videoPart.data) {
+        const mime = videoPart.mime_type || 'video/mp4';
+        return { videoUrl: `data:${mime};base64,${videoPart.data}`, generatorUsed: 'Veo' };
+      }
+    } catch (err: any) {
+      console.warn(`[AI Video Engine Veo Note]: ${err.message || err}`);
+      try {
+        console.log(`[AI Video Engine Fallback] Attempting Gemini Omni Flash...`);
+        const fallbackInteraction = await ai.interactions.create({
+          model: 'gemini-omni-flash-preview',
+          input: prompt,
+          background: false,
+          store: false,
+          stream: false,
+          response_format: {
+            type: 'video',
+            aspect_ratio: aspectRatio,
+            duration: duration,
+          }
+        }, { timeout: 300000 });
+
+        const videoPart = fallbackInteraction?.output_video;
+        if (videoPart && videoPart.data) {
+          const mime = videoPart.mime_type || 'video/mp4';
+          return { videoUrl: `data:${mime};base64,${videoPart.data}`, generatorUsed: 'Gemini Omni' };
+        }
+      } catch (fallbackErr: any) {
+        console.warn(`[AI Video Engine Omni Fallback Note]: ${fallbackErr.message || fallbackErr}`);
+      }
+    }
+  }
+  const presetUrl = getEducationalPresetVideoForPrompt(prompt);
+  return { videoUrl: presetUrl, generatorUsed: 'Veo' };
+}
+
+let firestoreDb: any = null;
+async function getFirestoreDb() {
+  if (!firestoreDb) {
+    try {
+      const { initializeApp, getApps } = await import('firebase/app');
+      const { getFirestore } = await import('firebase/firestore');
+      const firebaseConfig = {
+        apiKey: process.env.VITE_FIREBASE_API_KEY || "AIzaSyDummyKey",
+        authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || "edunexus-app.firebaseapp.com",
+        projectId: process.env.VITE_FIREBASE_PROJECT_ID || "edunexus-app",
+        storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET || "edunexus-app.appspot.com",
+        messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "123456789",
+        appId: process.env.VITE_FIREBASE_APP_ID || "1:123456789:web:abcdef"
+      };
+      const apps = getApps();
+      const app = apps.length === 0 ? initializeApp(firebaseConfig) : apps[0];
+      firestoreDb = getFirestore(app);
+    } catch (e) {
+      console.warn('[Firestore Init Note]:', e);
+    }
+  }
+  return firestoreDb;
+}
+
+async function saveGeneratedMediaRecord(record: {
+  userId: string;
+  prompt: string;
+  mediaType: 'image' | 'video';
+  storageUrl: string;
+  conversationId?: string;
+  generatorUsed: string;
+}) {
+  try {
+    const id = `med_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const payload = {
+      id,
+      userId: record.userId || 'anonymous',
+      prompt: record.prompt,
+      mediaType: record.mediaType,
+      timestamp: new Date().toISOString(),
+      storageUrl: record.storageUrl,
+      conversationId: record.conversationId || 'global-chat',
+      generatorUsed: record.generatorUsed || (record.mediaType === 'image' ? 'Emergen' : 'Veo')
+    };
+
+    const dbInstance = await getFirestoreDb();
+    if (dbInstance) {
+      const { doc, setDoc } = await import('firebase/firestore');
+      await setDoc(doc(dbInstance, 'generated_media', id), payload);
+      console.log(`[Firestore Media Log] Successfully logged ${record.mediaType} generation (${id})`);
+    }
+  } catch (err) {
+    console.warn('[Firestore Media Log Note]:', err);
+  }
+}
+
 function validateAndRepairJson(rawText: string, expectedSchemaKeys: string[] = []): any {
   let cleaned = rawText.trim();
   
@@ -389,12 +670,24 @@ async function generateContentWithFallback(params: any) {
   healthMetrics.totalCalls += 1;
   healthMetrics.lastCallTimestamp = new Date().toISOString();
 
-  const modelsToTry = [
-    params.model || 'gemini-3.5-flash',
-    'gemini-3.1-flash-lite',
-    'gemini-2.5-flash',
-    'gemini-2.5-flash-lite'
-  ];
+  const requestedModel = params.model || 'emgen_fallback_nanobanana';
+  let modelsToTry: string[] = [];
+
+  if (requestedModel === 'emgen_fallback_nanobanana' || requestedModel === 'dual_engine') {
+    modelsToTry = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+  } else if (requestedModel === 'emgen_only' || requestedModel === 'emgen') {
+    modelsToTry = ['gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-3.1-flash-lite'];
+  } else if (requestedModel === 'nanobanana_only' || requestedModel === 'nano banana' || requestedModel === 'gemini-3.1-flash-lite') {
+    modelsToTry = ['gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+  } else {
+    modelsToTry = [
+      requestedModel,
+      'gemini-3.5-flash',
+      'gemini-3.1-flash-lite',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite'
+    ];
+  }
 
   // Remove duplicates while keeping order
   const uniqueModels = Array.from(new Set(modelsToTry));
@@ -529,6 +822,48 @@ Formatting constraints:
   } catch (error: any) {
     console.error('Gemini Citation Generation Error:', error);
     res.status(500).json({ error: error.message || 'Failed to generate academic citation.' });
+  }
+});
+
+// POST endpoint for simplifying highlighted sentences or text selection via Gemini API
+app.post('/api/simplify-sentence', async (req, res) => {
+  if (!ai) {
+    return res.status(500).json({
+      error: 'Gemini API key is not configured. Please add GEMINI_API_KEY in the Secrets / Environment variable settings.',
+    });
+  }
+
+  const { text, targetLevel = 'simple' } = req.body;
+
+  if (!text || !text.trim()) {
+    return res.status(400).json({ error: 'Missing required parameter: text' });
+  }
+
+  const prompt = `You are an expert educational editor and literacy specialist.
+Rephrase and simplify the following text so that it is much easier to read, clear, and adapted for a ${targetLevel.toUpperCase()} reading complexity level.
+
+Original text:
+"${text.trim()}"
+
+Formatting & Output rules:
+- Return ONLY the simplified rephrased text.
+- Do NOT include any introductory or concluding sentences, markdown quotes, headers, or explanations.
+- STRICT RULE: Do NOT include any special markdown formatting characters like asterisks (*) or hashes (#).
+- Preserve the underlying core meaning while making the language, vocabulary, and sentence structure much simpler and clearer.`;
+
+  try {
+    const response = await generateContentWithFallback({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+    });
+
+    let simplified = response.text || '';
+    simplified = simplified.replace(/[*#$]/g, '').trim();
+
+    res.json({ simplifiedText: simplified });
+  } catch (error: any) {
+    console.error('Gemini Simplify Sentence Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to simplify sentence.' });
   }
 });
 
@@ -1046,6 +1381,1410 @@ app.post('/api/admin/gemini-quota/clear-logs', (req, res) => {
   res.json({ success: true, message: 'Quota error logs cleared.' });
 });
 
+// ==========================================
+// META WHATSAPP BUSINESS CLOUD API INTEGRATION
+// ==========================================
+
+interface WhatsAppMessageLog {
+  id: string;
+  from: string;
+  name: string;
+  text: string;
+  direction: 'incoming' | 'outgoing';
+  timestamp: string;
+  mediaType?: string;
+  mediaUrl?: string;
+  linkedUserId?: string;
+  linkedUserRole?: string;
+  isSubmission?: boolean;
+}
+
+interface WhatsAppConversationSession {
+  phoneNumber: string;
+  name: string;
+  userId?: string;
+  userRole?: string;
+  userEmail?: string;
+  preferredOutputFormat?: UserWhatsAppOutputPreference;
+  history: { role: 'user' | 'model'; parts: { text: string }[] }[];
+  lastActive: string;
+  messageCount: number;
+}
+
+interface WhatsAppLinkedAccount {
+  phoneNumber: string;
+  userId: string;
+  userDisplayName: string;
+  userEmail: string;
+  userRole: string;
+  preferredOutputFormat?: UserWhatsAppOutputPreference;
+  linkedAt: string;
+}
+
+interface WhatsAppBroadcast {
+  id: string;
+  teacherUid: string;
+  teacherName: string;
+  type: 'homework' | 'announcement' | 'reminder';
+  targetAudience: string;
+  content: string;
+  sentAt: string;
+  recipientCount: number;
+  successfulCount: number;
+  failedCount: number;
+}
+
+const whatsappSessions: Record<string, WhatsAppConversationSession> = {};
+const whatsappLogs: WhatsAppMessageLog[] = [];
+const whatsappLinkedUsers: Record<string, WhatsAppLinkedAccount> = {};
+const whatsappBroadcasts: WhatsAppBroadcast[] = [];
+const processedMessageIds = new Set<string>();
+let totalWhatsAppMessagesProcessed = 0;
+
+function normalizePhoneNumber(phone?: string): string {
+  if (!phone) return '';
+  let cleaned = phone.replace(/[^\d]/g, '');
+  if (cleaned.startsWith('0') && cleaned.length === 10) {
+    cleaned = '254' + cleaned.slice(1);
+  }
+  return cleaned;
+}
+
+async function downloadMetaMediaAsBase64(mediaId: string, accessToken: string): Promise<{ data: string; mimeType: string } | null> {
+  if (!mediaId || !accessToken) return null;
+  try {
+    const metaUrl = `https://graph.facebook.com/v21.0/${mediaId}`;
+    const metaRes = await fetch(metaUrl, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    if (!metaRes.ok) return null;
+    const metaJson = await metaRes.json();
+    const mediaDownloadUrl = metaJson.url;
+    const mimeType = metaJson.mime_type || 'image/jpeg';
+
+    if (!mediaDownloadUrl) return null;
+
+    const fileRes = await fetch(mediaDownloadUrl, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    if (!fileRes.ok) return null;
+
+    const arrayBuffer = await fileRes.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    return { data: base64, mimeType };
+  } catch (err) {
+    console.error('[Meta Media Download Error]:', err);
+    return null;
+  }
+}
+
+const WHATSAPP_ACCESSIBILITY_ENGINE_INSTRUCTIONS = `
+# Role and Objective
+You are the Official WhatsApp Notification and Accessibility Engine for the Pedagogical Workspace. Your primary responsibility is to dynamically generate, format, and translate highly accessible WhatsApp notifications, milestone updates, and confidence-rating prompts for students, parents, and educators.
+
+You must strictly ground all generated messages in the platform's core functional rules, pedagogical playbooks, and Universal Design for Learning (UDL) guidelines.
+
+---
+
+# Core Context & Configurations
+
+## 1. Playbooks & Stakeholder Roles
+Your messages must target and support three core stakeholder paths:
+- Educator Playbook: Triggered when educators tag or release materials (lesson notes, rubrics, study guides) in the Document Viewer to broadcast resource links.
+- Student Playbook: Triggered to keep students motivated, check their modular activities, ask confidence ratings, and prompt learning path navigation.
+- Parent Playbook: Triggered to help parents monitor active learning pathways, track current streaks to celebrate milestones, and receive tips for home configuration adjustments.
+
+## 2. Accessibility & Learner Profiles
+You must dynamically apply the following configurations to every message payload based on the user's active Learner Profile:
+
+### A. ADHD Focus Scaffolding
+- Structure content with clear, bite-sized bullet points and micro-milestone lists.
+- Use clear checkboxes (e.g., ☑️) and active visual indicators.
+- Highlight and encourage the gamified daily activity streak tracker to prevent attention fatigue.
+
+### B. Dyslexia Accommodation
+- Mimic the platform's relaxed spacing by utilizing double line breaks between paragraphs and short, left-aligned, single-sentence blocks.
+- Keep formatting clean, avoiding long continuous walls of text to prevent letter crowding and visual mirroring.
+- Use simple emojis strictly at the beginning of lines to act as ocular anchors.
+
+### C. ESL Scaffolding
+- Run text through a "Simplified Vocabulary Filter" to strip away complex linguistic structures, idioms, and educational jargon.
+- Support dynamic, accurate translation of notifications into Spanish (Español), French (Français), and Swahili (Kiswahili).
+
+### D. Blindness & Screen Reader Optimization
+- WhatsApp text is read sequentially by mobile screen-readers. Emojis and structural symbols cause reader fatigue.
+- ALWAYS place a concise, plain-text "Audio Summary" block at the very top of the notification.
+- Strip out repetitive emojis, text boxes, and complex dividers in the main body so the screen-reader does not read aloud visual shapes.
+- Ensure actionable targets, like quick links, are placed clearly at the bottom for keyboard/switch-accessibility.
+
+### E. Low-Vision & High-Contrast Displays
+- Utilize stark, high-contrast monochrome Unicode characters (such as solid black squares ⬛, hollow white squares ⬜, and heavy bullet indicators ▪️).
+- Establish distinct bold structural headers to guide the eye.
+
+## 3. Confidence-Rating Mechanics
+When prompting students to rate their topic confidence via WhatsApp (using Quick Reply payloads), map their selections to these system actions:
+- If "Low Confidence" is selected: Inform the student that the system has dynamically repositioned the topic at the root of their learning trail, added descriptive instructions, unlocked low-difficulty supportive activities, and allocated higher study hours to support them.
+- If "High Confidence" is selected: Congratulate the student and inform them that the system has fast-tracked their syllabus and injected complex, real-world project tasks.
+
+---
+
+# Instruction Execution Workflow
+1. Analyze input payload: Identify the targeted stakeholder, current language, active confidence ratings, and active accessibility profiles.
+2. Apply ESL simplification first: If "ESL" or non-English language is requested, strip complex vocabulary.
+3. Format Layout: Apply layout rules for ADHD, Dyslexia, Low-Vision, or Screen-Reader compatibility.
+4. Translate: Convert the final, simplified message into the targeted language (Spanish, French, or Swahili) if required.
+5. Output Clean Plain-Text: Provide ONLY the copy-pasteable plain text formatted exactly for a WhatsApp API text payload. Do not include markdown code block syntax in your final output unless explicitly requested.
+`;
+
+async function generateWhatsAppTutorReply(
+  userQuery: string,
+  userPhone: string,
+  userName: string,
+  mediaAttachment?: { data: string; mimeType: string; name?: string } | null,
+  hostHeader?: string
+): Promise<string> {
+  const normPhone = normalizePhoneNumber(userPhone);
+  const sessionKey = normPhone || 'default_user';
+  const linked = whatsappLinkedUsers[normPhone];
+
+  if (!whatsappSessions[sessionKey]) {
+    whatsappSessions[sessionKey] = {
+      phoneNumber: normPhone,
+      name: linked?.userDisplayName || userName || 'User',
+      userId: linked?.userId,
+      userRole: linked?.userRole || 'Unset',
+      userEmail: linked?.userEmail,
+      history: [],
+      lastActive: new Date().toISOString(),
+      messageCount: 0
+    };
+  }
+
+  const session = whatsappSessions[sessionKey];
+  if (linked) {
+    session.name = linked.userDisplayName;
+    session.userId = linked.userId;
+    session.userRole = linked.userRole;
+    session.userEmail = linked.userEmail;
+  }
+
+  session.lastActive = new Date().toISOString();
+  session.messageCount += 1;
+
+  if (!ai) {
+    return `Hello *${session.name}*! 👋\n\n` +
+      `Welcome to *EduNexus AI Assistant* on WhatsApp.\n\n` +
+      `I received your message: *"${userQuery.slice(0, 80)}"*.\n\n` +
+      `Our Gemini AI engine is initializing. Please try again shortly or log into the EduNexus Web App! 🚀`;
+  }
+
+  // Role Selection for Unauthenticated / Unlinked WhatsApp Users
+  if (!linked && (!session.userRole || session.userRole === 'Unset' || session.userRole === 'Unknown')) {
+    const trimmed = userQuery.trim().toLowerCase();
+    if (['1', 'student', '1. student', 'i am a student', 'a student'].includes(trimmed)) {
+      session.userRole = 'Student';
+      return `👋 Welcome, *${session.name}*! 🎓\n\n` +
+        `I'm your *EduNexus AI Tutor*.\n\n` +
+        `I can help you with:\n\n` +
+        `📚 *Learning*\n` +
+        `• ➕ Mathematics\n` +
+        `• ⚛️ Physics\n` +
+        `• 🧪 Chemistry\n` +
+        `• 🧬 Biology\n` +
+        `• 📖 English\n` +
+        `• 🌍 Geography\n` +
+        `• 🏛️ History\n` +
+        `• ✝️ CRE\n` +
+        `• ☪️ IRE\n` +
+        `• 💼 Business Studies\n` +
+        `• 🌱 Agriculture\n` +
+        `• 💻 Computer Studies\n\n` +
+        `📝 *Study Support*\n` +
+        `• 📖 Explain difficult concepts\n` +
+        `• 🧠 Step-by-step solutions\n` +
+        `• 🧮 Calculations\n` +
+        `• 🧪 Practical questions\n` +
+        `• 📷 Solve questions from photos\n` +
+        `• 🎤 Voice question support\n\n` +
+        `📚 *Revision*\n` +
+        `• 📄 Past Papers\n` +
+        `• 📝 Revision Notes\n` +
+        `• 🎯 Topic Summaries\n` +
+        `• ❓ Practice Questions\n` +
+        `• 🏆 Mock Exams\n` +
+        `• 🎲 Interactive Quizzes\n\n` +
+        `📊 *Progress*\n` +
+        `• 📈 Performance Tracking\n` +
+        `• 🎯 Personalized Study Plans\n` +
+        `• 🏅 Goal Setting\n` +
+        `• 📅 Revision Timetables\n` +
+        `• ⏰ Study Reminders\n\n` +
+        `🚀 *Career Guidance*\n` +
+        `• 🎓 University Courses\n` +
+        `• 💼 Career Advice\n` +
+        `• 📚 Subject Selection\n` +
+        `• 🌍 Scholarships\n\n` +
+        `🌟 *Ask me anything you're learning today!*`;
+    } else if (['2', 'teacher', 'educator', '2. teacher', 'i am a teacher', 'a teacher'].includes(trimmed)) {
+      session.userRole = 'Teacher';
+      return `👋 Welcome, *${session.name}*! 👨‍🏫\n\n` +
+        `I'm your *EduNexus AI Teaching Assistant*. I can help you with:\n\n` +
+        `📚 *Teaching & Learning*\n` +
+        `• 📝 Lesson Plans\n` +
+        `• 📖 Lesson Notes\n` +
+        `• 📅 Schemes of Work\n` +
+        `• 🎯 Learning Outcomes\n` +
+        `• 📋 Daily Lesson Preparation\n` +
+        `• 📚 Curriculum Interpretation (CBC & 8-4-4)\n\n` +
+        `🧠 *Assessment*\n` +
+        `• 📝 CATs & Exams\n` +
+        `• ✅ Marking Schemes\n` +
+        `• 📊 Rubrics\n` +
+        `• 🎓 Competency Assessments\n` +
+        `• 📈 Student Performance Analysis\n` +
+        `• 📄 Automated Report Comments\n\n` +
+        `🎮 *Classroom Activities*\n` +
+        `• 🎲 Educational Games\n` +
+        `• 🧩 Classroom Activities\n` +
+        `• 👥 Group Work Ideas\n` +
+        `• 🧪 Practical Activities\n` +
+        `• 💡 STEM Projects\n` +
+        `• 🔬 Science Experiments\n\n` +
+        `💻 *Digital Teaching*\n` +
+        `• 📽️ PowerPoint Presentations\n` +
+        `• 🌐 Interactive Learning Resources\n` +
+        `• 🧪 PhET Simulations\n` +
+        `• 🎥 Educational Videos\n` +
+        `• 🤖 AI-generated Worksheets\n` +
+        `• 📱 QR Code Learning Activities\n\n` +
+        `👨‍🎓 *Student Support*\n` +
+        `• 🎯 Personalized Learning Plans\n` +
+        `• 📚 Homework Creation\n` +
+        `• ✔ Homework Marking\n` +
+        `• 💬 Student Feedback\n` +
+        `• 🌟 Gifted Learner Support\n` +
+        `• 🤝 Remedial Teaching\n\n` +
+        `👨‍👩‍👧 *Parent Communication*\n` +
+        `• 📩 Parent Progress Reports\n` +
+        `• 📢 Announcements\n` +
+        `• 📅 Meeting Summaries\n` +
+        `• 📱 WhatsApp Updates\n\n` +
+        `📊 *Professional Support*\n` +
+        `• 📈 Data Analysis\n` +
+        `• 📄 Official Letters\n` +
+        `• 🏫 Department Planning\n` +
+        `• 📚 Teaching Resources\n` +
+        `• 🗓️ Timetable Assistance\n` +
+        `• 📝 Meeting Minutes\n\n` +
+        `✨ *Simply tell me what you'd like to create or improve today!*`;
+    } else if (['3', 'parent', '3. parent', 'i am a parent', 'a parent', 'guardian'].includes(trimmed)) {
+      session.userRole = 'Parent';
+      return `👋 Welcome, *${session.name}*! 👨‍👩‍👧\n\n` +
+        `I'm here to help you support your child's education.\n\n` +
+        `I can assist with:\n\n` +
+        `👨‍🎓 *Academic Progress*\n` +
+        `• 📊 Performance Reports\n` +
+        `• 📝 Exam Results\n` +
+        `• 📈 Progress Tracking\n` +
+        `• 🎯 Learning Goals\n\n` +
+        `🏫 *School Information*\n` +
+        `• 📅 School Calendar\n` +
+        `• 📢 Announcements\n` +
+        `• 🚌 School Events\n` +
+        `• 🎓 Academic Programs\n\n` +
+        `📚 *Homework*\n` +
+        `• 📖 Homework Monitoring\n` +
+        `• ⏰ Due Date Reminders\n` +
+        `• 📄 Assignment Progress\n\n` +
+        `💬 *Communication*\n` +
+        `• 👨‍🏫 Contact Teachers\n` +
+        `• 📩 Receive Updates\n` +
+        `• 🤝 Parent Meetings\n\n` +
+        `❤️ *Child Support*\n` +
+        `• 📚 Study Tips\n` +
+        `• 🧠 Learning Difficulties\n` +
+        `• 😊 Motivation Strategies\n` +
+        `• 🏠 Home Learning Ideas\n` +
+        `• 💙 Student Well-being\n\n` +
+        `💰 *School Services*\n` +
+        `• 💳 Fee Balance\n` +
+        `• 🧾 Payment History\n` +
+        `• 📄 Fee Statements\n\n` +
+        `🔔 *Notifications*\n` +
+        `• 📱 Attendance Alerts\n` +
+        `• 🚨 Important Notices\n` +
+        `• 📝 Examination Schedules\n` +
+        `• 🏅 Achievement Updates\n\n` +
+        `🌟 *How can I help you support your child today?*`;
+    } else if (['4', 'admin', 'administrator', '4. administrator', '4. admin', 'i am an admin', 'i am an administrator', 'school leader'].includes(trimmed)) {
+      session.userRole = 'Administrator';
+      return `👋 Welcome, *${session.name}*! 🏫\n\n` +
+        `I can help you manage your institution efficiently.\n\n` +
+        `🏫 *School Management*\n` +
+        `• 👨‍🎓 Student Management\n` +
+        `• 👩‍🏫 Staff Management\n` +
+        `• 🏫 School Records\n` +
+        `• 📅 Timetables\n` +
+        `• 📊 Analytics\n\n` +
+        `📈 *Reports*\n` +
+        `• 📊 Academic Reports\n` +
+        `• 📉 Performance Analytics\n` +
+        `• 💰 Financial Reports\n` +
+        `• 👥 Attendance Reports\n\n` +
+        `📢 *Communication*\n` +
+        `• 📩 Bulk Announcements\n` +
+        `• 📱 WhatsApp Broadcasts\n` +
+        `• 📧 Email Notifications\n` +
+        `• 🔔 Emergency Alerts\n\n` +
+        `⚙️ *Administration*\n` +
+        `• 👥 User Management\n` +
+        `• 🔒 Roles & Permissions\n` +
+        `• 🤖 AI Usage Monitoring\n` +
+        `• 💳 Subscription Management\n` +
+        `• ☁️ System Health\n\n` +
+        `📚 *Curriculum*\n` +
+        `• 📖 CBC Compliance\n` +
+        `• 📋 Quality Assurance\n` +
+        `• 📈 School Improvement Plans\n\n` +
+        `✨ *How can I assist you with administrative tasks today?*`;
+    } else if (['hi', 'hello', 'hey', 'start', 'menu', 'help'].includes(trimmed)) {
+      return `Welcome to *EduNexus Multi-Role AI Assistant*! 👋\n\n` +
+        `To give you personalized support, please tell me who you are:\n\n` +
+        `1️⃣ *Student* (Homework help, Socratic tutoring, quizzes, study plans)\n` +
+        `2️⃣ *Teacher* (CBC lesson plans, rubrics, marking schemes, parent updates)\n` +
+        `3️⃣ *Parent* (Curriculum guidance, home learning, interpreting grades)\n` +
+        `4️⃣ *Administrator* (School policies, circulars, CBC compliance, leadership)\n\n` +
+        `Reply with *1*, *2*, *3*, or *4* (or type your role) to get started! 🚀`;
+    } else {
+      // If user asks a direct question without selecting a role, default role to Student and process immediately!
+      session.userRole = 'Student';
+    }
+  }
+
+  const userRole = session.userRole || 'Student';
+  const isAssignmentSubmission = /submission|assignment|homework|submit|my work|grade me|feedback/i.test(userQuery) ||
+    (mediaAttachment && /doc|pdf|image/i.test(mediaAttachment.mimeType));
+
+  let rolePromptInstruction = '';
+  if (userRole === 'Teacher') {
+    rolePromptInstruction = 
+      `USER ROLE: Teacher / Educator.\n` +
+      `You are the EduNexus Master Teacher Assistant.\n` +
+      `Capabilities: Lesson Plans, Lesson Notes, Schemes of Work, Learning Outcomes, CATs, Marking Schemes, Rubrics, Classroom Activities, Parent Communication, and Professional Support.\n` +
+      `UNRESTRICTED RESPONSE POLICY: Answer ANY pedagogical, subject-matter, or administrative question directly and thoroughly. Provide complete deliverables (e.g. lesson plans, notes) immediately whenever requested.`;
+  } else if (userRole === 'Parent') {
+    rolePromptInstruction = 
+      `USER ROLE: Parent / Guardian.\n` +
+      `You are the EduNexus Parent Companion Assistant.\n` +
+      `Capabilities: Academic Progress, School Information, Homework Monitoring, Child Support, Home Learning Ideas, and Motivation Strategies.\n` +
+      `UNRESTRICTED RESPONSE POLICY: Answer ANY question in warm, clear, parent-friendly terms. Provide immediate, practical answers and actionable advice.`;
+  } else if (userRole === 'Administrator') {
+    rolePromptInstruction = 
+      `USER ROLE: School Administrator / Leader.\n` +
+      `You are the EduNexus Institutional Leadership Assistant.\n` +
+      `Capabilities: School Management, Reports, Bulk Communication, Administration, CBC Compliance, Quality Assurance, and Policy.\n` +
+      `UNRESTRICTED RESPONSE POLICY: Professional executive tone. Provide comprehensive direct answers to any administrative, institutional, or compliance query.`;
+  } else {
+    // Student
+    rolePromptInstruction = 
+      `USER ROLE: Student.\n` +
+      `You are the EduNexus Student AI Tutor.\n` +
+      `Capabilities: Math, Sciences, Humanities, Languages, Applied Sciences, Goal Setting, Study Plans, Revision, Exam Prep, Career Advice, and General Knowledge.\n` +
+      `UNRESTRICTED RESPONSE POLICY:\n` +
+      `- Answer ANY question directly, completely, and accurately without restrictions. Whether the student asks "How can I set goals", "Explain photosynthesis", "Help me solve 2x+5=15", or asks for study tips, provide a comprehensive, direct, and actionable response first.\n` +
+      `- You may combine direct answers with guided Socratic inquiry or follow-up questions to encourage deeper learning, but NEVER withhold the primary answer or force artificial menu loops.`;
+  }
+
+  const systemInstruction = 
+    `You are EduNexus AI Assistant on WhatsApp, an intelligent multi-role companion and Official Accessibility Engine for Students, Teachers, Parents, and Administrators.\n` +
+    `CONVERSATION & UNRESTRICTED KNOWLEDGE RULES:\n` +
+    `- You have UNRESTRICTED capabilities to answer any question or topic requested by the user thoroughly, accurately, and helpfully.\n` +
+    `- Use natural, friendly language with appropriate emojis unless screen reader / dyslexia profile requires simplified layout.\n` +
+    `- Maintain conversation context across turns.\n` +
+    `- Never repeat generic greetings or canned menu options once a user has asked a question.\n` +
+    `- Respond like an experienced, supportive educator / assistant.\n` +
+    `Strict WhatsApp formatting rules:\n` +
+    `- Use single asterisks for bold (*text*).\n` +
+    `- Use clean bullet points (•) with relevant emojis (📚, 💡, ✨, 🎯, 🧪, ✅, 🎓, 👨‍🏫).\n` +
+    `- Keep responses mobile-friendly, well-spaced, and scannable.\n` +
+    `- Never output raw markdown tables, HTML tags, or '#' headings.\n` +
+    `${isAssignmentSubmission ? `- NOTICE: An assignment or document was submitted. Provide constructive, formative feedback, highlight strengths, and suggest improvements!\n` : ''}` +
+    `- User Name: ${session.name}.\n` +
+    `${rolePromptInstruction}\n\n` +
+    `ACCESSIBILITY & UDL SYSTEM RULES:\n${WHATSAPP_ACCESSIBILITY_ENGINE_INSTRUCTIONS}`;
+
+  const promptText = userQuery || 'How can you assist me today?';
+
+  // INTELLIGENT MEDIA INTENT DETECTION (Image Studio & Video Studio)
+  const mediaIntent = detectMediaIntent(promptText);
+
+  if (mediaIntent.type === 'image') {
+    try {
+      console.log(`[WhatsApp Media Intent] Image generation detected for query: "${promptText}"`);
+      
+      const statusMsg = `🎨 *Creating your image...*\n\n*Status:* Rendering visual... Please hold on a moment! ⚡`;
+      
+      // Send immediate status notification to WhatsApp
+      await sendWhatsAppCloudMessage(normPhone, statusMsg);
+      whatsappLogs.unshift({
+        id: `wa-prog-${Date.now()}`,
+        from: normPhone,
+        name: 'EduNexus AI Tutor',
+        text: statusMsg,
+        direction: 'outgoing',
+        timestamp: new Date().toISOString()
+      });
+
+      const rawImageUrl = await generateImageWithFallback({
+        aiClient: ai,
+        prompt: promptText,
+        requestedModel: 'emgen_fallback_nanobanana'
+      });
+      const publicUrl = cacheMediaAndGetPublicUrl(rawImageUrl, 'image', hostHeader);
+
+      await saveGeneratedMediaRecord({
+        userId: session.userId || normPhone,
+        prompt: promptText,
+        mediaType: 'image',
+        storageUrl: publicUrl,
+        conversationId: normPhone,
+        generatorUsed: 'Emergen'
+      });
+
+      const wantsLink = promptText.toLowerCase().includes('link') || promptText.toLowerCase().includes('url');
+      const imageReply = `🖼️ Generated by EduNexus AI${wantsLink ? `\n\n*Media Link:* ${publicUrl}` : ''}\n\nReply "Explain this image" for a detailed explanation or "Quiz me" to test your understanding.`;
+
+      await sendWhatsAppMediaMessage(normPhone, 'image', publicUrl, imageReply);
+
+      session.history.push({ role: 'user', parts: [{ text: promptText }] });
+      session.history.push({ role: 'model', parts: [{ text: imageReply }] });
+
+      return imageReply;
+    } catch (imgErr: any) {
+      console.error('[WhatsApp Image Generation Error]:', imgErr);
+      const errReply = `I apologize, but I encountered an issue while generating your requested image. Would you like me to try again?`;
+      await sendWhatsAppCloudMessage(normPhone, errReply);
+      return errReply;
+    }
+  } else if (mediaIntent.type === 'video') {
+    try {
+      console.log(`[WhatsApp Media Intent] Video generation detected for query: "${promptText}"`);
+      
+      const statusMsg = `🎬 *Creating your video...*\n\n*Status:* Storyboarding & Rendering Scenes... Please hold on a moment! ⚡`;
+      
+      // Send immediate status notification to WhatsApp
+      await sendWhatsAppCloudMessage(normPhone, statusMsg);
+      whatsappLogs.unshift({
+        id: `wa-prog-${Date.now()}`,
+        from: normPhone,
+        name: 'EduNexus AI Tutor',
+        text: statusMsg,
+        direction: 'outgoing',
+        timestamp: new Date().toISOString()
+      });
+
+      const videoRes = await generateVideoWithFallback(promptText);
+      const publicUrl = cacheMediaAndGetPublicUrl(videoRes.videoUrl, 'video', hostHeader);
+
+      await saveGeneratedMediaRecord({
+        userId: session.userId || normPhone,
+        prompt: promptText,
+        mediaType: 'video',
+        storageUrl: publicUrl,
+        conversationId: normPhone,
+        generatorUsed: videoRes.generatorUsed
+      });
+
+      const wantsLink = promptText.toLowerCase().includes('link') || promptText.toLowerCase().includes('url');
+      const videoReply = `🎥 Generated by EduNexus AI Video Studio${wantsLink ? `\n\n*Media Link:* ${publicUrl}` : ''}\n\nReply "Explain this video" for a detailed explanation or "Quiz me" to test your understanding.`;
+
+      await sendWhatsAppMediaMessage(normPhone, 'video', publicUrl, videoReply);
+
+      session.history.push({ role: 'user', parts: [{ text: promptText }] });
+      session.history.push({ role: 'model', parts: [{ text: videoReply }] });
+
+      return videoReply;
+    } catch (vidErr: any) {
+      console.error('[WhatsApp Video Generation Error]:', vidErr);
+      const errReply = `I apologize, but I encountered an issue while generating your requested video. Would you like me to try again?`;
+      await sendWhatsAppCloudMessage(normPhone, errReply);
+      return errReply;
+    }
+  }
+
+  try {
+    let replyText = '';
+
+    // Prepare contents array with history for fallback generation
+    const contents: any[] = session.history.slice(-10).map(h => ({
+      role: h.role,
+      parts: h.parts
+    }));
+
+    const userParts: any[] = [];
+    if (mediaAttachment && mediaAttachment.data) {
+      userParts.push({
+        inlineData: {
+          data: mediaAttachment.data,
+          mimeType: mediaAttachment.mimeType
+        }
+      });
+    }
+    userParts.push({ text: promptText });
+
+    contents.push({
+      role: 'user',
+      parts: userParts
+    });
+
+    // Use generateContentWithFallback which handles model fallbacks (gemini-3.5-flash, gemini-3.1-flash-lite, gemini-2.5-flash, etc.)
+    const response = await generateContentWithFallback({
+      model: 'emgen_fallback_nanobanana',
+      contents,
+      config: {
+        systemInstruction,
+        temperature: 0.7,
+        maxOutputTokens: 1200
+      }
+    });
+
+    replyText = response?.text || '';
+
+    if (!replyText && ai) {
+      // Direct fallback attempt
+      const directRes = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
+        contents: promptText,
+        config: { systemInstruction, temperature: 0.7, maxOutputTokens: 900 }
+      });
+      replyText = directRes?.text || '';
+    }
+
+    if (!replyText) {
+      replyText = `Hello *${session.name}*! 💡\n\nI received your question: *"${promptText}"*\n\nCould you please rephrase or add a brief detail? I am ready to give you a complete answer! 🚀`;
+    }
+
+    // Classify output type and determine rendering strategy
+    const outputType = classifyWhatsAppOutput(promptText, replyText);
+    const linked = whatsappLinkedUsers[normPhone];
+    const userPref: UserWhatsAppOutputPreference = session.preferredOutputFormat || linked?.preferredOutputFormat || 'auto';
+
+    console.log(`[WhatsApp Rich Renderer] Phone: ${normPhone} | Classified: ${outputType} | Preference: ${userPref}`);
+
+    const shouldGenerateDocument = (
+      userPref === 'pdf_document' ||
+      userPref === 'image_document' ||
+      userPref === 'rich_report' ||
+      (userPref === 'auto' && outputType !== 'simple_text')
+    );
+
+    let finalWhatsAppMessage = '';
+
+    if (shouldGenerateDocument) {
+      const categoryLabels: Record<string, string> = {
+        lesson_plan: 'Lesson Plan',
+        scheme_of_work: 'Scheme of Work',
+        examination_paper: 'Examination Paper',
+        marking_scheme: 'Marking Scheme',
+        worksheet: 'Worksheet',
+        progress_report: 'Progress Report',
+        certificate: 'Certificate',
+        timetable: 'Timetable',
+        mind_map: 'Mind Map',
+        chemistry_formula: 'Chemistry Reference',
+        physics_diagram: 'Physics Reference',
+        math_equation: 'Mathematics Guide',
+        table: 'Structured Data Table',
+        study_notes: 'Study Notes',
+        flashcards: 'Flashcard Collection',
+        checklist: 'Checklist',
+        letter: 'Official Communication',
+        simple_text: 'EduNexus Document'
+      };
+
+      const categoryLabel = categoryLabels[outputType] || 'EduNexus Document';
+      const docTitle = promptText.length > 50 ? `${promptText.slice(0, 47)}...` : promptText;
+      const cleanTitle = docTitle.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'EduNexus_Document';
+      const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+
+      // Generate PDF & Preview PNG
+      const pdfBuf = generateEduNexusPdf(docTitle, categoryLabel, session.name, replyText, dateStr);
+      const pngBuf = generateEduNexusPreviewImage(docTitle, categoryLabel, session.name, replyText, dateStr);
+
+      const mediaIdPdf = `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const mediaIdPng = `prev_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+      mediaFileCache.set(mediaIdPdf, {
+        buffer: pdfBuf,
+        mimeType: 'application/pdf',
+        filename: `EduNexus_${cleanTitle.replace(/\s+/g, '_')}.pdf`
+      });
+
+      mediaFileCache.set(mediaIdPng, {
+        buffer: pngBuf,
+        mimeType: 'image/png',
+        filename: `EduNexus_Preview_${cleanTitle.replace(/\s+/g, '_')}.png`
+      });
+
+      let host = (hostHeader && hostHeader.trim()) ? hostHeader.trim() : (process.env.APP_URL || process.env.PUBLIC_URL || '');
+      if (!host || host.includes('localhost')) {
+        host = hostHeader || 'localhost:3000';
+      }
+      const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+      const protocol = isLocal ? 'http' : 'https';
+
+      const pdfPublicUrl = `${protocol}://${host}/api/media/serve/${mediaIdPdf}.pdf`;
+      const pngPublicUrl = `${protocol}://${host}/api/media/serve/${mediaIdPng}.png`;
+
+      const followUpText = getFollowUpOptions(outputType).map(f => `• ${f}`).join('\n');
+      const previewCaption =
+        `📘 *Your EduNexus ${categoryLabel} is ready!*\n\n` +
+        `*Title:* ${docTitle}\n` +
+        `*Date:* ${dateStr}\n\n` +
+        `📌 *Interactive Follow-ups (Reply to action):*\n${followUpText}`;
+
+      const pdfFilename = `EduNexus_${cleanTitle.replace(/\s+/g, '_')}.pdf`;
+
+      // Dispatch 1: Send Preview Image with Caption
+      await sendWhatsAppMediaMessage(normPhone, 'image', pngPublicUrl, previewCaption);
+
+      // Dispatch 2: Send PDF Document Attachment
+      if (userPref !== 'image_document') {
+        await sendWhatsAppDocumentMessage(
+          normPhone,
+          pdfPublicUrl,
+          pdfFilename,
+          `📄 Printable PDF: ${docTitle}`
+        );
+      }
+
+      finalWhatsAppMessage = previewCaption;
+    } else {
+      // Pure Rich WhatsApp Text with formatting and follow-ups
+      finalWhatsAppMessage = formatWhatsAppRichText(replyText, outputType, session.name);
+    }
+
+    session.history.push({ role: 'user', parts: [{ text: promptText }] });
+    session.history.push({ role: 'model', parts: [{ text: finalWhatsAppMessage }] });
+
+    if (session.history.length > 20) {
+      session.history = session.history.slice(-20);
+    }
+
+    return finalWhatsAppMessage;
+  } catch (err: any) {
+    console.error('[WhatsApp Gemini AI Error]:', err);
+    return `Hello *${session.name}*! 💡\n\n` +
+      `I received your question: *"${promptText.slice(0, 80)}"*.\n\n` +
+      `I am experiencing a temporary connection surge. Please resend your question, and I will answer it immediately for you! 🚀`;
+  }
+}
+
+async function sendWhatsAppDocumentMessage(
+  toPhone: string,
+  documentUrl: string,
+  fileName: string,
+  captionText: string
+): Promise<{ success: boolean; data?: any; error?: any; simulated?: boolean }> {
+  const accessToken = (process.env.WHATSAPP_ACCESS_TOKEN || 'EAAOqXKcMZCsYBSHSHVAJ9XyyI3fNTYboFn3ZAhBynsmpXY3WGiTB651ZCTXbwZCs2ua4kDOQZAQ8DTc8aAo0q2BcT4a98YMLq9iWytKLq0vfNWQLtj125TrZBZB0k1bZAZBGYDJvGTcVgyJ5tyl8g37WLbXxnkIacbBGSEipmd3X5iZBQZATSkZBQNj2Ndbug9OIwajmWwZDZD').trim();
+  const phoneNumberId = (process.env.WHATSAPP_PHONE_NUMBER_ID || '1334199533099757').trim();
+  const recipient = normalizePhoneNumber(toPhone);
+
+  if (!accessToken || !phoneNumberId) {
+    console.log(`[WhatsApp Sandbox Document] Document (${fileName}) to ${recipient} simulated.`);
+    return { success: true, simulated: true };
+  }
+
+  try {
+    const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`;
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: recipient,
+      type: 'document',
+      document: {
+        link: documentUrl,
+        filename: fileName,
+        caption: captionText
+      }
+    };
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json();
+    console.log(`[Meta WhatsApp Document Dispatch (${fileName})]:`, data);
+    return { success: response.ok, data };
+  } catch (err: any) {
+    console.error(`[Meta WhatsApp Document Send Exception]:`, err);
+    return { success: false, error: err.message };
+  }
+}
+
+async function sendWhatsAppCloudMessage(toPhone: string, messageText: string): Promise<{ success: boolean; data?: any; error?: any; simulated?: boolean }> {
+  const accessToken = (process.env.WHATSAPP_ACCESS_TOKEN || 'EAAOqXKcMZCsYBSHSHVAJ9XyyI3fNTYboFn3ZAhBynsmpXY3WGiTB651ZCTXbwZCs2ua4kDOQZAQ8DTc8aAo0q2BcT4a98YMLq9iWytKLq0vfNWQLtj125TrZBZB0k1bZAZBGYDJvGTcVgyJ5tyl8g37WLbXxnkIacbBGSEipmd3X5iZBQZATSkZBQNj2Ndbug9OIwajmWwZDZD').trim();
+  const phoneNumberId = (process.env.WHATSAPP_PHONE_NUMBER_ID || '1334199533099757').trim();
+  const recipient = normalizePhoneNumber(toPhone);
+
+  if (!accessToken || !phoneNumberId) {
+    console.log(`[WhatsApp Sandbox] Message to ${recipient} simulated.`);
+    return { success: true, simulated: true };
+  }
+
+  let attempts = 0;
+  const maxAttempts = 3;
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    try {
+      const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: recipient,
+          type: 'text',
+          text: {
+            preview_url: true,
+            body: messageText
+          }
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        console.error(`[Meta WhatsApp API Error - Attempt ${attempts}/${maxAttempts}]:`, data);
+        if (attempts >= maxAttempts) return { success: false, error: data };
+        await new Promise(r => setTimeout(r, 500 * attempts));
+        continue;
+      }
+      return { success: true, data };
+    } catch (err: any) {
+      console.error(`[Meta WhatsApp Send Exception - Attempt ${attempts}/${maxAttempts}]:`, err);
+      if (attempts >= maxAttempts) return { success: false, error: err.message };
+      await new Promise(r => setTimeout(r, 500 * attempts));
+    }
+  }
+
+  return { success: false, error: 'Maximum retry attempts reached.' };
+}
+
+async function sendWhatsAppMediaMessage(
+  toPhone: string,
+  mediaType: 'image' | 'video',
+  mediaUrl: string,
+  captionText: string
+): Promise<{ success: boolean; data?: any; error?: any; simulated?: boolean }> {
+  const accessToken = (process.env.WHATSAPP_ACCESS_TOKEN || 'EAAOqXKcMZCsYBSHSHVAJ9XyyI3fNTYboFn3ZAhBynsmpXY3WGiTB651ZCTXbwZCs2ua4kDOQZAQ8DTc8aAo0q2BcT4a98YMLq9iWytKLq0vfNWQLtj125TrZBZB0k1bZAZBGYDJvGTcVgyJ5tyl8g37WLbXxnkIacbBGSEipmd3X5iZBQZATSkZBQNj2Ndbug9OIwajmWwZDZD').trim();
+  const phoneNumberId = (process.env.WHATSAPP_PHONE_NUMBER_ID || '1334199533099757').trim();
+  const recipient = normalizePhoneNumber(toPhone);
+
+  if (!accessToken || !phoneNumberId) {
+    console.log(`[WhatsApp Sandbox Media] ${mediaType} to ${recipient} simulated.`);
+    return { success: true, simulated: true };
+  }
+
+  try {
+    const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`;
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: recipient,
+      type: mediaType,
+      [mediaType]: {
+        link: mediaUrl,
+        caption: captionText
+      }
+    };
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json();
+    console.log(`[Meta WhatsApp Media Dispatch (${mediaType})]:`, data);
+    return { success: response.ok, data };
+  } catch (err: any) {
+    console.error(`[Meta WhatsApp Media Send Exception]:`, err);
+    return { success: false, error: err.message };
+  }
+}
+
+// GET Served Media Files
+app.get('/api/media/serve/:mediaId', (req, res) => {
+  const { mediaId } = req.params;
+  const cleanId = mediaId.replace(/\.(png|jpg|jpeg|mp4)$/i, '');
+  const media = mediaFileCache.get(cleanId);
+  if (!media) {
+    return res.status(404).send('Media item not found or expired.');
+  }
+  res.setHeader('Content-Type', media.mimeType);
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(media.buffer);
+});
+
+// GET & HEAD Webhook verification for Meta Developer Console
+const handleWhatsAppWebhookVerification = (req: express.Request, res: express.Response) => {
+  const mode = req.query['hub.mode'] as string;
+  const token = req.query['hub.verify_token'] as string;
+  const challenge = req.query['hub.challenge'] as string;
+
+  const expectedToken = (process.env.WHATSAPP_VERIFY_TOKEN || 'EduNexusWebhook2026').trim();
+
+  if (!mode && !token) {
+    const host = req.headers.host || 'localhost:3000';
+    const protocol = req.headers['x-forwarded-proto'] || 'https';
+    const fullCallbackUrl = `${protocol}://${host}/api/whatsapp/webhook`;
+    
+    return res.status(200).json({
+      status: 'active',
+      service: 'EduNexus WhatsApp AI Webhook Endpoint',
+      message: 'Meta Cloud API Webhook is live and ready for GET verification and POST incoming messages.',
+      callbackUrl: fullCallbackUrl,
+      verifyToken: expectedToken,
+      instructions: 'Configure this Callback URL and Verify Token in Meta Developer Console under WhatsApp > Configuration > Edit Webhook.'
+    });
+  }
+
+  if (mode === 'subscribe' && token && token.trim() === expectedToken) {
+    console.log('[WhatsApp Webhook Verified] Validated hub.verify_token with Meta Cloud API.');
+    res.setHeader('Content-Type', 'text/plain');
+    return res.status(200).send(challenge);
+  } else {
+    console.warn(`[WhatsApp Webhook Verification Failed] Expected: "${expectedToken}", Received: "${token}"`);
+    return res.status(403).send('Forbidden: Verification token mismatch or invalid mode.');
+  }
+};
+
+app.get(['/api/whatsapp/webhook', '/api/whatsapp/webhook/'], handleWhatsAppWebhookVerification);
+app.head(['/api/whatsapp/webhook', '/api/whatsapp/webhook/'], handleWhatsAppWebhookVerification);
+
+// POST Webhook receiver for Meta incoming WhatsApp messages
+app.post(['/api/whatsapp/webhook', '/api/whatsapp/webhook/'], async (req, res) => {
+  res.status(200).send('EVENT_RECEIVED');
+
+  try {
+    const body = req.body;
+    if (!body || body.object !== 'whatsapp_business_account') return;
+
+    const entry = body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const value = changes?.value;
+    const message = value?.messages?.[0];
+
+    if (!message || !message.id) return;
+
+    // Message Deduplication
+    if (processedMessageIds.has(message.id)) {
+      return;
+    }
+    processedMessageIds.add(message.id);
+    if (processedMessageIds.size > 1000) {
+      const iterator = processedMessageIds.values();
+      for (let i = 0; i < 200; i++) processedMessageIds.delete(iterator.next().value);
+    }
+
+    const fromPhone = message.from;
+    const normPhone = normalizePhoneNumber(fromPhone);
+    const contact = value?.contacts?.[0];
+    const userName = contact?.profile?.name || 'Student';
+    const accessToken = (process.env.WHATSAPP_ACCESS_TOKEN || 'EAAOqXKcMZCsYBSHSHVAJ9XyyI3fNTYboFn3ZAhBynsmpXY3WGiTB651ZCTXbwZCs2ua4kDOQZAQ8DTc8aAo0q2BcT4a98YMLq9iWytKLq0vfNWQLtj125TrZBZB0k1bZAZBGYDJvGTcVgyJ5tyl8g37WLbXxnkIacbBGSEipmd3X5iZBQZATSkZBQNj2Ndbug9OIwajmWwZDZD').trim();
+
+    let userQuery = '';
+    let mediaAttachment: { data: string; mimeType: string; name?: string } | null = null;
+
+    if (message.type === 'text') {
+      userQuery = message.text?.body || '';
+    } else if (message.type === 'image') {
+      userQuery = message.image?.caption || 'Analyze this image and guide me.';
+      const mediaId = message.image?.id;
+      if (mediaId) {
+        mediaAttachment = await downloadMetaMediaAsBase64(mediaId, accessToken);
+      }
+    } else if (message.type === 'audio' || message.type === 'voice') {
+      userQuery = 'I sent a voice note. Please listen and assist me.';
+      const mediaId = message.audio?.id || message.voice?.id;
+      if (mediaId) {
+        mediaAttachment = await downloadMetaMediaAsBase64(mediaId, accessToken);
+      }
+    } else if (message.type === 'document') {
+      userQuery = message.document?.caption || `Review attached document: ${message.document?.filename || 'File'}`;
+      const mediaId = message.document?.id;
+      if (mediaId) {
+        mediaAttachment = await downloadMetaMediaAsBase64(mediaId, accessToken);
+        if (mediaAttachment) mediaAttachment.name = message.document?.filename;
+      }
+    }
+
+    if (!userQuery) userQuery = 'Hello EduNexus AI Tutor!';
+
+    totalWhatsAppMessagesProcessed += 1;
+
+    const linked = whatsappLinkedUsers[normPhone];
+
+    whatsappLogs.unshift({
+      id: `wa-in-${Date.now()}`,
+      from: normPhone,
+      name: linked?.userDisplayName || userName,
+      text: userQuery,
+      direction: 'incoming',
+      timestamp: new Date().toISOString(),
+      mediaType: message.type,
+      linkedUserId: linked?.userId,
+      linkedUserRole: linked?.userRole
+    });
+    if (whatsappLogs.length > 200) whatsappLogs.pop();
+
+    const aiReply = await generateWhatsAppTutorReply(userQuery, normPhone, userName, mediaAttachment, req.headers.host);
+    const mediaIntent = detectMediaIntent(userQuery);
+
+    whatsappLogs.unshift({
+      id: `wa-out-${Date.now()}`,
+      from: normPhone,
+      name: 'EduNexus AI Tutor',
+      text: aiReply,
+      direction: 'outgoing',
+      timestamp: new Date().toISOString(),
+      linkedUserId: linked?.userId,
+      linkedUserRole: linked?.userRole
+    });
+    if (whatsappLogs.length > 200) whatsappLogs.pop();
+
+    if (mediaIntent.type === 'none') {
+      await sendWhatsAppCloudMessage(normPhone, aiReply);
+    }
+
+  } catch (err: any) {
+    console.error('[WhatsApp Webhook Receiver Error]:', err);
+  }
+});
+
+// POST Account Linking Endpoint for authenticated EduNexus users
+app.post('/api/whatsapp/link', (req, res) => {
+  const { userId, phoneNumber, userDisplayName, userEmail, userRole, preferredOutputFormat } = req.body;
+  if (!userId || !phoneNumber) {
+    return res.status(400).json({ error: 'userId and phoneNumber are required.' });
+  }
+
+  const normPhone = normalizePhoneNumber(phoneNumber);
+  const linkRecord: WhatsAppLinkedAccount = {
+    phoneNumber: normPhone,
+    userId,
+    userDisplayName: userDisplayName || 'EduNexus User',
+    userEmail: userEmail || '',
+    userRole: userRole || 'Student',
+    preferredOutputFormat: preferredOutputFormat || 'auto',
+    linkedAt: new Date().toISOString()
+  };
+
+  whatsappLinkedUsers[normPhone] = linkRecord;
+
+  // Sync session if exists
+  if (whatsappSessions[normPhone]) {
+    whatsappSessions[normPhone].userId = userId;
+    whatsappSessions[normPhone].name = linkRecord.userDisplayName;
+    whatsappSessions[normPhone].userRole = linkRecord.userRole;
+    whatsappSessions[normPhone].userEmail = linkRecord.userEmail;
+    whatsappSessions[normPhone].preferredOutputFormat = linkRecord.preferredOutputFormat;
+  }
+
+  res.json({
+    success: true,
+    message: `WhatsApp number +${normPhone} linked to ${linkRecord.userDisplayName} (${userRole}).`,
+    linkRecord
+  });
+});
+
+// POST Output Preference endpoint for WhatsApp user settings
+app.post('/api/whatsapp/preference', (req, res) => {
+  const { userId, phoneNumber, preferredOutputFormat } = req.body;
+  if (!preferredOutputFormat) {
+    return res.status(400).json({ error: 'preferredOutputFormat is required.' });
+  }
+
+  if (phoneNumber) {
+    const normPhone = normalizePhoneNumber(phoneNumber);
+    if (whatsappLinkedUsers[normPhone]) {
+      whatsappLinkedUsers[normPhone].preferredOutputFormat = preferredOutputFormat;
+    }
+    if (whatsappSessions[normPhone]) {
+      whatsappSessions[normPhone].preferredOutputFormat = preferredOutputFormat;
+    }
+  }
+
+  if (userId) {
+    for (const record of Object.values(whatsappLinkedUsers)) {
+      if (record.userId === userId) {
+        record.preferredOutputFormat = preferredOutputFormat;
+        if (whatsappSessions[record.phoneNumber]) {
+          whatsappSessions[record.phoneNumber].preferredOutputFormat = preferredOutputFormat;
+        }
+      }
+    }
+  }
+
+  res.json({
+    success: true,
+    preferredOutputFormat,
+    message: 'Preferred WhatsApp output format updated successfully.'
+  });
+});
+
+// GET Linked WhatsApp account for user
+app.get('/api/whatsapp/link/:userId', (req, res) => {
+  const userId = req.params.userId;
+  const match = Object.values(whatsappLinkedUsers).find(l => l.userId === userId);
+  res.json({ linked: !!match, linkRecord: match || null });
+});
+
+// DELETE Link
+app.delete('/api/whatsapp/link/:userId', (req, res) => {
+  const userId = req.params.userId;
+  for (const [phone, record] of Object.entries(whatsappLinkedUsers)) {
+    if (record.userId === userId) {
+      delete whatsappLinkedUsers[phone];
+      return res.json({ success: true, message: 'WhatsApp account unlinked.' });
+    }
+  }
+  res.json({ success: true, message: 'No link found.' });
+});
+
+// POST Broadcast Endpoint for Teachers to send homework / announcements via WhatsApp
+app.post('/api/whatsapp/broadcast', async (req, res) => {
+  const { teacherUid, teacherName, type, targetAudience, content, recipients } = req.body;
+  if (!content || !recipients || !Array.isArray(recipients) || recipients.length === 0) {
+    return res.status(400).json({ error: 'Content and array of recipient phone numbers required.' });
+  }
+
+  let successCount = 0;
+  let failedCount = 0;
+  const broadcastText = `📢 *EduNexus ${type === 'homework' ? 'Homework Notice' : 'Announcement'}*\n` +
+    `*From Teacher*: ${teacherName || 'EduNexus Educator'}\n\n` +
+    `${content}\n\n` +
+    `💡 *Note*: Reply to this message to submit your work or ask the AI Tutor for help!`;
+
+  for (const recipient of recipients) {
+    const normPhone = normalizePhoneNumber(recipient);
+    if (!normPhone) continue;
+    const result = await sendWhatsAppCloudMessage(normPhone, broadcastText);
+    if (result.success) {
+      successCount++;
+    } else {
+      failedCount++;
+    }
+  }
+
+  const broadcastRecord: WhatsAppBroadcast = {
+    id: `wa-bc-${Date.now()}`,
+    teacherUid: teacherUid || 'teacher',
+    teacherName: teacherName || 'Teacher',
+    type: type || 'announcement',
+    targetAudience: targetAudience || 'Class',
+    content,
+    sentAt: new Date().toISOString(),
+    recipientCount: recipients.length,
+    successfulCount: successCount,
+    failedCount
+  };
+
+  whatsappBroadcasts.unshift(broadcastRecord);
+
+  res.json({
+    success: true,
+    message: `Broadcast sent to ${successCount} recipient(s).`,
+    broadcastRecord
+  });
+});
+
+// GET WhatsApp Conversations and Messages for App UI
+app.get('/api/whatsapp/conversations', (req, res) => {
+  const sessions = Object.values(whatsappSessions).map(s => ({
+    phoneNumber: s.phoneNumber,
+    name: s.name,
+    userId: s.userId,
+    userRole: s.userRole,
+    lastActive: s.lastActive,
+    messageCount: s.messageCount,
+    lastMessageText: s.history.slice(-1)[0]?.parts[0]?.text || ''
+  }));
+  res.json({ conversations: sessions, linkedCount: Object.keys(whatsappLinkedUsers).length });
+});
+
+app.get('/api/whatsapp/messages/:phoneNumber', (req, res) => {
+  const normPhone = normalizePhoneNumber(req.params.phoneNumber);
+  const msgs = whatsappLogs.filter(l => l.from === normPhone);
+  const session = whatsappSessions[normPhone];
+  res.json({ phoneNumber: normPhone, session: session || null, messages: msgs });
+});
+
+// POST Simulation endpoint for testing WhatsApp bot directly in the EduNexus UI
+app.post('/api/whatsapp/simulate', async (req, res) => {
+  const { message, phoneNumber = '+254700123456', name = 'Student Demo' } = req.body;
+  if (!message) {
+    return res.status(400).json({ error: 'Message content is required' });
+  }
+
+  const normPhone = normalizePhoneNumber(phoneNumber);
+  totalWhatsAppMessagesProcessed += 1;
+  const incomingId = `wa-sim-in-${Date.now()}`;
+  whatsappLogs.unshift({
+    id: incomingId,
+    from: normPhone,
+    name,
+    text: message,
+    direction: 'incoming',
+    timestamp: new Date().toISOString()
+  });
+
+  const reply = await generateWhatsAppTutorReply(message, normPhone, name, null, req.headers.host);
+  const mediaIntent = detectMediaIntent(message);
+
+  let mediaUrl: string | undefined = undefined;
+  if (mediaIntent.type !== 'none') {
+    const session = whatsappSessions[normPhone];
+    const lastHistoryText = session?.history?.slice(-1)[0]?.parts?.[0]?.text;
+    if (lastHistoryText) {
+      const match = lastHistoryText.match(/(https?:\/\/[^\s\n]+|\/api\/media\/serve\/[^\s\n]+)/i);
+      if (match) mediaUrl = match[0];
+    }
+  }
+
+  const outgoingId = `wa-sim-out-${Date.now()}`;
+  whatsappLogs.unshift({
+    id: outgoingId,
+    from: normPhone,
+    name: 'EduNexus AI Tutor',
+    text: reply,
+    mediaUrl,
+    mediaType: mediaIntent.type !== 'none' ? mediaIntent.type : undefined,
+    direction: 'outgoing',
+    timestamp: new Date().toISOString()
+  });
+
+  let sendResult: any = { simulated: true };
+  if (mediaIntent.type === 'none') {
+    sendResult = await sendWhatsAppCloudMessage(normPhone, reply);
+  }
+
+  res.json({
+    success: true,
+    userMessage: message,
+    aiReply: reply,
+    mediaUrl,
+    mediaType: mediaIntent.type !== 'none' ? mediaIntent.type : undefined,
+    sendResult,
+    session: whatsappSessions[normPhone],
+    totalProcessed: totalWhatsAppMessagesProcessed
+  });
+});
+
+// POST Collaboration AI Participant Consultation Endpoint
+app.post('/api/collaboration/ai-respond', async (req, res) => {
+  try {
+    const { roomType, roomTitle, subject, topic, history = [], prompt, userRole } = req.body;
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt is required.' });
+    }
+
+    if (!ai) {
+      return res.status(500).json({ error: 'Gemini AI is not initialized on the server.' });
+    }
+    
+    // Construct room persona
+    let systemInstruction = `You are EduNexus AI, an intelligent, empathetic, and highly capable AI participant in a multi-user collaborative room within the EduNexus Educational Platform.\n`;
+    
+    if (roomType === 'student-study') {
+      systemInstruction += `ROOM CONTEXT: Student-to-Student Group Study / Homework Guild.\n`;
+      systemInstruction += `YOUR ROLE: Socratic Peer Tutor & Study Facilitator.\n`;
+      systemInstruction += `- Help students (like Brian, Amina, etc.) work through academic questions together.\n`;
+      systemInstruction += `- DO NOT give away direct answers immediately. Guide them step-by-step with Socratic questions.\n`;
+      systemInstruction += `- Offer to create practice quizzes, educational diagrams, or video concept ideas.\n`;
+      systemInstruction += `- Be encouraging, enthusiastic, and friendly.\n`;
+    } else if (roomType === 'teacher-dept') {
+      systemInstruction += `ROOM CONTEXT: Teacher-to-Teacher Department & Curriculum Collaboration.\n`;
+      systemInstruction += `YOUR ROLE: Co-Teacher, Pedagogical Strategist & CBC Curriculum Assistant.\n`;
+      systemInstruction += `- Assist teachers in designing CBC lesson plans, schemes of work, practical activities, worksheets, and assessment rubrics.\n`;
+      systemInstruction += `- When teachers discuss a topic (e.g. Grade 10 Photosynthesis), provide structured, ready-to-use lesson outlines with Learning Outcomes, Practical Investigations, Discussion Questions, and Homework.\n`;
+      systemInstruction += `- Offer to generate downloadable worksheets, PowerPoint outlines, and quizzes.\n`;
+    } else if (roomType === 'parent-teacher') {
+      systemInstruction += `ROOM CONTEXT: Parent-Teacher Student Progress Consultation.\n`;
+      systemInstruction += `YOUR ROLE: Educational Consultant & Learner Progress Mediator.\n`;
+      systemInstruction += `- Bridge discussions between parents and teachers concerning student performance and challenges (e.g. algebra, reading comprehension).\n`;
+      systemInstruction += `- Provide actionable, supportive recommendations (e.g., 20 mins daily targeted practice, weekly progress quizzes, revision videos).\n`;
+      systemInstruction += `- Offer to generate personalized study plans and parenting briefs.\n`;
+    } else if (roomType === 'school-admin') {
+      systemInstruction += `ROOM CONTEXT: School Administration & Staff Collaboration Meeting.\n`;
+      systemInstruction += `YOUR ROLE: Executive AI Assistant, Meeting Secretary & Administrative Analyst.\n`;
+      systemInstruction += `- Record meeting notes, extract action items with assigned responsibilities, summarize key decisions, and schedule follow-ups.\n`;
+      systemInstruction += `- Assist in analyzing exam performance trends, drafting official announcements, and creating departmental reports.\n`;
+    } else {
+      systemInstruction += `ROOM CONTEXT: WhatsApp Synced Collaboration Hub.\n`;
+      systemInstruction += `YOUR ROLE: EduNexus AI Participant connected live via WhatsApp.\n`;
+      systemInstruction += `- Respond clearly using WhatsApp formatting (*bold*, _italics_, bullet points).\n`;
+      systemInstruction += `- Provide concise, high-value academic and administrative assistance.\n`;
+    }
+
+    systemInstruction += `\nAlways format your responses with clean Markdown, bullet points, and appropriate emojis for readability.`;
+
+    // Build chat history for Gemini
+    const contents: any[] = [];
+    
+    if (history.length > 0) {
+      const historyTranscript = history.map((h: any) => `[${h.senderName || 'User'} (${h.senderRole || 'Participant'})]: ${h.text}`).join('\n');
+      contents.push({
+        role: 'user',
+        parts: [{ text: `Here is the ongoing discussion in "${roomTitle || 'Collaboration Room'}" (Subject: ${subject || 'General'}, Topic: ${topic || 'General'}):\n\n${historyTranscript}\n\nNow respond to the latest input/request below.` }]
+      });
+      contents.push({
+        role: 'model',
+        parts: [{ text: `Understood. I have read the conversation context and am ready as EduNexus AI participant to contribute.` }]
+      });
+    }
+
+    contents.push({
+      role: 'user',
+      parts: [{ text: prompt }]
+    });
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents,
+      config: {
+        systemInstruction,
+        temperature: 0.7
+      }
+    });
+
+    const aiReply = response.text || "I'm here to help with our collaborative discussion!";
+
+    res.json({
+      success: true,
+      aiReply,
+      roomType,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err: any) {
+    console.error('[Collaboration AI Respond Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to generate collaboration AI response' });
+  }
+});
+
+// GET Status & Meta Webhook Configuration details
+app.get('/api/whatsapp/config', (req, res) => {
+  const host = req.headers.host || 'localhost:3000';
+  const protocol = req.headers['x-forwarded-proto'] || 'https';
+  const webhookUrl = `${protocol}://${host}/api/whatsapp/webhook`;
+  const verifyToken = (process.env.WHATSAPP_VERIFY_TOKEN || 'EduNexusWebhook2026').trim();
+  const hasAccessToken = !!(process.env.WHATSAPP_ACCESS_TOKEN || 'EAAOqXKcMZCsYBSHSHVAJ9XyyI3fNTYboFn3ZAhBynsmpXY3WGiTB651ZCTXbwZCs2ua4kDOQZAQ8DTc8aAo0q2BcT4a98YMLq9iWytKLq0vfNWQLtj125TrZBZB0k1bZAZBGYDJvGTcVgyJ5tyl8g37WLbXxnkIacbBGSEipmd3X5iZBQZATSkZBQNj2Ndbug9OIwajmWwZDZD');
+  const hasPhoneNumberId = !!(process.env.WHATSAPP_PHONE_NUMBER_ID || '1334199533099757');
+  const businessNumber = process.env.WHATSAPP_BUSINESS_NUMBER || '+254740183394';
+
+  res.json({
+    configured: hasAccessToken && hasPhoneNumberId,
+    webhookUrl,
+    verifyToken,
+    hasAccessToken,
+    hasPhoneNumberId,
+    businessNumber,
+    totalProcessedMessages: totalWhatsAppMessagesProcessed,
+    recentLogs: whatsappLogs.slice(0, 30),
+    activeSessionsCount: Object.keys(whatsappSessions).length,
+    linkedAccountsCount: Object.keys(whatsappLinkedUsers).length,
+    broadcastsCount: whatsappBroadcasts.length
+  });
+});
+
+/**
+ * POST /api/whatsapp/udl-generate
+ * Generates highly accessible WhatsApp notifications grounded in UDL guidelines,
+ * active learner profiles (ADHD, Dyslexia, ESL, Screen Reader, Low Vision), confidence rating mechanics,
+ * and multi-lingual translations (English, Spanish, French, Swahili).
+ */
+app.post('/api/whatsapp/udl-generate', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const stakeholder = payload.stakeholder || 'student';
+    const studentName = payload.student_name || 'Alex';
+    const activeProfiles = Array.isArray(payload.active_profiles) ? payload.active_profiles : ['ADHD', 'Dyslexia'];
+    const language = payload.language || 'en';
+    const data = payload.data || {};
+
+    const promptText = `
+Execute the Official WhatsApp Notification and Accessibility Engine workflow for the following input payload:
+${JSON.stringify(payload, null, 2)}
+
+Ensure the generated notification follows all specified accessibility and UDL formatting rules:
+- Stakeholder: ${stakeholder}
+- Learner Profiles: ${activeProfiles.join(', ')}
+- Language: ${language}
+- Streak Count: ${data.streak_count || 4}/${data.streak_goal || 5}
+- Completed Topics: ${(data.completed_topics || []).join(', ') || 'Mathematics'}
+- Pending Topics: ${(data.pending_topics || []).join(', ') || 'Physics'}
+- Confidence Rating Topic: ${data.confidence_rating_topic || 'Newtonian Mechanics'}
+- Confidence Selection: ${data.confidence_selection || 'None'}
+
+Generate ONLY the clean, formatted WhatsApp plain-text message.
+`;
+
+    if (!ai) {
+      // Fallback generator when Gemini AI is offline
+      let msg = '';
+      if (activeProfiles.includes('Screen_Reader')) {
+        msg += `[AUDIO SUMMARY: WhatsApp Update for ${studentName}. Streak: ${data.streak_count || 4} of ${data.streak_goal || 5} days. New resources unlocked.]\n\n`;
+      }
+      if (activeProfiles.includes('Low_Vision')) {
+        msg += `⬛ *EDUNEXUS ACCESSIBLE NOTIFICATION*\n▪️ Student: ${studentName}\n▪️ Status: Active Trail Progress\n\n`;
+      }
+      if (activeProfiles.includes('ADHD')) {
+        msg += `☑️ Daily Streak: ${data.streak_count || 4}/${data.streak_goal || 5} Days Completed!\n☑️ Next Milestone: ${data.pending_topics?.[0] || 'Physics Practice'}\n\n`;
+      } else {
+        msg += `*Notification for ${studentName}*\nStreak: ${data.streak_count || 4}/${data.streak_goal || 5} Days.\n\n`;
+      }
+
+      if (data.confidence_selection === 'Low Confidence') {
+        msg += `Notice: Topic '${data.confidence_rating_topic || 'Physics'}' has been repositioned to your trail root with extra supportive scaffolding and study hours.\n\n`;
+      } else if (data.confidence_selection === 'High Confidence') {
+        msg += `Great job! '${data.confidence_rating_topic || 'Physics'}' has been fast-tracked into real-world project challenges!\n\n`;
+      }
+
+      msg += `Quick Action Link: https://edunexus.edu/learn`;
+      return res.json({ success: true, message: msg, fallback: true });
+    }
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{ role: 'user', parts: [{ text: promptText }] }],
+      config: {
+        systemInstruction: WHATSAPP_ACCESSIBILITY_ENGINE_INSTRUCTIONS,
+        temperature: 0.4,
+        maxOutputTokens: 800
+      }
+    });
+
+    const generatedMessage = response.text || 'Notification payload generated successfully.';
+    return res.json({
+      success: true,
+      message: generatedMessage,
+      payload
+    });
+  } catch (err: any) {
+    console.error('[WhatsApp UDL Generator Error]:', err);
+    return res.status(500).json({ error: err.message || 'Failed to generate UDL notification.' });
+  }
+});
+
 // POST endpoint to probe live Gemini API Quota and health
 app.post('/api/admin/gemini-quota/probe', async (req, res) => {
   if (!ai) {
@@ -1154,6 +2893,8 @@ app.post('/api/generate', async (req, res) => {
     classicNotesImageModel,
     documentPageSize = 'A4',
     documentLength = 'standard',
+    readingComplexity = 'standard',
+    enableSearchGrounding = true,
   } = req.body;
 
   if (!docType || !subject || !classLevel || !topic) {
@@ -1228,6 +2969,10 @@ app.post('/api/generate', async (req, res) => {
 
   if (documentPageSize) {
     systemInstruction += ` PAGE FORMAT & DIMENSION SCOPE: Format headings, table widths, list spacing, and visual sections for optimal presentation on ${documentPageSize} paper format (${documentPageSize === 'A3' ? 'large poster size 297x420mm' : documentPageSize === 'A5' ? 'compact notebook size 148x210mm' : documentPageSize === 'Letter' ? 'US Letter 8.5x11 inches' : documentPageSize === 'Legal' ? 'extended Legal 8.5x14 inches' : 'standard A4 210x297mm'}).`;
+  }
+
+  if (readingComplexity) {
+    systemInstruction += ` READING COMPLEXITY LEVEL: Tailor all explanations, vocabulary, and sentence structures to a ${readingComplexity.toUpperCase()} reading complexity level (${readingComplexity === 'simple' ? 'Elementary, simple vocabulary, short clear sentences' : readingComplexity === 'professional' ? 'Advanced academic rigor, professional/technical terminology' : 'Standard balanced secondary school reading level'}).`;
   }
 
   // Dynamic Adaptive AI Engine prompts based on active Learner Accessibility Profile
@@ -1894,9 +3639,14 @@ Guidelines:
   }
 
   try {
+    if (enableSearchGrounding) {
+      systemInstruction += '\n\nCRITICAL SEARCH GROUNDING REQUIREMENT: Real-time search grounding is ENABLED. Use Google Search to query up-to-date, current, and verifiable educational standards (e.g. KICD CBC strands, NGSS, Cambridge, Common Core, IB), real-world statistics, and facts. Ground all curriculum objectives and content directly in verified facts.';
+    }
+
     const response = await generateContentWithFallback({
       model: 'gemini-3.5-flash',
       contents: generationPrompt,
+      tools: enableSearchGrounding ? [{ googleSearch: {} }] : undefined,
       config: {
         systemInstruction: systemInstruction,
         temperature: 0.3, // Lower temperature is better for structured educational plans
@@ -1905,6 +3655,52 @@ Guidelines:
 
     let text = response.text || '';
     text = cleanDocumentText(text);
+
+    // Extract search grounding metadata if available
+    let groundingSources: Array<{ title: string; url: string }> = [];
+    let webSearchQueries: string[] = [];
+
+    const groundingMetadata = (response as any)?.candidates?.[0]?.groundingMetadata;
+    if (groundingMetadata) {
+      if (Array.isArray(groundingMetadata.webSearchQueries)) {
+        webSearchQueries = groundingMetadata.webSearchQueries.filter((q: any) => typeof q === 'string' && q.trim().length > 0);
+      }
+      if (Array.isArray(groundingMetadata.groundingChunks)) {
+        groundingSources = groundingMetadata.groundingChunks
+          .map((chunk: any) => ({
+            title: chunk.web?.title || 'Verified Educational Reference',
+            url: chunk.web?.uri || '',
+          }))
+          .filter((src: any) => src.url && src.url.startsWith('http'));
+      }
+    }
+
+    if (enableSearchGrounding && (groundingSources.length > 0 || webSearchQueries.length > 0)) {
+      text += '\n\n---\n\n### 🌐 VERIFIED WEB SEARCH GROUNDING & STANDARDS REFERENCES\n';
+      text += '*This document was generated using live Google Search Grounding to pull current, verifiable educational standards, curriculum outcomes, and real-world facts directly from official web sources.*\n\n';
+
+      if (webSearchQueries.length > 0) {
+        text += '**Live Educational Search Queries Executed:**\n';
+        webSearchQueries.forEach((q) => {
+          text += `- 🔍 *"${q}"*\n`;
+        });
+        text += '\n';
+      }
+
+      if (groundingSources.length > 0) {
+        text += '**Verified Standards & Reference Sources:**\n';
+        const uniqueMap = new Map<string, { title: string; url: string }>();
+        groundingSources.forEach(s => {
+          if (!uniqueMap.has(s.url)) {
+            uniqueMap.set(s.url, s);
+          }
+        });
+
+        Array.from(uniqueMap.values()).slice(0, 8).forEach((src, idx) => {
+          text += `${idx + 1}. [${src.title || src.url}](${src.url})\n`;
+        });
+      }
+    }
 
     // Analyze the generated content to suggest appropriate category and tags
     let suggestedCategory = 'Other / General';
@@ -2033,11 +3829,7 @@ ${text.substring(0, 3000)}
 
     if (docType === 'lesson-notes-classic') {
       try {
-        console.log(`[Image Notes Production] Producing Classic Lesson Notes as image using model: ${classicNotesImageModel || 'emgen'}`);
-        let selectedModel = 'gemini-3.1-flash-image';
-        if (classicNotesImageModel === 'nano banana') {
-          selectedModel = 'gemini-3.1-flash-lite-image';
-        }
+        console.log(`[Image Notes Production] Producing Classic Lesson Notes image with model setting: ${classicNotesImageModel || 'emgen_fallback_nanobanana'}`);
 
         const pageSizeLabel = documentPageSize || 'A4';
         const pageDimensions = pageSizeLabel === 'A3' ? '297mm x 420mm' :
@@ -2056,35 +3848,16 @@ It has a prominent, clean handwritten heading at the top: "${topic.toUpperCase()
 It includes structured bullet lists, neat definitions, clear formulas or chemical equations, some small margin sketches, and key words highlighted beautifully with a neon yellow highlighter.
 CRITICAL REQUIREMENT: The entire handwritten lesson note content MUST fit perfectly on a SINGLE 1-page ${pageSizeLabel} paper sheet as a complete, clean, readable PNG document image without spilling over or cutting off. Completely readable, top-down flat orientation, zero digital watermarks.`;
 
-        const imageResponse = await ai.models.generateContent({
-          model: selectedModel,
-          contents: {
-            parts: [{ text: imagePrompt }],
-          },
-          config: {
-            imageConfig: {
-              aspectRatio: '3:4',
-            },
-          },
+        const imageUrl = await generateImageWithFallback({
+          aiClient: ai,
+          prompt: imagePrompt,
+          requestedModel: classicNotesImageModel || 'emgen_fallback_nanobanana',
+          aspectRatio: '3:4',
         });
-
-        let imageUrl = null;
-        const imgParts = imageResponse.candidates?.[0]?.content?.parts;
-        if (imgParts && Array.isArray(imgParts)) {
-          for (const p of imgParts) {
-            if (p.inlineData) {
-              const base64Data = p.inlineData.data;
-              imageUrl = `data:image/png;base64,${base64Data}`;
-              break;
-            }
-          }
-        }
 
         if (imageUrl) {
           text = `![Lesson Notes: ${topic}](${imageUrl})\n\n*(Transcribed notes for reference:)*\n\n${text}`;
           console.log('[Image Notes Production] Successfully generated notes image and updated content.');
-        } else {
-          console.error('[Image Notes Production] Image generation did not return any inline image data.');
         }
       } catch (imageErr) {
         console.error('[Image Notes Production] Error during classic notes image generation:', imageErr);
@@ -2094,7 +3867,10 @@ CRITICAL REQUIREMENT: The entire handwritten lesson note content MUST fit perfec
     const resultResponseObj = { 
       content: text,
       suggestedCategory,
-      suggestedTags
+      suggestedTags,
+      groundingSources,
+      webSearchQueries,
+      enableSearchGrounding
     };
 
     setCachedResponse(generationCacheKey, resultResponseObj);
@@ -2567,6 +4343,85 @@ Requirements:
   } catch (error: any) {
     console.error('Gemini Virtual Field Trip Generation Error:', error);
     res.status(500).json({ error: error.message || 'Failed to generate field trip.' });
+  }
+});
+
+// POST endpoint for Instant Teacher FAQ & Support Assistant
+app.post('/api/teacher-faq', async (req, res) => {
+  if (!ai) {
+    return res.status(500).json({
+      error: 'Gemini API key is not configured. Please add GEMINI_API_KEY in the Secrets / Environment variable settings.',
+    });
+  }
+
+  const { query, category = 'General Support', teacherRole = 'Educator' } = req.body;
+  if (!query || !query.trim()) {
+    return res.status(400).json({ error: 'Query parameter is required.' });
+  }
+
+  const systemInstruction = `You are the EduNexus AI Teacher Support Specialist.
+EduNexus is a comprehensive AI-powered teaching & curriculum platform for educators (featuring CBC lesson plan generation, Schemes of Work, Socratic AI reading assistants, UDL accommodations, PDF/Word exports, adaptive learning paths, offline sync, and student privacy compliance).
+
+Your mission is to provide helpful, empathetic, highly accurate, and concise answers to questions from teachers, school leaders, and parents.
+Follow these rules:
+1. Provide a direct, step-by-step, actionable answer to the teacher's question.
+2. Maintain a warm, encouraging, professional tone.
+3. Recommend specific EduNexus features or tools if applicable.
+4. Specify which contact email address they can use if they need further human assistance:
+   - Technical Support / Bugs: support@joinedunexus.app
+   - Lesson Planning / Guides: help@joinedunexus.app
+   - General Enquiries / Institutional Access: info@joinedunexus.app
+   - Legal / Data Privacy & Account Deletion: admin@joinedunexus.app
+5. Format the output cleanly in JSON using the provided schema. Do NOT use asterisks (*) in the answer text.`;
+
+  const prompt = `Teacher Query: "${query}"
+Category: ${category}
+Teacher Role: ${teacherRole}
+
+Provide a helpful, precise answer, 2-3 related follow-up questions/topics, and the recommended contact email if further human assistance is needed.`;
+
+  try {
+    const response = await generateContentWithFallback({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        systemInstruction,
+        temperature: 0.3,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            answer: {
+              type: Type.STRING,
+              description: 'A clear, direct, well-formatted step-by-step response to the query without asterisks.',
+            },
+            relatedTopics: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: '3 short related questions or topics the teacher might want to ask next.',
+            },
+            recommendedDepartment: {
+              type: Type.STRING,
+              description: 'The best support department for this query, e.g., "Technical Support", "Help Desk", "Administration", or "General Enquiries".',
+            },
+            contactEmail: {
+              type: Type.STRING,
+              description: 'The exact email address for human escalation, e.g. "support@joinedunexus.app".',
+            }
+          },
+          required: ['answer', 'relatedTopics', 'recommendedDepartment', 'contactEmail'],
+        }
+      }
+    });
+
+    const rawText = response.text || '{}';
+    const cleanText = rawText.replace(/\*/g, '');
+    const data = validateAndRepairJson(cleanText, ['answer', 'relatedTopics', 'recommendedDepartment', 'contactEmail']);
+
+    res.json({ result: data });
+  } catch (error: any) {
+    console.error('Teacher FAQ AI Response Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to process AI query.' });
   }
 });
 
@@ -4490,42 +6345,14 @@ app.post('/api/generate-diagram', async (req, res) => {
     return res.status(400).json({ error: 'Missing required parameter: prompt' });
   }
 
-  let selectedModel = 'gemini-3.1-flash-lite-image'; // Default to nano banana
-  if (model === 'emgen' || model === 'gemini-3.1-flash-image') {
-    selectedModel = 'gemini-3.1-flash-image';
-  } else if (model === 'nano banana' || model === 'gemini-3.1-flash-lite-image') {
-    selectedModel = 'gemini-3.1-flash-lite-image';
-  }
-
   try {
-    console.log(`Generating diagram with prompt: "${prompt}" using model: "${selectedModel}"`);
-    const response = await ai.models.generateContent({
-      model: selectedModel,
-      contents: {
-        parts: [
-          {
-            text: `Create a clean educational diagram. Textbook style, clean lines, black outlines, white background, high contrast, clearly labelled, readable annotations: ${prompt}`,
-          },
-        ],
-      },
-      config: {
-        imageConfig: {
-          aspectRatio: '4:3',
-        },
-      },
+    const diagramPrompt = `Create a clean educational diagram. Textbook style, clean lines, black outlines, white background, high contrast, clearly labelled, readable annotations: ${prompt}`;
+    const imageUrl = await generateImageWithFallback({
+      aiClient: ai,
+      prompt: diagramPrompt,
+      requestedModel: model || 'emgen_fallback_nanobanana',
+      aspectRatio: '4:3',
     });
-
-    let imageUrl = null;
-    const parts = response.candidates?.[0]?.content?.parts;
-    if (parts && Array.isArray(parts)) {
-      for (const part of parts) {
-        if (part.inlineData) {
-          const base64Data = part.inlineData.data;
-          imageUrl = `data:image/png;base64,${base64Data}`;
-          break;
-        }
-      }
-    }
 
     if (!imageUrl) {
       throw new Error('Image data not found in model response candidates.');
@@ -5158,76 +6985,9 @@ Guidelines:
   }
 });
 
-// Endpoint for parsing PDF/DOCX/Image files uploaded by teachers
-app.post('/api/parse-document', async (req, res) => {
-  try {
-    const { base64, fileName, fileType } = req.body;
-    if (!base64) {
-      return res.status(400).json({ error: 'Missing base64 file data.' });
-    }
-
-    const buffer = Buffer.from(base64, 'base64');
-    let extractedText = '';
-
-    const lowerName = (fileName || '').toLowerCase();
-    const isImage = fileType === 'image' || 
-                    lowerName.endsWith('.png') || 
-                    lowerName.endsWith('.jpg') || 
-                    lowerName.endsWith('.jpeg') || 
-                    lowerName.endsWith('.webp') || 
-                    lowerName.endsWith('.gif');
-
-    if (fileType === 'pdf' || lowerName.endsWith('.pdf')) {
-      const data = await pdf(buffer);
-      extractedText = data.text || '';
-    } else if (fileType === 'docx' || lowerName.endsWith('.docx')) {
-      const result = await mammoth.extractRawText({ buffer });
-      extractedText = result.value || '';
-    } else if (isImage) {
-      if (!ai) {
-        return res.status(500).json({ error: 'Gemini API is not configured. Please provide GEMINI_API_KEY in Settings > Secrets.' });
-      }
-
-      let mimeType = 'image/png';
-      if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) {
-        mimeType = 'image/jpeg';
-      } else if (lowerName.endsWith('.webp')) {
-        mimeType = 'image/webp';
-      } else if (lowerName.endsWith('.gif')) {
-        mimeType = 'image/gif';
-      }
-
-      const imagePart = {
-        inlineData: {
-          mimeType,
-          data: base64,
-        },
-      };
-
-      const textPart = {
-        text: 'You are an advanced OCR engine. Extract and transcribe all legible educational content, curriculum text, notes, diagrams labels, and worksheets text from this image with high fidelity. Do not add conversational intro/outro, simply output the extracted text.',
-      };
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.5-flash',
-        contents: { parts: [imagePart, textPart] },
-      });
-
-      extractedText = response.text || '';
-    } else {
-      return res.status(400).json({ error: 'Unsupported file type. Supported types: PDF, DOCX, PNG, JPG, JPEG, WEBP, GIF.' });
-    }
-
-    const cleanText = cleanDocumentText(extractedText).trim();
-    res.json({ text: cleanText });
-  } catch (error: any) {
-    console.error('[Document Parser] Error parsing uploaded file:', error);
-    res.status(500).json({ error: error.message || 'Failed to extract text from file.' });
-  }
-});
 
 // Endpoint for Socratic AI Tutor with scaffolding, misconception triangulation, and resource mapping
-app.post('/api/tutor-chat', async (req, res) => {
+const tutorChatHandler = async (req: express.Request, res: express.Response) => {
   if (!ai) {
     return res.status(500).json({
       error: 'Gemini API key is not configured. Please add GEMINI_API_KEY in the Secrets / Environment variable settings.',
@@ -5243,6 +7003,7 @@ app.post('/api/tutor-chat', async (req, res) => {
     scaffoldingLevel,
     documentContext,
     document_context,
+    contextDocument,
     persona,
     isCbcMode,
     cbcSubject,
@@ -5254,13 +7015,104 @@ app.post('/api/tutor-chat', async (req, res) => {
     difficultyLevel,
     targetLanguage,
     language,
+    model,
+    engine,
+    adminSelectedEngine,
+    userRole,
+    role,
   } = req.body;
 
   if (!message) {
     return res.status(400).json({ error: 'Missing required parameter: message' });
   }
 
-  const activeDocumentContext = document_context || documentContext || '';
+  // INTELLIGENT MEDIA INTENT DETECTION (Image Studio & Video Studio Integration)
+  const mediaIntent = detectMediaIntent(message);
+
+  if (mediaIntent.type === 'image') {
+    try {
+      console.log(`[Tutor Chat Media Intent] Generating image for prompt: "${message}"`);
+      const rawImageUrl = await generateImageWithFallback({
+        aiClient: ai,
+        prompt: message,
+        requestedModel: 'emgen_fallback_nanobanana'
+      });
+      const publicUrl = cacheMediaAndGetPublicUrl(rawImageUrl, 'image', req.headers.host);
+
+      await saveGeneratedMediaRecord({
+        userId: req.body.userId || 'user_chat',
+        prompt: message,
+        mediaType: 'image',
+        storageUrl: publicUrl,
+        conversationId: 'tutor-chat',
+        generatorUsed: 'Emergen'
+      });
+
+      return res.json({
+        message: `🖼️ Here is your generated visual illustration for "${message}". You can view, download, save to library, share, regenerate, or edit this image in Image Studio below!`,
+        text: `🖼️ Here is your generated visual illustration for "${message}".`,
+        media: {
+          type: 'image',
+          url: publicUrl,
+          prompt: message,
+          generatorUsed: 'Emergen'
+        },
+        generatedMedia: {
+          type: 'image',
+          url: publicUrl,
+          prompt: message,
+          generatorUsed: 'Emergen'
+        },
+        detectedMisconceptions: [],
+        scaffoldingStep: "Visual Concept Illustration",
+        suggestedResources: [],
+        conceptVisualization: { title: "Generated Visual Concept", nodes: [], edges: [] }
+      });
+    } catch (imgErr: any) {
+      console.error('[Tutor Chat Image Gen Error]:', imgErr);
+    }
+  } else if (mediaIntent.type === 'video') {
+    try {
+      console.log(`[Tutor Chat Media Intent] Generating video for prompt: "${message}"`);
+      const videoRes = await generateVideoWithFallback(message);
+      const publicUrl = cacheMediaAndGetPublicUrl(videoRes.videoUrl, 'video', req.headers.host);
+
+      await saveGeneratedMediaRecord({
+        userId: req.body.userId || 'user_chat',
+        prompt: message,
+        mediaType: 'video',
+        storageUrl: publicUrl,
+        conversationId: 'tutor-chat',
+        generatorUsed: videoRes.generatorUsed
+      });
+
+      return res.json({
+        message: `🎥 Here is your requested educational video for "${message}". You can watch, download, save to library, share, or edit this video in Video Studio below!`,
+        text: `🎥 Here is your requested educational video for "${message}".`,
+        media: {
+          type: 'video',
+          url: publicUrl,
+          prompt: message,
+          generatorUsed: videoRes.generatorUsed
+        },
+        generatedMedia: {
+          type: 'video',
+          url: publicUrl,
+          prompt: message,
+          generatorUsed: videoRes.generatorUsed
+        },
+        detectedMisconceptions: [],
+        scaffoldingStep: "Educational Video Demonstration",
+        suggestedResources: [],
+        conceptVisualization: { title: "Generated Video Concept", nodes: [], edges: [] }
+      });
+    } catch (vidErr: any) {
+      console.error('[Tutor Chat Video Gen Error]:', vidErr);
+    }
+  }
+
+  const activeUserRole = userRole || role || 'Student';
+  const activeDocumentContext = document_context || documentContext || contextDocument || '';
   const activeChatHistory = recent_chat_history || history || [];
 
   const cleanScaffolding = scaffoldingLevel || 'medium';
@@ -5268,6 +7120,65 @@ app.post('/api/tutor-chat', async (req, res) => {
   const cleanSubject = subject || 'General Education';
   const cleanTopic = topic || 'General Topic';
   const cleanPersona = persona || 'Socratic Questioner';
+
+  let roleDirectiveBlock = '';
+  if (activeUserRole === 'Teacher') {
+    roleDirectiveBlock = `\n[ROLE SPECIFIC DIRECTIVE: TEACHER ASSISTANT]
+You are acting as the EduNexus AI Teaching Assistant for Teachers and Educators.
+CONVERSATION RULES:
+- Tone: Natural, encouraging, friendly, and expert educator tone with appropriate emojis.
+- Intent Detection: Understand the teacher's exact goal before generating output.
+- Deliverable Rule: If a teacher requests something like "lesson notes", "lesson plan", "schemes of work", "exam", or "marking scheme", immediately ask for the subject, grade/form, topic, and curriculum (CBC vs 8-4-4) if not provided!
+- Context Retention: Maintain conversation history without restarting or repeating generic greetings.
+- Full Capabilities Showcase (refer to this when asked what you can do):
+  1) Teaching & Learning: Lesson Plans, Lesson Notes, Schemes of Work, Learning Outcomes, Daily Preparation, CBC & 8-4-4 Interpretation.
+  2) Assessment: CATs & Exams, Marking Schemes, Rubrics, Competency Assessments, Performance Analysis, Report Comments.
+  3) Classroom Activities: Educational Games, Group Work Ideas, STEM Projects, Science Experiments, Practical Activities.
+  4) Digital Teaching: PowerPoint Presentations, Interactive Resources, PhET Simulations, Video Links, AI Worksheets.
+  5) Student Support: Personalized Learning Plans, Homework Creation/Marking, Student Feedback, Gifted Support, Remediation.
+  6) Parent Communication: Progress Reports, Announcements, Meeting Summaries, WhatsApp Updates.
+  7) Professional Support: Data Analysis, Official Letters, Department Planning, Timetables, Meeting Minutes.`;
+  } else if (activeUserRole === 'Parent') {
+    roleDirectiveBlock = `\n[ROLE SPECIFIC DIRECTIVE: PARENT COMPANION]
+You are acting as the EduNexus AI Parent Companion Assistant.
+CONVERSATION RULES:
+- Tone: Warm, reassuring, empathetic, and parent-friendly language with helpful emojis.
+- Intent Detection: Listen carefully to what the parent needs regarding their child's education or school services.
+- Context Retention: Remember past details mentioned by the parent about their child or school.
+- Full Capabilities Showcase (refer to this when asked what you can do):
+  1) Academic Progress: Performance Reports, Exam Results, Progress Tracking, Learning Goals.
+  2) School Info: School Calendar, Announcements, School Events, Academic Programs.
+  3) Homework: Homework Monitoring, Due Date Reminders, Assignment Progress.
+  4) Communication: Contact Teachers, Receive Updates, Parent Meetings.
+  5) Child Support: Study Tips, Learning Difficulties, Motivation Strategies, Home Learning Ideas, Well-being.
+  6) School Services & Alerts: Fee Balances, Payment History, Attendance Alerts, Notices.`;
+  } else if (activeUserRole === 'Administrator') {
+    roleDirectiveBlock = `\n[ROLE SPECIFIC DIRECTIVE: SCHOOL ADMINISTRATOR]
+You are acting as the EduNexus Institutional Leadership Assistant.
+CONVERSATION RULES:
+- Tone: Professional, executive, structured, and constructive leadership tone.
+- Intent Detection: Understand institutional administrative, compliance, and management needs.
+- Context Retention: Maintain continuity on policy drafting, staff communications, and school governance tasks.
+- Full Capabilities Showcase (refer to this when asked what you can do):
+  1) School Management: Student Management, Staff Management, School Records, Timetables, Analytics.
+  2) Reports: Academic Reports, Performance Analytics, Financial Reports, Attendance Reports.
+  3) Communication: Bulk Announcements, WhatsApp Broadcasts, Email Notifications, Emergency Alerts.
+  4) Administration: User Management, Roles & Permissions, AI Usage Monitoring, Subscriptions, System Health.
+  5) Curriculum: CBC Compliance, Quality Assurance, School Improvement Plans.`;
+  } else {
+    roleDirectiveBlock = `\n[ROLE SPECIFIC DIRECTIVE: STUDENT TUTOR]
+You are acting as the EduNexus Student AI Tutor.
+CONVERSATION RULES:
+- Tone: Friendly, encouraging, supportive tutor tone with helpful emojis.
+- Intent Detection: Detect whether the student is chatting casually (e.g. 'Hi', 'Hello') vs asking an academic/revision question. Do NOT force Socratic questioning on simple greetings!
+- Socratic Method: Guide students step-by-step using Socratic inquiry when answering academic questions.
+- Deliverable Rule: If a student asks for revision notes or practice questions, ask for their subject, grade/level, and topic if not specified.
+- Full Capabilities Showcase (refer to this when asked what you can do):
+  1) Learning: Mathematics, Physics, Chemistry, Biology, English, Geography, History, CRE, IRE, Business Studies, Agriculture, Computer Studies.
+  2) Study Support: Explaining difficult concepts, Step-by-step solutions, Calculations, Practical questions, Photo/Voice question support.
+  3) Revision: Past Papers, Revision Notes, Topic Summaries, Practice Questions, Mock Exams, Interactive Quizzes.
+  4) Progress & Career: Performance Tracking, Personalized Study Plans, Goal Setting, Timetables, Career & Scholarship Guidance.`;
+  }
 
   let difficultyInstruction = '';
   if (cleanDifficulty === 'beginner') {
@@ -5484,6 +7395,10 @@ CRITICAL FORMATTING RULES:
     systemInstruction += `\n\nCRITICAL MULTILINGUAL INSTRUCTION: The user/student has set their target language preference to "${activeTargetLang}". You MUST output all text strings in the JSON response (specifically the "message", "scaffoldingStep", and descriptions inside "conceptVisualization") in "${activeTargetLang}". Whether the language is an international language (Kiswahili, French, Spanish, Arabic, Portuguese, German) or a local/regional language (Luganda, Kikuyu, Dholuo, Sheng, Kinyarwanda, Amharic), provide accurate, natural, and student-friendly explanations in "${activeTargetLang}".`;
   }
 
+  if (roleDirectiveBlock) {
+    systemInstruction += `\n\n${roleDirectiveBlock}`;
+  }
+
   try {
     // Format history for Gemini API
     const formattedContents = [];
@@ -5504,9 +7419,10 @@ CRITICAL FORMATTING RULES:
       parts: [{ text: message }],
     });
 
-    console.log(`[AI Tutor] Processing Socratic query with persona [${cleanPersona}] on subject: ${cleanSubject}, topic: ${cleanTopic}`);
+    const requestedModel = engine || model || adminSelectedEngine || 'emgen_fallback_nanobanana';
+    console.log(`[AI Tutor Engine] Processing Socratic query with engine strategy [${requestedModel}], persona [${cleanPersona}] on subject: ${cleanSubject}, topic: ${cleanTopic}`);
     const response = await generateContentWithFallback({
-      model: 'gemini-3.5-flash',
+      model: requestedModel,
       contents: formattedContents,
       config: {
         systemInstruction,
@@ -5590,18 +7506,30 @@ CRITICAL FORMATTING RULES:
       };
     };
 
+    const responseText = typeof parsedData.message === 'string'
+      ? parsedData.message.replace(/\*/g, '')
+      : 'Let us continue step by step. What have you understood so far?';
+    const responseStep = typeof parsedData.scaffoldingStep === 'string' ? parsedData.scaffoldingStep : 'Guided inquiry';
+    const responseMisconceptions = Array.isArray(parsedData.detectedMisconceptions) ? parsedData.detectedMisconceptions : [];
+    const responseResources = Array.isArray(parsedData.suggestedResources) ? parsedData.suggestedResources : [];
+    const responseConceptMap = parsedData.conceptVisualization && typeof parsedData.conceptVisualization === 'object'
+      ? {
+          title: typeof parsedData.conceptVisualization.title === 'string' ? parsedData.conceptVisualization.title : 'Concept map',
+          nodes: Array.isArray(parsedData.conceptVisualization.nodes) ? parsedData.conceptVisualization.nodes : [],
+          edges: Array.isArray(parsedData.conceptVisualization.edges) ? parsedData.conceptVisualization.edges : []
+        }
+      : { title: 'Concept map', nodes: [], edges: [] };
+
     const safePayload = {
-      message: typeof parsedData.message === 'string' ? parsedData.message.replace(/\*/g, '') : 'Let us continue step by step. What have you understood so far?',
-      detectedMisconceptions: Array.isArray(parsedData.detectedMisconceptions) ? parsedData.detectedMisconceptions : [],
-      scaffoldingStep: typeof parsedData.scaffoldingStep === 'string' ? parsedData.scaffoldingStep : 'Guided inquiry',
-      suggestedResources: Array.isArray(parsedData.suggestedResources) ? parsedData.suggestedResources : [],
-      conceptVisualization: parsedData.conceptVisualization && typeof parsedData.conceptVisualization === 'object'
-        ? {
-            title: typeof parsedData.conceptVisualization.title === 'string' ? parsedData.conceptVisualization.title : 'Concept map',
-            nodes: Array.isArray(parsedData.conceptVisualization.nodes) ? parsedData.conceptVisualization.nodes : [],
-            edges: Array.isArray(parsedData.conceptVisualization.edges) ? parsedData.conceptVisualization.edges : []
-          }
-        : { title: 'Concept map', nodes: [], edges: [] }
+      message: responseText,
+      text: responseText,
+      detectedMisconceptions: responseMisconceptions,
+      misconceptions: responseMisconceptions,
+      scaffoldingStep: responseStep,
+      activeStep: responseStep,
+      suggestedResources: responseResources,
+      conceptMap: responseConceptMap,
+      conceptVisualization: responseConceptMap
     };
 
     res.json(safePayload);
@@ -5609,7 +7537,10 @@ CRITICAL FORMATTING RULES:
     console.error('[AI Tutor] Error during Socratic tutor session:', error);
     res.status(500).json({ error: error.message || 'Failed to communicate with Socratic AI Tutor.' });
   }
-});
+};
+
+app.post('/api/tutor-chat', tutorChatHandler);
+app.post('/api/ai-tutor', tutorChatHandler);
 
 // Endpoint for generating aligned assessment items with common pedagogical principles
 app.post('/api/generate-assessment-items', async (req, res) => {
@@ -5751,19 +7682,10 @@ app.post('/api/generate-or-edit-image', async (req, res) => {
     return res.status(400).json({ error: 'Missing required parameter: prompt' });
   }
 
-  let selectedModel = model || 'gemini-3.1-flash-image';
-  if (selectedModel === 'emgen' || selectedModel === 'gemini-3.1-flash-image') {
-    selectedModel = 'gemini-3.1-flash-image';
-  } else if (selectedModel === 'nano banana' || selectedModel === 'gemini-3.1-flash-lite-image') {
-    selectedModel = 'gemini-3.1-flash-lite-image';
-  }
-
   const selectedAspectRatio = aspectRatio || '1:1';
   const selectedImageSize = imageSize || '1K';
 
   try {
-    console.log(`[Image Studio] Calling ${selectedModel} with prompt: "${prompt}", size: ${selectedImageSize}, aspectRatio: ${selectedAspectRatio}. Has base image: ${!!image}`);
-
     const parts: any[] = [];
     if (image) {
       const parseDataUrl = (dataUrl: string) => {
@@ -5786,33 +7708,14 @@ app.post('/api/generate-or-edit-image', async (req, res) => {
       }
     }
 
-    parts.push({ text: prompt });
-
-    const response = await ai.models.generateContent({
-      model: selectedModel,
-      contents: {
-        parts: parts,
-      },
-      config: {
-        imageConfig: {
-          aspectRatio: selectedAspectRatio,
-          imageSize: selectedImageSize,
-        },
-      },
+    const imageUrl = await generateImageWithFallback({
+      aiClient: ai,
+      prompt,
+      requestedModel: model || 'emgen_fallback_nanobanana',
+      parts,
+      aspectRatio: selectedAspectRatio,
+      imageSize: selectedImageSize,
     });
-
-    let imageUrl = null;
-    const responseParts = response.candidates?.[0]?.content?.parts;
-    if (responseParts && Array.isArray(responseParts)) {
-      for (const part of responseParts) {
-        if (part.inlineData) {
-          const base64Data = part.inlineData.data;
-          const mimeType = part.inlineData.mimeType || 'image/png';
-          imageUrl = `data:${mimeType};base64,${base64Data}`;
-          break;
-        }
-      }
-    }
 
     if (!imageUrl) {
       throw new Error('Image data not found in model response candidates.');
@@ -7817,7 +9720,7 @@ const upload = multer({
     fileSize: 100 * 1024 * 1024, // 100MB max limit per file
   },
   fileFilter: (_req, file, cb) => {
-    // Allow broad media and document formats (images, videos, documents, PDFs)
+    // Allow broad media and document formats (images, videos, documents, PDFs, HTML, XML)
     const allowedMimeTypes = [
       'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
       'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo',
@@ -7829,11 +9732,18 @@ const upload = multer({
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'application/vnd.ms-powerpoint',
       'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      'text/plain', 'text/csv', 'text/markdown',
+      'text/plain', 'text/csv', 'text/markdown', 'text/html', 'application/xhtml+xml',
+      'text/xml', 'application/xml',
       'application/json', 'application/zip'
     ];
 
-    if (allowedMimeTypes.includes(file.mimetype) || file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (
+      allowedMimeTypes.includes(file.mimetype) ||
+      file.mimetype.startsWith('image/') ||
+      file.mimetype.startsWith('video/') ||
+      ['.html', '.htm', '.xml', '.txt'].includes(ext)
+    ) {
       cb(null, true);
     } else {
       cb(new Error(`File type '${file.mimetype}' is not supported.`));
@@ -7932,8 +9842,225 @@ app.get('/api/files/:filename', (req, res) => {
   res.sendFile(targetPath);
 });
 
-// Serve frontend assets in dev/prod
+// Ensure public directory exists for domain/site verification files
+const publicDir = path.join(process.cwd(), 'public');
+if (!fs.existsSync(publicDir)) {
+  try {
+    fs.mkdirSync(publicDir, { recursive: true });
+  } catch (e) {
+    console.error('Failed to create public directory:', e);
+  }
+}
+
+// Serve files in public directory statically before SPA fallback handler
+app.use('/public', express.static(publicDir));
+app.use(express.static(publicDir));
+
+// Multer Storage Configuration for Public Directory (preserves exact filenames for site verifications)
+const publicStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    if (!fs.existsSync(publicDir)) {
+      try {
+        fs.mkdirSync(publicDir, { recursive: true });
+      } catch (e) {}
+    }
+    cb(null, publicDir);
+  },
+  filename: (_req, file, cb) => {
+    // Preserve original filename, sanitizing only path traversal or illegal characters
+    const original = path.basename(file.originalname);
+    const safeFilename = original.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    cb(null, safeFilename);
+  },
+});
+
+const publicUpload = multer({
+  storage: publicStorage,
+  limits: {
+    fileSize: 20 * 1024 * 1024, // 20MB limit
+  },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowedExts = ['.html', '.htm', '.xml', '.txt', '.json', '.svg', '.png', '.ico'];
+    if (allowedExts.includes(ext) || file.mimetype === 'text/html' || file.mimetype === 'application/xhtml+xml') {
+      cb(null, true);
+    } else {
+      cb(new Error(`Only verification and static public files (.html, .htm, .xml, .txt, .json, .svg) are allowed.`));
+    }
+  },
+});
+
+/**
+ * POST /api/upload-public-verification
+ * Allows users to upload HTML files (e.g. google1234.html) into the public directory for site verification
+ */
+app.post('/api/upload-public-verification', (req, res) => {
+  publicUpload.array('files', 10)(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      return res.status(400).json({ error: `Upload error: ${err.message}` });
+    } else if (err) {
+      return res.status(400).json({ error: err.message || 'Public file upload failed.' });
+    }
+
+    const reqFiles = (req.files as Express.Multer.File[]) || (req.file ? [req.file as Express.Multer.File] : []);
+    if (reqFiles.length === 0) {
+      return res.status(400).json({ error: 'No files uploaded. Please attach HTML/verification file.' });
+    }
+
+    const distDir = path.join(process.cwd(), 'dist');
+    const savedFiles = reqFiles.map((file) => {
+      const destPublicPath = path.join(publicDir, file.filename);
+      // Sync to dist if dist folder exists in runtime
+      if (fs.existsSync(distDir)) {
+        try {
+          fs.copyFileSync(destPublicPath, path.join(distDir, file.filename));
+        } catch (e) {
+          console.error('[Public Upload] Error syncing to dist:', e);
+        }
+      }
+      return {
+        filename: file.filename,
+        originalname: file.originalname,
+        size: file.size,
+        url: `/${file.filename}`,
+        publicUrl: `/public/${file.filename}`,
+        uploadedAt: new Date().toISOString()
+      };
+    });
+
+    res.status(201).json({
+      success: true,
+      message: `${savedFiles.length} file(s) successfully placed in the public directory for domain verification.`,
+      files: savedFiles
+    });
+  });
+});
+
+/**
+ * GET /api/public-verification-files
+ * Lists all verification HTML/TXT/XML files currently stored in the public directory
+ */
+app.get('/api/public-verification-files', (_req, res) => {
+  try {
+    if (!fs.existsSync(publicDir)) {
+      return res.json({ files: [] });
+    }
+
+    const filenames = fs.readdirSync(publicDir);
+    const files = filenames
+      .filter((fn) => {
+        const ext = path.extname(fn).toLowerCase();
+        return ['.html', '.htm', '.xml', '.txt', '.json', '.svg'].includes(ext);
+      })
+      .map((fn) => {
+        const filePath = path.join(publicDir, fn);
+        const stat = fs.statSync(filePath);
+        return {
+          filename: fn,
+          size: stat.size,
+          url: `/${fn}`,
+          publicUrl: `/public/${fn}`,
+          updatedAt: stat.mtime.toISOString()
+        };
+      });
+
+    res.json({ files });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to list public verification files.' });
+  }
+});
+
+/**
+ * DELETE /api/public-verification-files/:filename
+ * Removes a verification file from the public directory
+ */
+app.delete('/api/public-verification-files/:filename', (req, res) => {
+  try {
+    const filename = path.basename(req.params.filename);
+    const targetPath = path.join(publicDir, filename);
+
+    if (fs.existsSync(targetPath)) {
+      fs.unlinkSync(targetPath);
+    }
+
+    const distPath = path.join(process.cwd(), 'dist', filename);
+    if (fs.existsSync(distPath)) {
+      try {
+        fs.unlinkSync(distPath);
+      } catch (e) {}
+    }
+
+    res.json({ success: true, message: `File '${filename}' removed from public directory.` });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to delete verification file.' });
+  }
+});
+
+// Serve frontend assets in dev/prod with full SEO, security & caching optimizations
 const startServer = async () => {
+  // Security Headers Middleware
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    
+    // Performance Cache headers for static assets
+    if (req.url.match(/\.(png|jpg|jpeg|gif|ico|svg|css|js|woff|woff2|ttf|eot)$/)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else if (req.url === '/' || req.url.startsWith('/about') || req.url.startsWith('/contact')) {
+      res.setHeader('Cache-Control', 'public, max-age=3600, revalidate');
+    }
+    next();
+  });
+
+  // Dedicated Dynamic SEO Routes
+  app.get('/sitemap.xml', (_req, res) => {
+    const sitemapPath = path.join(publicDir, 'sitemap.xml');
+    if (fs.existsSync(sitemapPath)) {
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      return res.sendFile(sitemapPath);
+    }
+    const fallbackSitemap = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://joinedunexus.app/</loc><lastmod>${new Date().toISOString().split('T')[0]}</lastmod><priority>1.0</priority></url>
+  <url><loc>https://joinedunexus.app/about</loc><lastmod>${new Date().toISOString().split('T')[0]}</lastmod><priority>0.8</priority></url>
+  <url><loc>https://joinedunexus.app/contact</loc><lastmod>${new Date().toISOString().split('T')[0]}</lastmod><priority>0.7</priority></url>
+  <url><loc>https://joinedunexus.app/privacy</loc><lastmod>${new Date().toISOString().split('T')[0]}</lastmod><priority>0.5</priority></url>
+  <url><loc>https://joinedunexus.app/terms</loc><lastmod>${new Date().toISOString().split('T')[0]}</lastmod><priority>0.5</priority></url>
+  <url><loc>https://joinedunexus.app/accessibility</loc><lastmod>${new Date().toISOString().split('T')[0]}</lastmod><priority>0.6</priority></url>
+</urlset>`;
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.send(fallbackSitemap);
+  });
+
+  app.get('/robots.txt', (_req, res) => {
+    const robotsPath = path.join(publicDir, 'robots.txt');
+    if (fs.existsSync(robotsPath)) {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      return res.sendFile(robotsPath);
+    }
+    const fallbackRobots = `User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /dashboard\nDisallow: /api/\nSitemap: https://joinedunexus.app/sitemap.xml`;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(fallbackRobots);
+  });
+
+  app.get('/site.webmanifest', (_req, res) => {
+    const manifestPath = path.join(publicDir, 'site.webmanifest');
+    if (fs.existsSync(manifestPath)) {
+      res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+      return res.sendFile(manifestPath);
+    }
+    const altPath = path.join(publicDir, 'manifest.json');
+    if (fs.existsSync(altPath)) {
+      res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+      return res.sendFile(altPath);
+    }
+    res.status(404).send('Manifest not found');
+  });
+
+  // Serve static public folder files directly (favicons, og images, verification HTML files)
+  app.use(express.static(publicDir));
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },

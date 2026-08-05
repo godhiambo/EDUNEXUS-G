@@ -820,9 +820,9 @@ export const QRAnalyticsChart: React.FC<QRAnalyticsChartProps> = ({
                             {mapping.targetPayload.socratic.documentTitle || 'Default Grade Reader'}
                           </span>
                         </div>
-                        {mapping.targetPayload.socratic.prompt && (
+                        {mapping.targetPayload.socratic.socraticPrompt && (
                           <p className="text-[11px] text-indigo-800 italic line-clamp-2">
-                            "{mapping.targetPayload.socratic.prompt}"
+                            "{mapping.targetPayload.socratic.socraticPrompt}"
                           </p>
                         )}
                       </div>
@@ -836,11 +836,11 @@ export const QRAnalyticsChart: React.FC<QRAnalyticsChartProps> = ({
                             <span>Concept Node:</span>
                           </span>
                           <span className="text-emerald-700 font-mono text-[11px]">
-                            {mapping.targetPayload.adaptive.nodeTitle}
+                            {mapping.targetPayload.adaptive.nodeId}
                           </span>
                         </div>
                         <p className="text-[11px] text-emerald-800">
-                          Prereq: <span className="font-semibold">{mapping.targetPayload.adaptive.prerequisiteConcept || 'None'}</span> • Level: {mapping.targetPayload.adaptive.difficultyLevel}
+                          Topic: <span className="font-semibold">{mapping.targetPayload.adaptive.topic || 'General'}</span> • Auto-Differentiate: {mapping.targetPayload.adaptive.autoTriggerLowDifficulty ? 'Yes' : 'No'}
                         </p>
                       </div>
                     )}
@@ -852,13 +852,13 @@ export const QRAnalyticsChart: React.FC<QRAnalyticsChartProps> = ({
                           <span>Preset Accessibility Toggles:</span>
                         </div>
                         <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-mono">
-                          {mapping.targetPayload.udl.preconfiguredToggles?.dyslexicFont && (
+                          {mapping.targetPayload.udl.useDyslexicFont && (
                             <span className="px-2 py-0.5 bg-white border border-amber-200 rounded font-bold text-amber-800">Dyslexic Font</span>
                           )}
-                          {mapping.targetPayload.udl.preconfiguredToggles?.highContrast && (
+                          {mapping.targetPayload.udl.highContrast && (
                             <span className="px-2 py-0.5 bg-white border border-amber-200 rounded font-bold text-amber-800">High Contrast</span>
                           )}
-                          {mapping.targetPayload.udl.preconfiguredToggles?.lineSpacing && (
+                          {mapping.targetPayload.udl.lineSpacing !== 'normal' && (
                             <span className="px-2 py-0.5 bg-white border border-amber-200 rounded font-bold text-amber-800">Wide Spacing</span>
                           )}
                         </div>
@@ -870,13 +870,15 @@ export const QRAnalyticsChart: React.FC<QRAnalyticsChartProps> = ({
                         <div className="flex items-center justify-between font-bold text-rose-900">
                           <span className="flex items-center gap-1">
                             <Users className="w-3.5 h-3.5 text-rose-600" />
-                            <span>Parent Homework Task:</span>
+                            <span>Parent Task:</span>
                           </span>
-                          <span className="text-rose-700">{mapping.targetPayload.parent.studentName}</span>
+                          <span className="text-rose-700">{mapping.targetPayload.parent.studentName || 'Student'}</span>
                         </div>
-                        <p className="text-[11px] text-rose-800">
-                          {mapping.targetPayload.parent.homeworkAssignment}
-                        </p>
+                        {mapping.targetPayload.parent.customParentMessage && (
+                          <p className="text-[11px] text-rose-800">
+                            {mapping.targetPayload.parent.customParentMessage}
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>

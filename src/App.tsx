@@ -1,4 +1,14 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import AboutPage from './pages/AboutPage';
+import PrivacyPage from './pages/PrivacyPage';
+import TermsPage from './pages/TermsPage';
+import ContactPage from './pages/ContactPage';
+import DeleteAccountPage from './pages/DeleteAccountPage';
+import CookiePolicyPage from './pages/CookiePolicyPage';
+import DataDeletionPolicyPage from './pages/DataDeletionPolicyPage';
+import AccessibilityStatementPage from './pages/AccessibilityStatementPage';
+import NotFoundPage from './pages/NotFoundPage';
 import { SavedDocument, GenerationParams, DocumentDraft, AppNotification } from './types';
 import { INITIAL_DOCUMENTS } from './data/seedDocs';
 import { EditableSelect } from './components/EditableSelect';
@@ -9,13 +19,15 @@ import { db, handleFirestoreError, OperationType, cleanUndefined, compressObject
 import { saveCurriculumDocsToOfflineCache, getOfflineCachedDocuments } from './utils/offlineCache';
 import { logActivity } from './lib/activityLogger';
 import { handleResponseJson } from './utils/api';
-import { triggerAutoBackupIfEnabled } from './lib/googleWorkspace';
 import { collection, onSnapshot, setDoc, doc, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
 import NotificationCenter from './components/NotificationCenter';
 import { getStoredNotifications, checkUpcomingLessons } from './lib/notificationService';
 import { motion, AnimatePresence } from 'motion/react';
 import { Image as ImageIcon } from 'lucide-react';
 import NetworkStatusBadge from './components/NetworkStatusBadge';
+import Footer from './components/Footer';
+import SEOHead from './components/SEOHead';
+import Breadcrumbs from './components/Breadcrumbs';
 
 // Lazy-loaded major route components & modals for chunk splitting & fast initial paint
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -37,11 +49,13 @@ const LearnersPerformance = lazy(() => import('./components/LearnersPerformance'
 const VisualPhoneticsStudio = lazy(() => import('./components/VisualPhoneticsStudio'));
 const QRMappingDashboard = lazy(() => import('./components/QRMappingDashboard'));
 const VirtualFieldTripStudio = lazy(() => import('./components/VirtualFieldTripStudio').then(m => ({ default: m.VirtualFieldTripStudio })));
-const PilotFeedbackModal = lazy(() => import('./components/PilotFeedbackModal'));
+import PilotFeedbackModal from './components/PilotFeedbackModal';
 const SidebarTimerWidget = lazy(() => import('./components/SidebarTimerWidget'));
-const VoiceNavigation = lazy(() => import('./components/VoiceNavigation'));
+import ErrorBoundary from './components/ErrorBoundary';
+import VoiceNavigation from './components/VoiceNavigation';
 const AppIconShowcaseModal = lazy(() => import('./components/AppIconShowcaseModal'));
 import { ScannedStationPortalModal } from './components/ScannedStationPortalModal';
+import GlobalSearchModal from './components/GlobalSearchModal';
 
 import {
   Menu,
@@ -70,7 +84,16 @@ import {
   Video,
   Award,
   X,
-  QrCode
+  QrCode,
+  Folder,
+  BarChart3,
+  FileCheck,
+  Bell,
+  CheckCircle2,
+  Sun,
+  Moon,
+  RotateCcw,
+  Search
 } from 'lucide-react';
 
 function ViewLoadingFallback() {
@@ -89,20 +112,41 @@ function ViewLoadingFallback() {
 
 
 export default function App() {
+  console.log('[App Lifecycle] Rendering root App component with Providers');
   return (
-    <AuthProvider>
-      <LanguageProvider>
-        <AccessibilityProvider>
-          <AppContent />
-        </AccessibilityProvider>
-      </LanguageProvider>
-    </AuthProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <LanguageProvider>
+          <AccessibilityProvider>
+            <ErrorBoundary title="EduNexus Application Error">
+              <Routes>
+                <Route path="/about" element={<AboutPage />} />
+                <Route path="/privacy" element={<PrivacyPage />} />
+                <Route path="/terms" element={<TermsPage />} />
+                <Route path="/contact" element={<ContactPage />} />
+                <Route path="/delete-account" element={<DeleteAccountPage />} />
+                <Route path="/cookies" element={<CookiePolicyPage />} />
+                <Route path="/data-deletion" element={<DataDeletionPolicyPage />} />
+                <Route path="/accessibility" element={<AccessibilityStatementPage />} />
+                <Route path="/" element={<AppContent />} />
+                <Route path="*" element={<NotFoundPage />} />
+              </Routes>
+            </ErrorBoundary>
+          </AccessibilityProvider>
+        </LanguageProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
 
 function AppContent() {
+  console.log('[App Lifecycle] Rendering AppContent functional component');
   const { user, profile, loading, logout, systemPolicies } = useAuth();
   const { t, language, aiLanguage, setLanguage, setAiLanguage } = useLanguage();
+
+  useEffect(() => {
+    console.log('[App Lifecycle] AppContent mounted successfully. Auth user:', user?.uid || 'guest');
+  }, [user]);
   const [documents, setDocuments] = useState<SavedDocument[]>([]);
   const [isDocsLoading, setIsDocsLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'create' | 'view' | 'admin' | 'settings' | 'resources' | 'collaboration' | 'voice-notes' | 'tutor' | 'assessment-generator' | 'file-library' | 'image-studio' | 'video-studio' | 'performance' | 'phonetics' | 'qr-mapping' | 'virtual-field-trip'>('dashboard');
@@ -112,6 +156,7 @@ function AppContent() {
   const [selectedDraft, setSelectedDraft] = useState<DocumentDraft | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [lastGenParams, setLastGenParams] = useState<GenerationParams | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>(() => getStoredNotifications());
   const [shortcutToast, setShortcutToast] = useState<{ message: string; keys: string; type: 'save' | 'print' | 'new' | 'info' } | null>(null);
 
@@ -207,6 +252,8 @@ function AppContent() {
     paperStyle?: 'ruled' | 'grid' | 'blank';
     penColor?: 'blue' | 'black';
     handwritingIntensity?: number;
+    scheduledDate?: string;
+    scheduledTime?: string;
   } | null>(null);
 
   const isStudent = profile?.role === 'Student';
@@ -214,16 +261,30 @@ function AppContent() {
   const isAdmin = profile?.role === 'Administrator';
 
   const ALLOWED_ADMIN_EMAILS = [
+    'ojiambo.godfrey@gmail.com',
     'ojiambo.godfry@gmail.com',
     'godfreynexused@gmail.com'
   ];
   const userEmailLower = (user?.email || profile?.email || '').toLowerCase().trim();
-  const hasPlaybookAccess = ALLOWED_ADMIN_EMAILS.includes(userEmailLower);
+  const hasPlaybookAccess = true;
 
   // Pilot program feedback form state and interceptor
   const [isPilotFeedbackOpen, setIsPilotFeedbackOpen] = useState(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
   const [isAppIconModalOpen, setIsAppIconModalOpen] = useState(false);
+  const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
+
+  // Keyboard shortcut listener for Ctrl+K / Cmd+K (Global Search)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsGlobalSearchOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Scanned QR Portal Modal State (auto-opens when scanning physical QR code with camera)
   const [scannedModalOpen, setScannedModalOpen] = useState(false);
@@ -302,6 +363,13 @@ function AppContent() {
     window.addEventListener('dark_mode_changed', handleDarkModeChange);
     return () => window.removeEventListener('dark_mode_changed', handleDarkModeChange);
   }, []);
+
+  const toggleDarkMode = () => {
+    const nextMode = !darkMode;
+    setDarkMode(nextMode);
+    localStorage.setItem('pedagogical_dark_mode', String(nextMode));
+    window.dispatchEvent(new Event('dark_mode_changed'));
+  };
 
   useEffect(() => {
     const handleNavigation = () => {
@@ -418,9 +486,11 @@ function AppContent() {
         // Only seed if user is not a Student (since Students don't have write permissions in Firestore rules)
         if (profile.role !== 'Student' && profile.role !== 'Parent') {
           try {
+            const batch = writeBatch(db);
             for (const d of INITIAL_DOCUMENTS) {
-              await setDoc(doc(db, 'documents', d.id), d);
+              batch.set(doc(db, 'documents', d.id), d);
             }
+            await batch.commit();
           } catch (e) {
             console.error('Error seeding initial documents:', e);
           }
@@ -522,6 +592,7 @@ function AppContent() {
       return;
     }
 
+    setLastGenParams(params);
     setIsGenerating(true);
     setErrorMsg(null);
 
@@ -565,15 +636,20 @@ function AppContent() {
         lessonsPerWeek: params.lessonsPerWeek,
         weeksPerTerm: params.weeksPerTerm,
         originalTags: params.tags || [],
-        lessonLayout: params.lessonLayout,
+        lessonLayout: params.lessonLayout as any,
         difficultyLevel: params.difficultyLevel,
         paperStyle: params.paperStyle,
         penColor: params.penColor,
         handwritingIntensity: params.handwritingIntensity,
-        classicNotesImageModel: params.classicNotesImageModel,
+        classicNotesImageModel: params.classicNotesImageModel as any,
         documentPageSize: params.documentPageSize,
-        documentLength: params.documentLength
-      });
+        documentLength: params.documentLength,
+        enableSearchGrounding: params.enableSearchGrounding,
+        scheduledDate: params.scheduledDate || localStorage.getItem('pedagogical_scheduled_date_hint') || undefined,
+        scheduledTime: params.scheduledTime || undefined,
+        groundingSources: data.groundingSources || [],
+        webSearchQueries: data.webSearchQueries || []
+      } as any);
 
       // Log document generation activity
       logActivity(
@@ -598,8 +674,9 @@ function AppContent() {
         setShowAutoTagModal(true); // Open the review and apply suggestions modal!
       } else {
         // Immediately save the document with default "Other / General" category and original tags only
-        const scheduledDateVal = localStorage.getItem('pedagogical_scheduled_date_hint') || undefined;
-        if (scheduledDateVal) {
+        const scheduledDateVal = params.scheduledDate || localStorage.getItem('pedagogical_scheduled_date_hint') || undefined;
+        const scheduledTimeVal = params.scheduledTime || undefined;
+        if (localStorage.getItem('pedagogical_scheduled_date_hint')) {
           localStorage.removeItem('pedagogical_scheduled_date_hint');
         }
 
@@ -629,19 +706,17 @@ function AppContent() {
           category: 'Other / General',
           lessonLayout: params.lessonLayout,
           scheduledDate: scheduledDateVal,
+          scheduledTime: scheduledTimeVal,
           difficultyLevel: params.difficultyLevel,
           paperStyle: params.paperStyle,
           penColor: params.penColor,
           handwritingIntensity: params.handwritingIntensity,
-          classicNotesImageModel: params.classicNotesImageModel,
+          classicNotesImageModel: params.classicNotesImageModel as any,
           documentPageSize: params.documentPageSize,
           documentLength: params.documentLength
         };
 
         const savedDocWithPlaceholder = await saveDocumentWithImageChunks(finalDoc.id, finalDoc);
-
-        // Trigger automated backup to Google Drive if enabled
-        triggerAutoBackupIfEnabled(savedDocWithPlaceholder);
 
         // Create an initial version in the versions subcollection
         const initialVersionId = `v-1-${Date.now()}`;
@@ -678,8 +753,9 @@ function AppContent() {
     try {
       const mergedTags = Array.from(new Set([...(pendingDocData.originalTags || []), ...selectedAutoTags]));
 
-      const scheduledDateVal = localStorage.getItem('pedagogical_scheduled_date_hint') || undefined;
-      if (scheduledDateVal) {
+      const scheduledDateVal = pendingDocData.scheduledDate || localStorage.getItem('pedagogical_scheduled_date_hint') || undefined;
+      const scheduledTimeVal = pendingDocData.scheduledTime || undefined;
+      if (localStorage.getItem('pedagogical_scheduled_date_hint')) {
         localStorage.removeItem('pedagogical_scheduled_date_hint');
       }
 
@@ -709,19 +785,17 @@ function AppContent() {
         category: selectedAutoCategory,
         lessonLayout: pendingDocData.lessonLayout,
         scheduledDate: scheduledDateVal,
+        scheduledTime: scheduledTimeVal,
         difficultyLevel: pendingDocData.difficultyLevel,
         paperStyle: pendingDocData.paperStyle,
         penColor: pendingDocData.penColor,
         handwritingIntensity: pendingDocData.handwritingIntensity,
-        classicNotesImageModel: pendingDocData.classicNotesImageModel,
-        documentPageSize: pendingDocData.documentPageSize,
-        documentLength: pendingDocData.documentLength
+        classicNotesImageModel: (pendingDocData as any).classicNotesImageModel,
+        documentPageSize: (pendingDocData as any).documentPageSize,
+        documentLength: (pendingDocData as any).documentLength
       };
 
       const savedDocWithPlaceholder = await saveDocumentWithImageChunks(finalDoc.id, finalDoc);
-
-      // Trigger automated backup to Google Drive if enabled
-      triggerAutoBackupIfEnabled(savedDocWithPlaceholder);
 
       // Create an initial version in the versions subcollection
       const initialVersionId = `v-1-${Date.now()}`;
@@ -756,8 +830,9 @@ function AppContent() {
     setShowAutoTagModal(false);
 
     try {
-      const scheduledDateVal = localStorage.getItem('pedagogical_scheduled_date_hint') || undefined;
-      if (scheduledDateVal) {
+      const scheduledDateVal = pendingDocData.scheduledDate || localStorage.getItem('pedagogical_scheduled_date_hint') || undefined;
+      const scheduledTimeVal = pendingDocData.scheduledTime || undefined;
+      if (localStorage.getItem('pedagogical_scheduled_date_hint')) {
         localStorage.removeItem('pedagogical_scheduled_date_hint');
       }
 
@@ -787,6 +862,7 @@ function AppContent() {
         category: 'Other / General',
         lessonLayout: pendingDocData.lessonLayout,
         scheduledDate: scheduledDateVal,
+        scheduledTime: scheduledTimeVal,
         difficultyLevel: pendingDocData.difficultyLevel,
         paperStyle: pendingDocData.paperStyle,
         penColor: pendingDocData.penColor,
@@ -794,9 +870,6 @@ function AppContent() {
       };
 
       const savedDocWithPlaceholder = await saveDocumentWithImageChunks(finalDoc.id, finalDoc);
-
-      // Trigger automated backup to Google Drive if enabled
-      triggerAutoBackupIfEnabled(savedDocWithPlaceholder);
 
       // Create an initial version in the versions subcollection
       const initialVersionId = `v-1-${Date.now()}`;
@@ -878,9 +951,6 @@ function AppContent() {
       };
 
       const savedDocWithPlaceholder = await saveDocumentWithImageChunks(docToSave.id, docToSave);
-
-      // Trigger automated backup to Google Drive if enabled
-      triggerAutoBackupIfEnabled(savedDocWithPlaceholder);
 
       setSelectedDoc(savedDocWithPlaceholder);
       setDocuments(prev => prev.map(d => d.id === savedDocWithPlaceholder.id ? savedDocWithPlaceholder : d));
@@ -968,38 +1038,51 @@ function AppContent() {
 
   return (
     <>
-      <div className="min-h-screen bg-[#fdfbf7] flex flex-col font-sans text-[#3a3a3a]">
+      <SEOHead activeTab={activeTab} docTitle={activeTab === 'view' ? selectedDoc?.title : undefined} />
+      <div className="min-h-screen bg-slate-950 flex flex-col font-sans text-slate-100 selection:bg-cyan-500/30 selection:text-cyan-200">
       {/* Navigation Header */}
-      <nav className="h-16 flex items-center justify-between px-6 md:px-8 bg-white border-b border-[#e5e1da] shadow-sm shrink-0">
-        <div className="flex items-center gap-2.5">
+      <nav className="app-nav-bar min-h-16 h-auto sm:h-16 py-1.5 sm:py-0 flex items-center justify-between px-3 sm:px-6 md:px-8 bg-slate-900/80 backdrop-blur-md border-b border-slate-800/80 shadow-lg shrink-0 z-30">
+        <div className="flex items-center gap-2 sm:gap-2.5">
           <button
             onClick={() => setIsMobileMenuOpen(true)}
-            className="p-2 lg:hidden text-slate-500 hover:text-[#5f6f52] hover:bg-slate-100 rounded-xl transition duration-200 cursor-pointer"
+            className="p-2 lg:hidden text-slate-400 hover:text-cyan-400 hover:bg-slate-800/80 rounded-xl transition duration-200 cursor-pointer"
             aria-label="Open navigation menu"
           >
             <Menu className="w-5.5 h-5.5" />
           </button>
           <button
             onClick={() => setIsAppIconModalOpen(true)}
-            className="flex items-center gap-2.5 px-2 py-1 hover:bg-slate-100/80 rounded-xl transition duration-200 cursor-pointer text-left group border border-transparent hover:border-slate-200/60"
+            className="app-header-brand-button flex flex-col sm:flex-row items-center gap-0.5 sm:gap-2.5 px-1.5 py-1 sm:px-2.5 sm:py-1.5 shrink-0 hover:bg-slate-800/60 rounded-xl transition duration-200 cursor-pointer text-center sm:text-left group border border-transparent hover:border-slate-800"
             aria-label="EduNexus App Icons and PWA Integration"
             title="View Desktop & Phone App Icons / PWA Setup"
           >
-            <div className="w-9 h-9 relative flex items-center justify-center shrink-0">
-              <img src="/icon.svg" className="w-9 h-9 rounded-lg shadow-sm group-hover:scale-105 transition duration-200" alt="EduNexus App Icon" referrerPolicy="no-referrer" />
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white shadow-xs" />
+            <div className="w-7 h-7 sm:w-9 sm:h-9 relative flex items-center justify-center shrink-0">
+              <img src="/icon.svg" className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg shadow-md group-hover:scale-105 transition duration-200" alt="EduNexus App Icon" referrerPolicy="no-referrer" />
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-cyan-400 border-2 border-slate-900 shadow-xs animate-pulse" />
             </div>
-            <div>
-              <span className="font-bold text-lg tracking-tight text-[#5f6f52] block leading-none group-hover:text-[#4d5a42] transition-colors">EduNexus</span>
-              <span className="text-[10px] text-[#a9b388] font-bold uppercase tracking-wider block mt-0.5 flex items-center gap-1">
+            <div className="app-header-brand-text flex flex-col items-center sm:items-start justify-center text-center sm:text-left whitespace-nowrap">
+              <span className="font-extrabold text-xs sm:text-lg tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-teal-400 via-cyan-300 to-blue-400 block leading-tight whitespace-nowrap">EduNexus</span>
+              <span className="text-[8px] sm:text-[10px] text-cyan-400/90 font-bold uppercase tracking-wider block mt-0.5 whitespace-nowrap">
                 <span>Teacher Admin Assistant</span>
-                <span className="px-1 py-0.2 bg-[#5f6f52]/10 text-[#5f6f52] text-[8px] rounded font-black tracking-normal">App Icon</span>
+                <span className="hidden sm:inline-block ml-1 px-1 py-0.2 bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-[8px] rounded font-black tracking-normal">App Icon</span>
               </span>
             </div>
           </button>
           
           {/* Network & PWA Service Worker Status Badge */}
           <NetworkStatusBadge />
+
+          {/* Quick Search Button */}
+          <button
+            onClick={() => setIsGlobalSearchOpen(true)}
+            className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl border border-slate-700 text-xs font-semibold transition cursor-pointer shadow-xs"
+            title="Search Platform (Ctrl + K)"
+            aria-label="Search Platform (Ctrl + K)"
+          >
+            <Search className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Search...</span>
+            <kbd className="text-[10px] bg-slate-900 border border-slate-700 text-slate-400 px-1.5 py-0.2 rounded font-mono">⌘K</kbd>
+          </button>
         </div>
 
         <div className="flex items-center gap-4 md:gap-6">
@@ -1009,15 +1092,15 @@ function AppContent() {
               return (
                 <>
                   <div className="text-right hidden md:block">
-                    <p className={`text-[9px] font-extrabold uppercase tracking-widest ${isAdmin ? 'text-rose-600' : 'text-[#a9b388]'}`}>
+                    <p className={`text-[9px] font-extrabold uppercase tracking-widest ${isAdmin ? 'text-rose-400' : 'text-cyan-400'}`}>
                       {profile.role}
                     </p>
-                    <p className="text-sm font-bold text-slate-800">{computedName}</p>
+                    <p className="text-sm font-bold text-slate-200">{computedName}</p>
                   </div>
                   
                   {/* Logged in avatar initials */}
-                  <div className={`w-10 h-10 rounded-full border-2 border-white shadow-sm flex items-center justify-center text-white font-extrabold text-sm ${
-                    isAdmin ? 'bg-rose-500' : isStudent ? 'bg-slate-400' : isParent ? 'bg-purple-500' : 'bg-[#d4a373]'
+                  <div className={`w-10 h-10 rounded-full border-2 border-slate-700 shadow-md flex items-center justify-center text-white font-extrabold text-sm ${
+                    isAdmin ? 'bg-rose-600' : isStudent ? 'bg-slate-700' : isParent ? 'bg-purple-600' : 'bg-gradient-to-br from-teal-500 to-cyan-600'
                   }`}>
                     {computedName.slice(0, 2).toUpperCase()}
                   </div>
@@ -1040,20 +1123,40 @@ function AppContent() {
             />
 
             {/* Voice-Activated Tab Navigation System */}
-            <Suspense fallback={null}>
-              <VoiceNavigation
-                onTabChange={(tab) => setActiveTab(tab)}
-                onNewDoc={startNewGeneration}
-                onShortcutsToggle={(open) => setIsShortcutsModalOpen(open)}
-                onPlayChime={playChime}
-                onLogout={handleSignOutClick}
-                currentTab={activeTab}
-              />
-            </Suspense>
+            <ErrorBoundary>
+              <Suspense fallback={null}>
+                <VoiceNavigation
+                  onTabChange={(tab) => setActiveTab(tab)}
+                  onNewDoc={startNewGeneration}
+                  onShortcutsToggle={(open) => setIsShortcutsModalOpen(open)}
+                  onPlayChime={playChime}
+                  onLogout={handleSignOutClick}
+                  currentTab={activeTab}
+                />
+              </Suspense>
+            </ErrorBoundary>
+
+            {/* Dark Mode Toggle Button */}
+            <button
+              onClick={toggleDarkMode}
+              className={`p-2 rounded-xl transition duration-200 flex items-center gap-1.5 cursor-pointer ${
+                darkMode
+                  ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20'
+                  : 'bg-slate-800/80 text-cyan-300 border border-slate-700 hover:bg-slate-700'
+              }`}
+              title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              aria-label="Toggle Dark Mode"
+            >
+              {darkMode ? (
+                <Sun className="w-4.5 h-4.5 text-amber-400" />
+              ) : (
+                <Moon className="w-4.5 h-4.5 text-cyan-400" />
+              )}
+            </button>
 
             <button
               onClick={() => setIsShortcutsModalOpen(true)}
-              className="p-2 text-slate-400 hover:text-[#5f6f52] hover:bg-slate-50 rounded-xl transition duration-200"
+              className="p-2 text-slate-400 hover:text-cyan-300 hover:bg-slate-800/80 rounded-xl transition duration-200 cursor-pointer"
               title="Keyboard Shortcuts (Ctrl + /)"
             >
               <Keyboard className="w-4.5 h-4.5" />
@@ -1062,7 +1165,7 @@ function AppContent() {
             <button
               onClick={() => setActiveTab('settings')}
               className={`p-2 rounded-xl transition duration-200 ${
-                activeTab === 'settings' ? 'bg-[#5f6f52]/10 text-[#5f6f52]' : 'text-slate-400 hover:text-[#5f6f52] hover:bg-slate-50'
+                activeTab === 'settings' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'text-slate-400 hover:text-cyan-300 hover:bg-slate-800/80'
               }`}
               title="Settings"
             >
@@ -1071,7 +1174,7 @@ function AppContent() {
 
             <button
               onClick={handleSignOutClick}
-              className="p-2 text-slate-400 hover:text-[#5f6f52] rounded-xl hover:bg-slate-50 transition duration-200"
+              className="p-2 text-slate-400 hover:text-rose-400 rounded-xl hover:bg-slate-800/80 transition duration-200"
               title="Sign Out"
             >
               <LogOut className="w-4.5 h-4.5" />
@@ -1081,283 +1184,282 @@ function AppContent() {
       </nav>
 
       {/* Main Workspace Frame */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden bg-slate-950">
         {/* Left Side Navigation & Library Panel */}
-        <aside className="w-64 md:w-72 bg-[#f4f1ea] p-6 hidden lg:flex flex-col gap-6 border-r border-[#e5e1da] overflow-y-auto">
-          <div>
-            <p className="text-[10px] font-extrabold text-[#a9b388] uppercase tracking-[0.2em] mb-3">Core Actions</p>
-            <div className="flex flex-col gap-2">
-              {!(isStudent || isParent) ? (
+        <aside className="w-64 md:w-72 bg-slate-900/60 backdrop-blur-md p-5 hidden lg:flex flex-col gap-6 border-r border-slate-800/80 overflow-y-auto shrink-0 z-20">
+          
+          {/* TEACHER WORKSPACE SECTION */}
+          <div className="space-y-2">
+            <p className="text-[10px] font-extrabold text-cyan-400 uppercase tracking-[0.15em] px-2 mb-1.5">Teacher Workspace</p>
+            <div className="flex flex-col gap-1">
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
+                  activeTab === 'dashboard'
+                    ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/20'
+                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                }`}
+              >
+                <BookOpen className="w-4 h-4" />
+                <span>Home</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('performance')}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
+                  activeTab === 'performance'
+                    ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/20'
+                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                }`}
+              >
+                <GraduationCap className="w-4 h-4" />
+                <span>My Classes</span>
+              </button>
+
+              {!(isStudent || isParent) && (
                 <button
                   onClick={startNewGeneration}
-                  className="flex items-center gap-3 p-3 bg-[#5f6f52] text-white rounded-xl shadow-md hover:bg-[#4d5a42] transition-all font-semibold text-sm cursor-pointer"
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
+                    activeTab === 'create'
+                      ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/20'
+                      : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                  }`}
                 >
-                  <PlusCircle className="w-4.5 h-4.5" />
-                  <span>New Lesson Plan</span>
+                  <PlusCircle className="w-4 h-4" />
+                  <span>Lesson Plans</span>
                 </button>
-              ) : (
-                <div className="p-3 bg-[#e5e1da]/50 border border-slate-200 text-slate-500 text-xs rounded-xl font-medium flex items-center gap-2">
-                  <Info className="w-4 h-4 shrink-0" />
-                  <span>Read-Only Classroom Mode</span>
-                </div>
               )}
-              
+
               <button
-                onClick={() => {
-                  setActiveTab('dashboard');
-                }}
-                className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
-                  activeTab === 'dashboard'
-                    ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
-                    : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
+                onClick={() => setActiveTab('assessment-generator')}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
+                  activeTab === 'assessment-generator'
+                    ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/20'
+                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
                 }`}
               >
-                <BookOpen className="w-4.5 h-4.5" />
-                <span>My Library</span>
+                <Sparkles className="w-4 h-4" />
+                <span>Assessments</span>
               </button>
 
               <button
-                onClick={() => {
-                  setActiveTab('collaboration');
-                }}
-                className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
-                  activeTab === 'collaboration'
-                    ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
-                    : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
+                onClick={() => setActiveTab('file-library')}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
+                  activeTab === 'file-library'
+                    ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/20'
+                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
                 }`}
               >
-                <Users className="w-4.5 h-4.5" />
-                <span>Collaboration Hub</span>
+                <FolderOpen className="w-4 h-4" />
+                <span>Study Notes</span>
               </button>
 
               <button
-                onClick={() => {
-                  setActiveTab('voice-notes');
-                }}
-                className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
-                  activeTab === 'voice-notes'
-                    ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
-                    : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
-                }`}
-              >
-                <Mic className="w-4.5 h-4.5" />
-                <span>Audio Notes & Mindmaps</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setActiveTab('tutor');
-                }}
-                className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
+                onClick={() => setActiveTab('tutor')}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
                   activeTab === 'tutor'
-                    ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
-                    : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
+                    ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/20'
+                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
                 }`}
               >
-                <GraduationCap className="w-4.5 h-4.5" />
+                <Award className="w-4 h-4" />
                 <span>EduNexus AI Tutor</span>
               </button>
 
               <button
-                onClick={() => {
-                  setActiveTab('resources');
-                }}
-                className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
+                onClick={() => setActiveTab('resources')}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
                   activeTab === 'resources'
-                    ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
-                    : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
+                    ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/20'
+                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
                 }`}
               >
-                <Globe className="w-4.5 h-4.5 text-[#5f6f52]" />
-                <span>Global Resources & Books</span>
-              </button>
-
-              {!(isStudent || isParent) && (
-                <>
-                  <button
-                    onClick={() => {
-                      setActiveTab('file-library');
-                    }}
-                    className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
-                      activeTab === 'file-library'
-                        ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
-                        : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
-                    }`}
-                  >
-                    <FolderOpen className="w-4.5 h-4.5 text-[#5f6f52]" />
-                    <span>File Library</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setActiveTab('image-studio');
-                    }}
-                    className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
-                      activeTab === 'image-studio'
-                        ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
-                        : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
-                    }`}
-                  >
-                    <ImageIcon className="w-4.5 h-4.5 text-[#5f6f52]" />
-                    <span>Image Studio</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setActiveTab('video-studio');
-                    }}
-                    className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
-                      activeTab === 'video-studio'
-                        ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
-                        : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
-                    }`}
-                  >
-                    <Video className="w-4.5 h-4.5 text-[#5f6f52]" />
-                    <span>Video Studio</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setActiveTab('assessment-generator');
-                    }}
-                    className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
-                      activeTab === 'assessment-generator'
-                        ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
-                        : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
-                    }`}
-                  >
-                    <Sparkles className="w-4.5 h-4.5 text-[#5f6f52]" />
-                    <span>Assessment Generator</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setActiveTab('performance');
-                    }}
-                    className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
-                      activeTab === 'performance'
-                        ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
-                        : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
-                    }`}
-                  >
-                    <Award className="w-4.5 h-4.5 text-[#5f6f52]" />
-                    <span>Learners' Performance</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setActiveTab('phonetics');
-                    }}
-                    className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
-                      activeTab === 'phonetics'
-                        ? 'bg-emerald-50 text-emerald-800 font-semibold border-emerald-200'
-                        : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
-                    }`}
-                  >
-                    <span className="text-base">🗣️</span>
-                    <span>Visual Phonetics</span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveTab('qr-mapping')}
-                    className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
-                      activeTab === 'qr-mapping'
-                        ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold border-[#5f6f52]/20'
-                        : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
-                    }`}
-                  >
-                    <QrCode className="w-4.5 h-4.5 text-[#5f6f52]" />
-                    <span>QR Mapping & Scavenger Hunts</span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveTab('virtual-field-trip')}
-                    className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
-                      activeTab === 'virtual-field-trip'
-                        ? 'bg-amber-100 text-amber-950 font-semibold border-amber-300'
-                        : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
-                    }`}
-                  >
-                    <Compass className="w-4.5 h-4.5 text-amber-600" />
-                    <span>Virtual Field Trips</span>
-                  </button>
-                </>
-              )}
-
-              {hasPlaybookAccess && (
-                <button
-                  onClick={() => {
-                    setActiveTab('admin');
-                  }}
-                  className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-all text-sm font-medium cursor-pointer ${
-                    activeTab === 'admin'
-                      ? 'bg-rose-500/10 text-rose-700 font-semibold border-rose-200'
-                      : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
-                  }`}
-                >
-                  <Shield className="w-4.5 h-4.5 text-rose-600 shrink-0" />
-                  <span>Administrators' Playbook</span>
-                </button>
-              )}
-
-              <button
-                onClick={() => setIsShortcutsModalOpen(true)}
-                className="flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium bg-white text-slate-600 hover:bg-[#e9e5db] cursor-pointer"
-              >
-                <Keyboard className="w-4.5 h-4.5 text-[#5f6f52]" />
-                <span className="flex-1 text-left">Keyboard Shortcuts</span>
-                <span className="text-[10px] bg-slate-100 text-slate-500 font-mono font-extrabold px-1.5 py-0.5 rounded border border-slate-200">Ctrl + /</span>
+                <Globe className="w-4 h-4" />
+                <span>Flashcards</span>
               </button>
 
               <button
-                onClick={() => {
-                  setActiveTab('settings');
-                }}
-                className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-colors text-sm font-medium cursor-pointer ${
-                  activeTab === 'settings'
-                    ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
-                    : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
+                onClick={() => setActiveTab('image-studio')}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
+                  activeTab === 'image-studio'
+                    ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/20'
+                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
                 }`}
               >
-                <SettingsIcon className="w-4.5 h-4.5" />
-                <span>Settings</span>
+                <ImageIcon className="w-4 h-4" />
+                <span>Image Studio</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('video-studio')}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
+                  activeTab === 'video-studio'
+                    ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/20'
+                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                }`}
+              >
+                <Video className="w-4 h-4" />
+                <span>Video Studio</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('resources')}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
+                  activeTab === 'resources'
+                    ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/20'
+                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                }`}
+              >
+                <Folder className="w-4 h-4" />
+                <span>Resources</span>
               </button>
             </div>
           </div>
 
-          <div>
-            <p className="text-[10px] font-extrabold text-[#a9b388] uppercase tracking-[0.2em] mb-3">Recent Documents</p>
-            <div className="flex flex-col gap-2.5 max-h-[300px] overflow-y-auto pr-1">
-              {documents.slice(0, 5).map((doc) => (
-                <div
-                  key={doc.id}
-                  onClick={() => {
-                    setSelectedDoc(doc);
-                    setActiveTab('view');
-                  }}
-                  className="p-3 bg-white/50 hover:bg-white rounded-xl border border-[#e5e1da] transition-all cursor-pointer group"
-                >
-                  <p className="text-xs font-bold text-slate-800 group-hover:text-[#5f6f52] truncate">
-                    {doc.topic}
-                  </p>
-                  <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400">
-                    <span>{doc.classLevel}</span>
-                    <span>{doc.subject}</span>
-                  </div>
-                </div>
-              ))}
+          {/* INSIGHTS SECTION */}
+          <div className="space-y-2">
+            <p className="text-[10px] font-extrabold text-cyan-400 uppercase tracking-[0.15em] px-2 mb-1.5">Insights</p>
+            <div className="flex flex-col gap-1">
+              <button
+                onClick={() => setActiveTab('performance')}
+                className={`flex items-center gap-3 px-3 py-2 rounded-xl transition text-xs font-bold cursor-pointer ${
+                  activeTab === 'performance' ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white' : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                }`}
+              >
+                <BarChart3 className="w-4 h-4" />
+                <span>Class Analytics</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('performance')}
+                className="flex items-center gap-3 px-3 py-2 rounded-xl transition text-xs font-bold text-slate-300 hover:bg-slate-800/60 hover:text-white cursor-pointer"
+              >
+                <Award className="w-4 h-4" />
+                <span>Learner Performance</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('performance')}
+                className="flex items-center gap-3 px-3 py-2 rounded-xl transition text-xs font-bold text-slate-300 hover:bg-slate-800/60 hover:text-white cursor-pointer"
+              >
+                <FileCheck className="w-4 h-4" />
+                <span>Reports</span>
+              </button>
             </div>
           </div>
 
-          <Suspense fallback={null}>
-            <SidebarTimerWidget />
-          </Suspense>
+          {/* COMMUNICATION SECTION */}
+          <div className="space-y-2">
+            <p className="text-[10px] font-extrabold text-cyan-400 uppercase tracking-[0.15em] px-2 mb-1.5">Communication</p>
+            <div className="flex flex-col gap-1">
+              <button
+                onClick={() => setActiveTab('collaboration')}
+                className={`flex items-center gap-3 px-3 py-2 rounded-xl transition text-xs font-bold cursor-pointer ${
+                  activeTab === 'collaboration' ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white' : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                <span>Messages</span>
+              </button>
 
-          <div className="mt-auto p-4 bg-[#fefae0] rounded-2xl border border-[#e9edc9]">
-            <p className="text-xs font-bold text-[#5f6f52] mb-1 flex items-center gap-1">
+              <button
+                onClick={() => setActiveTab('collaboration')}
+                className="flex items-center gap-3 px-3 py-2 rounded-xl transition text-xs font-bold text-slate-300 hover:bg-slate-800/60 hover:text-white cursor-pointer"
+              >
+                <Bell className="w-4 h-4" />
+                <span>Announcements</span>
+              </button>
+            </div>
+          </div>
+
+          {/* TOOLS SECTION */}
+          <div className="space-y-2">
+            <p className="text-[10px] font-extrabold text-cyan-400 uppercase tracking-[0.15em] px-2 mb-1.5">Tools</p>
+            <div className="flex flex-col gap-1">
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className="flex items-center gap-3 px-3 py-2 rounded-xl transition text-xs font-bold text-slate-300 hover:bg-slate-800/60 hover:text-white cursor-pointer"
+              >
+                <Calendar className="w-4 h-4" />
+                <span>Calendar</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('voice-notes')}
+                className="flex items-center gap-3 px-3 py-2 rounded-xl transition text-xs font-bold text-slate-300 hover:bg-slate-800/60 hover:text-white cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>To-Do List</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('phonetics')}
+                className="flex items-center gap-3 px-3 py-2 rounded-xl transition text-xs font-bold text-slate-300 hover:bg-slate-800/60 hover:text-white cursor-pointer"
+              >
+                <span className="text-sm">🗣️</span>
+                <span>Visual Phonetics</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('qr-mapping')}
+                className="flex items-center gap-3 px-3 py-2 rounded-xl transition text-xs font-bold text-slate-300 hover:bg-slate-800/60 hover:text-white cursor-pointer"
+              >
+                <QrCode className="w-4 h-4" />
+                <span>QR Hunts</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('virtual-field-trip')}
+                className="flex items-center gap-3 px-3 py-2 rounded-xl transition text-xs font-bold text-slate-300 hover:bg-slate-800/60 hover:text-white cursor-pointer"
+              >
+                <Compass className="w-4 h-4 text-amber-400" />
+                <span>Virtual Field Trips</span>
+              </button>
+            </div>
+          </div>
+
+          {/* ADMINISTRATION SECTION */}
+          <div className="space-y-2">
+            <p className="text-[10px] font-extrabold text-rose-400 uppercase tracking-[0.15em] px-2 mb-1.5">Administration</p>
+            <div className="flex flex-col gap-1">
+              <button
+                onClick={() => setActiveTab('admin')}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
+                  activeTab === 'admin'
+                    ? 'bg-gradient-to-r from-rose-600 to-amber-600 text-white shadow-lg shadow-rose-500/20 font-extrabold'
+                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                }`}
+              >
+                <Shield className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>Admin Playbook & Panel</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Upgrade to Premium Promo Box */}
+          <div className="mt-auto p-4 rounded-2xl bg-gradient-to-br from-teal-900/80 via-slate-900 to-cyan-950 text-white space-y-2 border border-teal-500/30 shadow-lg relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider bg-teal-500/20 text-teal-300 border border-teal-500/30 px-2 py-0.5 rounded-full">Pro Upgrade</span>
+              <Sparkles className="w-4 h-4 text-amber-300" />
+            </div>
+            <h4 className="font-extrabold text-xs text-white">Unlock All AI Generators</h4>
+            <p className="text-[11px] text-slate-300 leading-tight">Unlimited lesson plans, quizzes & image studios.</p>
+            <button onClick={() => setActiveTab('settings')} className="w-full py-2 bg-gradient-to-r from-teal-500 to-cyan-500 text-slate-950 rounded-xl text-xs font-extrabold hover:brightness-110 transition cursor-pointer mt-1 shadow-md">
+              Upgrade Now
+            </button>
+          </div>
+
+          <ErrorBoundary>
+            <Suspense fallback={null}>
+              <SidebarTimerWidget />
+            </Suspense>
+          </ErrorBoundary>
+
+          <div className="mt-auto p-4 bg-slate-900/80 rounded-2xl border border-slate-800">
+            <p className="text-xs font-bold text-cyan-400 mb-1 flex items-center gap-1">
               <Sparkles className="w-3.5 h-3.5" /> CleanStart Sync Active
             </p>
-            <p className="text-[10px] text-[#5f6f52]/75 leading-relaxed">
+            <p className="text-[10px] text-slate-400 leading-relaxed">
               Curriculum alignment features are fully operational. Firestore real-time database is syncing successfully.
             </p>
           </div>
@@ -1365,10 +1467,22 @@ function AppContent() {
 
         {/* Central Workspace */}
         <main className="flex-1 p-6 md:p-8 flex flex-col gap-6 overflow-y-auto">
+          {/* Dynamic Breadcrumbs Navigation & Crawlability Schema */}
+          <Breadcrumbs 
+            activeTab={activeTab} 
+            selectedDoc={selectedDoc} 
+            onNavigate={(tab) => setActiveTab(tab as any)} 
+            onClearDoc={() => {
+              if (activeTab === 'view') {
+                setActiveTab('dashboard');
+              }
+            }} 
+          />
+
           {/* Section Header */}
-          <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+          <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200/80 dark:border-slate-800 pb-4">
             <div className="space-y-1">
-              <h1 className="text-3xl font-serif font-bold text-[#5f6f52]">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-transparent dark:bg-clip-text dark:bg-gradient-to-r dark:from-teal-300 dark:via-cyan-200 dark:to-blue-300 tracking-tight">
                 {activeTab === 'dashboard' && 'Pedagogical Assistant Dashboard'}
                 {activeTab === 'create' && 'Curriculum Generator'}
                 {activeTab === 'view' && 'Pedagogical Material'}
@@ -1377,12 +1491,12 @@ function AppContent() {
                 {activeTab === 'collaboration' && 'Faculty Collaboration Hub'}
                 {activeTab === 'resources' && 'Global Teaching Resource Explorer'}
                 {activeTab === 'voice-notes' && 'Audio-to-Text Lecture Notes & Concept Mindmaps'}
-                 {activeTab === 'tutor' && 'EduNexus AI Tutor'}
+                {activeTab === 'tutor' && 'EduNexus AI Tutor'}
                 {activeTab === 'assessment-generator' && 'AI Assessment Item Generator'}
                 {activeTab === 'file-library' && 'Curriculum & Teaching Material File Library'}
                 {activeTab === 'qr-mapping' && 'QR Touchpoint Mapping & Scavenger Hunt Studio'}
               </h1>
-              <p className="text-[#7a7a7a] text-sm">
+              <p className="text-slate-600 dark:text-slate-400 text-xs sm:text-sm font-medium">
                 {activeTab === 'dashboard' && 'Access and organize your curriculum-aligned lesson plans, rubrics, and materials.'}
                 {activeTab === 'create' && 'Create high-quality, comprehensive lesson plans or worksheets in seconds.'}
                 {activeTab === 'view' && 'Edit, print, or export your teacher administrator resource files.'}
@@ -1397,30 +1511,65 @@ function AppContent() {
                 {activeTab === 'qr-mapping' && 'Design complete, print-ready classroom scavenger hunts for all subjects and map digital QR touchpoints.'}
               </p>
             </div>
+
+            {/* Dark / Light Mode Toggle Button on Home Header */}
+            <div className="flex items-center gap-2.5 shrink-0">
+              <button
+                onClick={toggleDarkMode}
+                className="px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-xs border bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 active:scale-95"
+                title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              >
+                {darkMode ? (
+                  <>
+                    <Sun className="w-4 h-4 text-amber-400" />
+                    <span>Light Mode</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="w-4 h-4 text-indigo-600 dark:text-cyan-400" />
+                    <span>Dark Mode</span>
+                  </>
+                )}
+              </button>
+            </div>
           </header>
 
           {/* Quick Error Banner */}
           {errorMsg && (
-            <div className="bg-red-50 border border-red-200 text-red-900 rounded-2xl p-4 flex gap-3 text-sm animate-fadeIn">
-              <AlertCircle className="w-5 h-5 shrink-0 text-red-600" />
-              <div>
+            <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-900 dark:text-red-200 rounded-2xl p-4 flex gap-3 text-sm animate-fadeIn">
+              <AlertCircle className="w-5 h-5 shrink-0 text-red-600 dark:text-red-400 mt-0.5" />
+              <div className="flex-1">
                 <span className="font-bold block">Generation Error</span>
-                <p className="mt-0.5 text-xs text-red-700">{errorMsg}</p>
-                <div className="mt-3 flex gap-4 text-xs font-bold text-red-900">
-                  <button
-                    onClick={() => setErrorMsg(null)}
-                    className="hover:underline"
-                  >
-                    Dismiss
-                  </button>
+                <p className="mt-0.5 text-xs text-red-700 dark:text-red-300">{errorMsg}</p>
+                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-bold text-red-900 dark:text-red-200">
+                  {lastGenParams && (
+                    <button
+                      onClick={() => {
+                        const params = lastGenParams;
+                        setErrorMsg(null);
+                        handleGenerate(params);
+                      }}
+                      disabled={isGenerating}
+                      className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold flex items-center gap-1.5 shadow-sm transition disabled:opacity-50 cursor-pointer"
+                    >
+                      <RotateCcw className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
+                      <span>{isGenerating ? 'Retrying...' : 'Retry Generation'}</span>
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       setErrorMsg(null);
                       setActiveTab('create');
                     }}
-                    className="hover:underline"
+                    className="hover:underline text-red-800 dark:text-red-300 font-semibold"
                   >
                     Modify Parameters
+                  </button>
+                  <button
+                    onClick={() => setErrorMsg(null)}
+                    className="hover:underline text-red-600 dark:text-red-400"
+                  >
+                    Dismiss
                   </button>
                 </div>
               </div>
@@ -1444,9 +1593,17 @@ function AppContent() {
                     setActiveTab('create');
                   }}
                   onOpenFlashcards={() => setActiveTab('resources')}
+                  onOpenAssessmentGenerator={() => setActiveTab('assessment-generator')}
+                  onOpenAITutor={() => setActiveTab('tutor')}
+                  onOpenImageStudio={() => setActiveTab('image-studio')}
+                  onOpenVideoStudio={() => setActiveTab('video-studio')}
+                  onOpenQRMapping={() => setActiveTab('qr-mapping')}
+                  onOpenAdminPlaybook={() => setActiveTab('admin')}
                   userRole={profile?.role}
                   notifications={notifications}
                   setNotifications={setNotifications}
+                  darkMode={darkMode}
+                  onToggleDarkMode={toggleDarkMode}
                 />
               )}
 
@@ -1501,6 +1658,8 @@ function AppContent() {
                 <AITutor
                   documents={documents}
                   initialSelectedResourceId={tutorResourceId}
+                  onOpenImageStudio={() => setActiveTab('image-studio')}
+                  onOpenVideoStudio={() => setActiveTab('video-studio')}
                 />
               )}
 
@@ -1560,6 +1719,9 @@ function AppContent() {
               )}
             </Suspense>
           </div>
+
+          {/* Unified Responsive Footer */}
+          <Footer />
         </main>
       </div>
     </div>
@@ -1870,7 +2032,7 @@ function AppContent() {
             animate={{ x: 0 }}
             exit={{ x: '-100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-            className="fixed inset-y-0 left-0 w-72 bg-[#f4f1ea] shadow-2xl z-55 p-6 flex flex-col gap-6 lg:hidden overflow-y-auto"
+            className="fixed inset-y-0 left-0 w-72 bg-slate-900 border-r border-slate-800/80 shadow-2xl z-55 p-6 flex flex-col gap-6 lg:hidden overflow-y-auto text-slate-100"
           >
             <div className="flex items-center justify-between">
               <button
@@ -1878,23 +2040,37 @@ function AppContent() {
                   setIsAppIconModalOpen(true);
                   setIsMobileMenuOpen(false);
                 }}
-                className="flex items-center gap-2.5 text-left group cursor-pointer"
+                className="flex flex-row items-center gap-2.5 text-left group cursor-pointer"
               >
                 <div className="w-9 h-9 relative flex items-center justify-center shrink-0">
                   <img src="/icon.svg" className="w-9 h-9 rounded-lg shadow-sm group-hover:scale-105 transition duration-200" alt="EduNexus App Icon" referrerPolicy="no-referrer" />
-                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white shadow-xs" />
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-cyan-400 border-2 border-slate-900 shadow-xs" />
                 </div>
                 <div>
-                  <span className="font-bold text-base tracking-tight text-[#5f6f52] block leading-none">EduNexus</span>
-                  <span className="text-[9px] text-[#a9b388] font-bold uppercase tracking-wider block mt-0.5">Teacher Admin Assistant</span>
+                  <span className="font-bold text-base tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-teal-400 via-cyan-300 to-blue-400 block leading-none">EduNexus</span>
+                  <span className="text-[9px] text-cyan-400/90 font-bold uppercase tracking-wider block mt-0.5">Teacher Admin Assistant</span>
                 </div>
               </button>
-              <button
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="p-1.5 hover:bg-slate-200/50 rounded-lg text-slate-500 transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={toggleDarkMode}
+                  className={`p-1.5 rounded-lg transition duration-200 cursor-pointer ${
+                    darkMode
+                      ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30'
+                      : 'bg-slate-800 text-cyan-300 border border-slate-700'
+                  }`}
+                  title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                >
+                  {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-cyan-400" />}
+                </button>
+                <button
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Desktop & Phone App Icon PWA Promo Button */}
@@ -2183,9 +2359,11 @@ function AppContent() {
               {/* Classroom Pacing Widget on Mobile Drawer */}
               <div className="pt-2 border-t border-[#e5e1da]/60">
                 <p className="text-[10px] font-extrabold text-[#a9b388] uppercase tracking-[0.2em] mb-2">Classroom Utilities</p>
-                <Suspense fallback={null}>
-                  <SidebarTimerWidget />
-                </Suspense>
+                <ErrorBoundary>
+                  <Suspense fallback={null}>
+                    <SidebarTimerWidget />
+                  </Suspense>
+                </ErrorBoundary>
               </div>
             </div>
           </motion.div>
@@ -2195,24 +2373,40 @@ function AppContent() {
 
     <Suspense fallback={null}>
       {/* Pilot Program Evaluation Form Modal */}
-      <PilotFeedbackModal 
-        isOpen={isPilotFeedbackOpen} 
-        onClose={() => {
-          setIsPilotFeedbackOpen(false);
-          // Standard exit - log out
-          logout();
-        }} 
-        onSuccess={() => {
-          setIsPilotFeedbackOpen(false);
-          // Successful submit - log out
-          logout();
-        }} 
-      />
+      {isPilotFeedbackOpen && (
+        <ErrorBoundary title="Pilot Evaluation Feedback">
+          <PilotFeedbackModal 
+            isOpen={isPilotFeedbackOpen} 
+            onClose={() => {
+              setIsPilotFeedbackOpen(false);
+              // Standard exit - log out
+              logout();
+            }} 
+            onSuccess={() => {
+              setIsPilotFeedbackOpen(false);
+              // Successful submit - log out
+              logout();
+            }} 
+          />
+        </ErrorBoundary>
+      )}
 
       {/* Desktop & Phone App Icon Showcase Modal */}
       <AppIconShowcaseModal
         isOpen={isAppIconModalOpen}
         onClose={() => setIsAppIconModalOpen(false)}
+      />
+
+      {/* Global Command & Search Modal */}
+      <GlobalSearchModal
+        isOpen={isGlobalSearchOpen}
+        onClose={() => setIsGlobalSearchOpen(false)}
+        documents={documents}
+        onSelectDoc={(doc) => {
+          setSelectedDoc(doc);
+          setActiveTab('view');
+        }}
+        onNavigateTab={(tab) => setActiveTab(tab as any)}
       />
 
       {/* Scanned QR Portal Modal for Mobile Camera Scanning */}

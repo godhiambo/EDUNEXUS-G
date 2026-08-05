@@ -19,6 +19,7 @@ import {
 import { MermaidDiagram } from './MermaidDiagram';
 import { ParagraphReaction } from '../types';
 import { useAccessibility } from '../context/AccessibilityContext';
+import { useAuth } from '../context/AuthContext';
 import QuickEmbedCard from './QuickEmbedCard';
 
 const staggerContainerVariants = {
@@ -40,7 +41,7 @@ const blockItemVariants = {
     scale: 1,
     transition: {
       duration: 0.38,
-      ease: [0.16, 1, 0.3, 1],
+      ease: [0.16, 1, 0.3, 1] as [number, number, number, number],
     },
   },
 };
@@ -646,6 +647,8 @@ function MarkdownView({
   highlightAcademicVocab = false,
   onAcademicVocabClick
 }: MarkdownViewProps) {
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'Administrator';
   const [selectedModels, setSelectedModels] = React.useState<Record<string, string>>({});
 
   // Simple yet highly effective and robust custom markdown-to-JSX parser
@@ -704,7 +707,7 @@ function MarkdownView({
       const placeholderText = line.trim();
       const prompt = placeholderText.slice(9, -1).trim();
       const isGenerating = generatingPlaceholders[placeholderText];
-      const model = selectedModels[placeholderText] || 'nano banana';
+      const model = selectedModels[placeholderText] || 'emgen_fallback_nanobanana';
 
       elements.push(
         <motion.div key={`diagram-${keyCount}`} variants={blockItemVariants} className="my-6 p-5 bg-gradient-to-br from-emerald-50/50 to-amber-50/50 rounded-2xl border border-emerald-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-5 animate-fadeIn">
@@ -720,18 +723,25 @@ function MarkdownView({
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
             {onGenerateDiagram ? (
               <>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase">Engine:</span>
-                  <select
-                    value={model}
-                    onChange={(e) => setSelectedModels(prev => ({ ...prev, [placeholderText]: e.target.value }))}
-                    disabled={isGenerating}
-                    className="bg-white border border-emerald-250 rounded-xl px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 outline-none focus:border-[#5f6f52] transition-all cursor-pointer disabled:bg-slate-100 disabled:text-slate-400"
-                  >
-                    <option value="nano banana">🍌 Nano Banana (Rapid)</option>
-                    <option value="emgen">🎨 Emgen (High Quality)</option>
-                  </select>
-                </div>
+                {isAdmin ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase">Engine:</span>
+                    <select
+                      value={model}
+                      onChange={(e) => setSelectedModels(prev => ({ ...prev, [placeholderText]: e.target.value }))}
+                      disabled={isGenerating}
+                      className="bg-white border border-emerald-250 rounded-xl px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 outline-none focus:border-[#5f6f52] transition-all cursor-pointer disabled:bg-slate-100 disabled:text-slate-400"
+                    >
+                      <option value="emgen_fallback_nanobanana">🍌 Nano Banana Fallback for Emgen</option>
+                      <option value="emgen">🎨 Emgen Only</option>
+                      <option value="nano banana">🍌 Nano Banana Only</option>
+                    </select>
+                  </div>
+                ) : (
+                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-1 rounded-lg">
+                    ⚡ Emgen (Nano Banana Fallback)
+                  </span>
+                )}
                 <button
                   onClick={() => onGenerateDiagram(placeholderText, prompt, model)}
                   disabled={isGenerating}

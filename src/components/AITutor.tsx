@@ -51,7 +51,24 @@ import {
   Loader2,
   Paperclip,
   FileUp,
-  Check
+  Check,
+  MessageSquare,
+  Bot,
+  Bell,
+  Sun,
+  Moon,
+  Lightbulb,
+  Zap,
+  CheckCircle2,
+  Brain,
+  Share2,
+  CheckCheck,
+  Video,
+  Clock,
+  RotateCcw,
+  Wifi,
+  WifiOff,
+  ShieldCheck
 } from 'lucide-react';
 import { SavedDocument, PersonalizedLearningPath, FlashcardDeck } from '../types';
 import { LearningPathWorkspace } from './LearningPathWorkspace';
@@ -66,6 +83,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { SetupForm } from './SetupForm';
 import { handleResponseJson } from '../utils/api';
+import WhatsAppIntegrationModal from './WhatsAppIntegrationModal';
 
 interface UploadedResource {
   id: string;
@@ -83,9 +101,18 @@ interface UploadedResource {
 }
 
 interface Message {
+  id?: string;
   role: 'user' | 'model';
   text: string;
   feedback?: 'up' | 'down';
+  status?: 'sending' | 'delivered' | 'failed' | 'queued';
+  timestamp?: string;
+  media?: {
+    type: 'image' | 'video';
+    url: string;
+    prompt: string;
+    generatorUsed?: string;
+  };
 }
 
 interface SuggestedResource {
@@ -133,10 +160,49 @@ interface ChatSession {
 interface AITutorProps {
   documents: SavedDocument[];
   initialSelectedResourceId?: string;
+  onOpenImageStudio?: (prompt?: string) => void;
+  onOpenVideoStudio?: (prompt?: string) => void;
 }
 
-export default function AITutor({ documents, initialSelectedResourceId }: AITutorProps) {
+export default function AITutor({ documents, initialSelectedResourceId, onOpenImageStudio, onOpenVideoStudio }: AITutorProps) {
   const { aiLanguage } = useLanguage();
+  const { user, profile } = useAuth();
+  const isAdmin = profile?.role === 'Administrator';
+
+  // Multi-Role AI Assistant State (Student, Teacher, Parent, Administrator)
+  const [activeRole, setActiveRole] = useState<'Student' | 'Teacher' | 'Parent' | 'Administrator'>(() => {
+    if (profile?.role && ['Student', 'Teacher', 'Parent', 'Administrator'].includes(profile.role)) {
+      return profile.role as any;
+    }
+    return 'Student';
+  });
+
+  useEffect(() => {
+    if (profile?.role && ['Student', 'Teacher', 'Parent', 'Administrator'].includes(profile.role)) {
+      setActiveRole(profile.role as any);
+    }
+  }, [profile?.role]);
+
+  // WhatsApp Modal Integration State
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
+
+  // Lightbox Modal for Generated Media (Images & Videos)
+  const [lightboxMedia, setLightboxMedia] = useState<{ type: 'image' | 'video'; url: string; prompt: string; generatorUsed?: string } | null>(null);
+
+  // Admin AI Engine Choice State (Only visible & configurable by Administrator)
+  const [adminSelectedEngine, setAdminSelectedEngine] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('edunexus_admin_ai_engine') || 'gemini-3.5-flash';
+    }
+    return 'gemini-3.5-flash';
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && isAdmin) {
+      localStorage.setItem('edunexus_admin_ai_engine', adminSelectedEngine);
+    }
+  }, [adminSelectedEngine, isAdmin]);
+
   // Session History State
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     if (typeof window !== 'undefined') {
@@ -160,7 +226,7 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
         messages: [
           {
             role: 'model',
-            text: "Hello! I am EduNexus AI Tutor. Instead of just giving you the answers directly, I am here to help you work through concepts step-by-step so you truly master them. What would you like to explore today?"
+            text: "Hello! I am EduNexus AI Tutor. Instead of giving direct answers, I will guide you step-by-step through Socratic inquiry so you truly master the concepts. What topic would you like to explore today?"
           }
         ],
         activeStep: 'Exploratory onboarding',
@@ -178,15 +244,21 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
           }
         ],
         conceptMap: {
-          title: "Velocity & Acceleration Starter Map",
+          title: "Velocity & Acceleration Concept Map",
           nodes: [
-            { id: "node1", label: "Position", type: "concept", description: "An object's location relative to a reference point." },
-            { id: "node2", label: "Velocity", type: "concept", description: "The rate of change of position with respect to time." },
-            { id: "node3", label: "Acceleration", type: "concept", description: "The rate of change of velocity with respect to time." }
+            { id: "node1", label: "Velocity", type: "concept", description: "Rate of change of position over time." },
+            { id: "node2", label: "Speed", type: "variable", description: "Magnitude of velocity without directional vector." },
+            { id: "node3", label: "Displacement", type: "variable", description: "Overall change in position from origin." },
+            { id: "node4", label: "Acceleration", type: "concept", description: "Rate of change of velocity over time." },
+            { id: "node5", label: "Uniform Acceleration", type: "process", description: "Constant rate of velocity increase." },
+            { id: "node6", label: "Non-uniform Acceleration", type: "process", description: "Varying rate of acceleration over time." }
           ],
           edges: [
-            { from: "node1", to: "node2", label: "rate of change" },
-            { from: "node2", to: "node3", label: "rate of change" }
+            { from: "node1", to: "node2", label: "scalar magnitude" },
+            { from: "node1", to: "node3", label: "derived from" },
+            { from: "node1", to: "node4", label: "rate of change" },
+            { from: "node4", to: "node5", label: "constant" },
+            { from: "node4", to: "node6", label: "variable" }
           ]
         },
         createdAt: new Date().toISOString()
@@ -209,56 +281,15 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
     return 'initial-session';
   });
 
-  const [showConceptMap, setShowConceptMap] = useState<boolean>(true);
-  const isSwitchingSessionRef = useRef<boolean>(false);
-
-  // Session parameters loaded from active session
-  const [subject, setSubject] = useState<string>(() => {
-    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
-    return active ? active.subject : 'Physics';
-  });
-  const [topic, setTopic] = useState<string>(() => {
-    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
-    return active ? active.topic : 'Velocity and Acceleration';
-  });
-  const [scaffoldingLevel, setScaffoldingLevel] = useState<'low' | 'medium' | 'high'>(() => {
-    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
-    return active ? active.scaffoldingLevel : 'medium';
-  });
-  const [difficultyLevel, setDifficultyLevel] = useState<'beginner' | 'intermediate' | 'advanced'>(() => {
-    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
-    return active && active.difficultyLevel ? active.difficultyLevel : 'intermediate';
-  });
-  const [selectedDocId, setSelectedDocId] = useState<string>('');
-  const [persona, setPersona] = useState<'Socratic Questioner' | 'Encouraging Mentor' | 'Critical Examiner'>(() => {
-    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
-    return active ? active.persona : 'Socratic Questioner';
-  });
-  
-  // Concept Visualization state
-  const [conceptMap, setConceptMap] = useState<ConceptVisualization>(() => {
-    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
-    return active ? active.conceptMap : {
-      title: "Velocity & Acceleration Starter Map",
-      nodes: [
-        { id: "node1", label: "Position", type: "concept", description: "An object's location relative to a reference point." },
-        { id: "node2", label: "Velocity", type: "concept", description: "The rate of change of position with respect to time." },
-        { id: "node3", label: "Acceleration", type: "concept", description: "The rate of change of velocity with respect to time." }
-      ],
-      edges: [
-        { from: "node1", to: "node2", label: "rate of change" },
-        { from: "node2", to: "node3", label: "rate of change" }
-      ]
-    };
-  });
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   
-  // Student Personalized Learning Path & Socratic Dashboard State
+  // Modes & Layout States
   const [tutorMode, setTutorMode] = useState<'socratic' | 'cbc-tutor' | 'dashboard' | 'learning-path'>('socratic');
-
-  // Full screen widget toggle state
   const [fullscreenWidget, setFullscreenWidget] = useState<string | null>(null);
+  const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
+  const [copilotInput, setCopilotInput] = useState<string>('');
 
+  // CBC State
   const [isCbcSession, setIsCbcSession] = useState<boolean>(() => {
     const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
     return active ? !!(active as any).isCbcMode : false;
@@ -288,8 +319,59 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
     return active && (active as any).cbcSocraticMode ? (active as any).cbcSocraticMode : 'guided';
   });
 
-  // Custom uploaded resources state & handlers
-  const { user, profile } = useAuth();
+  // Session Parameters
+  const [subject, setSubject] = useState<string>(() => {
+    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
+    return active ? active.subject : 'Physics';
+  });
+  const [topic, setTopic] = useState<string>(() => {
+    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
+    return active ? active.topic : 'Velocity and Acceleration';
+  });
+  const [subTopicSelection, setSubTopicSelection] = useState<string>('Kinematics & Vector Motion');
+  const [specificConceptSelection, setSpecificConceptSelection] = useState<string>('Instantaneous vs Average Acceleration');
+  const [dialogueStyle, setDialogueStyle] = useState<'guided' | 'direct'>('guided');
+
+  const [scaffoldingLevel, setScaffoldingLevel] = useState<'low' | 'medium' | 'high'>(() => {
+    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
+    return active ? active.scaffoldingLevel : 'medium';
+  });
+  const [difficultyLevel, setDifficultyLevel] = useState<'beginner' | 'intermediate' | 'advanced'>(() => {
+    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
+    return active && active.difficultyLevel ? active.difficultyLevel : 'intermediate';
+  });
+  const [cognitiveLevel, setCognitiveLevel] = useState<string>('Understand & Apply');
+  const [languageStyle, setLanguageStyle] = useState<string>('Simple & Student-Friendly');
+  const [selectedDocId, setSelectedDocId] = useState<string>('');
+  const [persona, setPersona] = useState<'Socratic Questioner' | 'Encouraging Mentor' | 'Critical Examiner'>(() => {
+    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
+    return active ? active.persona : 'Socratic Questioner';
+  });
+
+  // Concept Visualization
+  const [conceptMap, setConceptMap] = useState<ConceptVisualization>(() => {
+    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
+    return active ? active.conceptMap : {
+      title: "Velocity & Acceleration Concept Map",
+      nodes: [
+        { id: "node1", label: "Velocity", type: "concept", description: "Rate of change of position over time." },
+        { id: "node2", label: "Speed", type: "variable", description: "Magnitude of velocity without directional vector." },
+        { id: "node3", label: "Displacement", type: "variable", description: "Overall change in position from origin." },
+        { id: "node4", label: "Acceleration", type: "concept", description: "Rate of change of velocity over time." },
+        { id: "node5", label: "Uniform Acceleration", type: "process", description: "Constant rate of velocity increase." },
+        { id: "node6", label: "Non-uniform Acceleration", type: "process", description: "Varying rate of acceleration over time." }
+      ],
+      edges: [
+        { from: "node1", to: "node2", label: "scalar magnitude" },
+        { from: "node1", to: "node3", label: "derived from" },
+        { from: "node1", to: "node4", label: "rate of change" },
+        { from: "node4", to: "node5", label: "constant" },
+        { from: "node4", to: "node6", label: "variable" }
+      ]
+    };
+  });
+
+  // Resources & Custom Documents
   const [sessionSearchQuery, setSessionSearchQuery] = useState<string>('');
   const [isSyncingWithFirestore, setIsSyncingWithFirestore] = useState<boolean>(false);
   const [showClearConfirmModal, setShowClearConfirmModal] = useState<boolean>(false);
@@ -301,79 +383,290 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Organized Panel Tab States
+  // Tabs
   const [leftSidebarTab, setLeftSidebarTab] = useState<'config' | 'materials' | 'voice'>('config');
   const [rightSidebarTab, setRightSidebarTab] = useState<'all' | 'concept' | 'pedagogy' | 'resources'>('all');
 
-  // Flashcards state in Socratic AI Sidebar
+  // Flashcards state
   const [activeFlashcardDeck, setActiveFlashcardDeck] = useState<FlashcardDeck | null>(null);
   const [isFlashcardModalOpen, setIsFlashcardModalOpen] = useState<boolean>(false);
   const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState<boolean>(false);
 
-  const handleGenerateSocraticFlashcards = async () => {
-    setIsGeneratingFlashcards(true);
-    try {
-      const selectedRes = uploadedResources.find(r => r.id === selectedResourceId);
-      const activeSubject = isCbcSession ? cbcSubject : subject;
-      const activeTopic = isCbcSession ? `${cbcStrand} - ${cbcSubStrand}` : topic;
-      const activeContent = selectedRes ? selectedRes.extractedText : messages.slice(-6).map(m => `${m.sender}: ${m.text}`).join('\n');
+  // Conversation State
+  const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
+  const [messages, setMessages] = useState<Message[]>(activeSession ? activeSession.messages : []);
+  const [inputMessage, setInputMessage] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [activeStep, setActiveStep] = useState<string>(activeSession ? activeSession.activeStep : 'Exploratory onboarding');
+  const [misconceptions, setMisconceptions] = useState<string[]>(activeSession ? activeSession.misconceptions : []);
+  const [suggestedResources, setSuggestedResources] = useState<SuggestedResource[]>(activeSession ? activeSession.suggestedResources : []);
 
-      const res = await fetch('/api/generate-flashcards', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          subject: activeSubject || 'General Studies',
-          topic: activeTopic || 'Core Socratic Lesson',
-          subtopic: cbcConcept || 'Contextual Review',
-          content: activeContent,
-          cardCount: 6,
-          isLowDifficultySupport: false,
-          language: aiLanguage,
-          targetLanguage: aiLanguage
-        })
-      });
-      const data = await handleResponseJson(res);
-      if (data.deck) {
-        setActiveFlashcardDeck(data.deck);
-        setIsFlashcardModalOpen(true);
+  // Network & AI Connection Status State
+  const OFFLINE_QUEUE_STORAGE_KEY = 'edunexus_ai_tutor_offline_queue_v1';
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [aiStatus, setAiStatus] = useState<'ready' | 'connecting' | 'thinking' | 'offline' | 'queued'>('ready');
+  const [offlineQueue, setOfflineQueue] = useState<Message[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('edunexus_ai_tutor_offline_queue_v1');
+        if (saved) return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to load offline message queue from localStorage:', e);
       }
-    } catch (err) {
-      console.error("Failed to generate contextual flashcards in Socratic AI:", err);
-    } finally {
-      setIsGeneratingFlashcards(false);
+    }
+    return [];
+  });
+
+  // Save offline message queue to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(OFFLINE_QUEUE_STORAGE_KEY, JSON.stringify(offlineQueue));
+      } catch (e) {
+        console.warn('Failed to save offline queue to localStorage:', e);
+      }
+    }
+  }, [offlineQueue]);
+
+  // Online / Offline Network Monitoring
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      setAiStatus('ready');
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      setAiStatus('offline');
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+      }
+    };
+  }, []);
+
+  // Sync session state changes to sessions array
+  useEffect(() => {
+    if (!activeSessionId) return;
+    setSessions(prev => prev.map(s => {
+      if (s.id === activeSessionId) {
+        return {
+          ...s,
+          messages,
+          activeStep,
+          misconceptions,
+          suggestedResources,
+          conceptMap
+        };
+      }
+      return s;
+    }));
+  }, [messages, activeStep, misconceptions, suggestedResources, conceptMap, activeSessionId]);
+
+  // Speech & Voice Synthesis State
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState<boolean>(false);
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  const [speakingText, setSpeakingText] = useState<string>('');
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoiceName, setSelectedVoiceName] = useState<string>('');
+  const [voiceRate, setVoiceRate] = useState<number>(1.0);
+  const [voicePitch, setVoicePitch] = useState<number>(1.0);
+  const [voiceVolume, setVoiceVolume] = useState<number>(1.0);
+  const [showVoiceSettings, setShowVoiceSettings] = useState<boolean>(false);
+
+  // Speech Recognition (Mic Input) State
+  const [isListening, setIsListening] = useState<boolean>(false);
+  const [speechError, setSpeechError] = useState<string | null>(null);
+  const [isHandsFree, setIsHandsFree] = useState<boolean>(false);
+  const recognitionRef = useRef<any>(null);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  // Synchronize state when active session changes
+  useEffect(() => {
+    const session = sessions.find(s => s.id === activeSessionId);
+    if (session) {
+      setMessages(session.messages);
+      setSubject(session.subject);
+      setTopic(session.topic);
+      setPersona(session.persona);
+      setScaffoldingLevel(session.scaffoldingLevel);
+      if (session.difficultyLevel) setDifficultyLevel(session.difficultyLevel);
+      setActiveStep(session.activeStep);
+      setMisconceptions(session.misconceptions);
+      setSuggestedResources(session.suggestedResources);
+      if (session.conceptMap) setConceptMap(session.conceptMap);
+      setIsCbcSession(!!(session as any).isCbcMode);
+      if ((session as any).cbcSubject) setCbcSubject((session as any).cbcSubject);
+      if ((session as any).cbcStrand) setCbcStrand((session as any).cbcStrand);
+      if ((session as any).cbcSubStrand) setCbcSubStrand((session as any).cbcSubStrand);
+      if ((session as any).cbcConcept) setCbcConcept((session as any).cbcConcept);
+      if ((session as any).cbcSystemPrompt) setCbcSystemPrompt((session as any).cbcSystemPrompt);
+      if ((session as any).cbcSocraticMode) setCbcSocraticMode((session as any).cbcSocraticMode);
+    }
+  }, [activeSessionId]);
+
+  // Save sessions to localStorage & Firestore
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('ai_tutor_sessions_v1', JSON.stringify(sessions));
+    }
+  }, [sessions]);
+
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isProcessing]);
+
+  // Load SpeechSynthesis voices
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      const updateVoices = () => {
+        const availableVoices = window.speechSynthesis.getVoices();
+        setVoices(availableVoices);
+        if (availableVoices.length > 0 && !selectedVoiceName) {
+          const preferredVoice = availableVoices.find(
+            v => v.lang.includes('en') && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Samantha') || v.name.includes('Daniel'))
+          ) || availableVoices.find(v => v.lang.includes('en')) || availableVoices[0];
+          setSelectedVoiceName(preferredVoice.name);
+        }
+      };
+
+      updateVoices();
+      window.speechSynthesis.onvoiceschanged = updateVoices;
+    }
+  }, []);
+
+  // Browser Speech Recognition Setup
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onresult = (event: any) => {
+          let currentTranscript = '';
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            currentTranscript += event.results[i][0].transcript;
+          }
+          setInputMessage(currentTranscript);
+        };
+
+        recognition.onerror = (event: any) => {
+          console.warn('Speech recognition error:', event.error);
+          setSpeechError(`Microphone error: ${event.error}`);
+          setIsListening(false);
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+        };
+
+        recognitionRef.current = recognition;
+      }
+    }
+  }, []);
+
+  const toggleListening = () => {
+    if (!recognitionRef.current) {
+      setSpeechError("Speech recognition is not supported in your browser.");
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      setSpeechError(null);
+      try {
+        if (isSpeaking && window.speechSynthesis) {
+          window.speechSynthesis.cancel();
+          setIsSpeaking(false);
+        }
+        recognitionRef.current.start();
+        setIsListening(true);
+      } catch (err) {
+        console.error("Failed to start speech recognition:", err);
+      }
     }
   };
 
-  const handleSaveFlashcardsToLibrary = async (deck: FlashcardDeck) => {
-    if (!profile?.uid || !deck) return;
-    const cards = deck?.cards ?? [];
-    const docId = deck.id || `flashcard-${Date.now()}`;
-    const savedDoc: SavedDocument = {
-      id: docId,
-      title: deck.title || 'Flashcard Deck',
-      docType: 'flashcards',
-      curriculum: 'cbc',
-      subject: deck.subject || 'General',
-      classLevel: 'Upper Primary / Secondary',
-      topic: deck.topic || 'Socratic Lesson',
-      subTopic: '',
-      duration: '15 mins',
-      content: cards.map((c, i) => `Card ${i + 1}: Q: ${c?.front || ''}\nA: ${c?.back || ''}${c?.hint ? `\nHint: ${c.hint}` : ''}`).join('\n\n'),
-      createdAt: new Date().toISOString(),
-      lastModified: new Date().toISOString(),
-      tags: ['flashcards', 'socratic-ai', 'file-library', deck.subject || 'General'],
-      category: 'Flashcards',
-      lastModifiedByUid: profile.uid,
-      lastModifiedByName: profile.displayName || 'Teacher',
-      flashcardDeck: {
-        ...deck,
-        cards: cards,
-      },
+  const speakText = (text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+
+    window.speechSynthesis.cancel();
+
+    // Clean markdown symbols for natural TTS reading
+    const cleanText = text
+      .replace(/[*#_`~]/g, '')
+      .replace(/\[.*?\]\(.*?\)/g, '')
+      .replace(/\n+/g, ' ');
+
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    if (selectedVoiceName) {
+      const selectedVoiceObj = voices.find(v => v.name === selectedVoiceName);
+      if (selectedVoiceObj) utterance.voice = selectedVoiceObj;
+    }
+
+    utterance.rate = voiceRate;
+    utterance.pitch = voicePitch;
+    utterance.volume = voiceVolume;
+
+    utterance.onstart = () => {
+      setIsSpeaking(true);
+      setSpeakingText(text);
     };
 
-    await setDoc(doc(db, 'documents', docId), savedDoc as any);
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      setSpeakingText('');
+
+      if (isHandsFree && recognitionRef.current) {
+        setTimeout(() => {
+          try {
+            recognitionRef.current.start();
+            setIsListening(true);
+          } catch (e) {}
+        }, 600);
+      }
+    };
+
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      setSpeakingText('');
+    };
+
+    window.speechSynthesis.speak(utterance);
   };
- 
+
+  const handleToggleSpeakMessage = (text: string) => {
+    if (isSpeaking && speakingText === text) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      setSpeakingText('');
+    } else {
+      speakText(text);
+    }
+  };
+
+  const handleMessageFeedback = (index: number, type: 'up' | 'down') => {
+    setMessages(prev => prev.map((m, idx) => {
+      if (idx === index) {
+        return { ...m, feedback: m.feedback === type ? undefined : type };
+      }
+      return m;
+    }));
+  };
+
+  // Resource Upload Handler
   useEffect(() => {
     if (initialSelectedResourceId) {
       setSelectedResourceId(initialSelectedResourceId);
@@ -420,7 +713,6 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
 
     if (!file) return;
 
-    // Validate file type
     const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
     const isDOCX = file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || file.name.toLowerCase().endsWith('.docx');
 
@@ -429,9 +721,8 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
       return;
     }
 
-    // Limit file size to 10MB
     if (file.size > 10 * 1024 * 1024) {
-      setUploadError("File size is too large. Please upload a file smaller than 10MB.");
+      setUploadError("File size exceeds 10MB limit.");
       return;
     }
 
@@ -440,7 +731,6 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
     setUploadError(null);
 
     try {
-      // 1. Convert to base64 for server-side parsing
       const reader = new FileReader();
       const base64Promise = new Promise<string>((resolve, reject) => {
         reader.onload = () => {
@@ -455,7 +745,6 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
       const base64 = await base64Promise;
       setUploadProgress(30);
 
-      // 2. Call backend parser
       const parseResponse = await fetch('/api/parse-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -467,19 +756,18 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
       });
 
       if (!parseResponse.ok) {
-        throw new Error("Failed to extract text content from the document.");
+        throw new Error("Failed to extract text from document.");
       }
 
       const parseData = await parseResponse.json();
       const extractedText = parseData.text || '';
       
       if (!extractedText.trim()) {
-        throw new Error("The uploaded document appears to be empty or contains no readable text.");
+        throw new Error("Document is empty or text could not be extracted.");
       }
 
       setUploadProgress(60);
 
-      // 3. Upload to Firebase Storage
       const fileId = `res-${Date.now()}`;
       const storageRef = ref(storage, `curriculum_documents/${profile?.uid || 'anonymous'}/${fileId}/${file.name}`);
       const uploadResult = await uploadBytes(storageRef, file);
@@ -487,7 +775,6 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
 
       setUploadProgress(80);
 
-      // 4. Save metadata + extractedText to Firestore
       const resourceData: UploadedResource = {
         id: fileId,
         userId: profile?.uid || 'anonymous',
@@ -498,34 +785,19 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
         extractedText,
         uploadedAt: new Date().toISOString(),
         subject: subject,
-        topic: topic || 'General Guide'
+        topic: topic,
+        accessCount: 1,
+        generationCount: 0
       };
 
       await setDoc(doc(db, 'uploadedResources', fileId), resourceData);
-      
+      setSelectedResourceId(fileId);
       setUploadProgress(100);
-      setSelectedResourceId(fileId); // Auto-select the newly uploaded file
-
-      // Add a friendly tutor notification message
-      const textMsg = `Success! I have processed and indexed your curriculum resource: "${file.name}". This guide is now added to your contextual knowledge base. Socratic Sage will refer to it during our dialogue. How should we proceed?`;
-      setMessages(prev => [
-        ...prev,
-        { role: 'model', text: textMsg }
-      ]);
-      
-      if (isVoiceEnabled) {
-        speakText(textMsg);
-      }
-
-    } catch (err: any) {
-      console.error("Upload error:", err);
-      setUploadError(err.message || "An unexpected error occurred during document upload.");
-    } finally {
       setIsUploading(false);
-      setUploadProgress(0);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ''; // Reset file input
-      }
+    } catch (err: any) {
+      console.error("Resource upload error:", err);
+      setUploadError(err.message || "Upload failed. Please try again.");
+      setIsUploading(false);
     }
   };
 
@@ -534,2058 +806,1322 @@ export default function AITutor({ documents, initialSelectedResourceId }: AITuto
     if (!confirm(`Are you sure you want to delete "${res.fileName}"?`)) return;
 
     try {
-      // 1. Delete from Firestore
+      if (res.storagePath) {
+        const storageRef = ref(storage, res.storagePath);
+        await deleteObject(storageRef).catch(() => {});
+      }
       await deleteDoc(doc(db, 'uploadedResources', res.id));
-
-      // 2. Delete from Firebase Storage
-      const storageRef = ref(storage, res.storagePath);
-      await deleteObject(storageRef);
-
       if (selectedResourceId === res.id) {
         setSelectedResourceId('');
       }
     } catch (err) {
-      console.error("Error deleting resource:", err);
-      alert("Failed to fully delete the resource.");
+      console.error("Failed to delete uploaded resource:", err);
     }
   };
-  
-  // Chat state
-  const [messages, setMessages] = useState<Message[]>(() => {
-    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
-    return active ? active.messages : [
-      {
-        role: 'model',
-        text: "Hello! I am EduNexus AI Tutor. Instead of just giving you the answers directly, I am here to help you work through concepts step-by-step so you truly master them. What would you like to explore today?"
-      }
-    ];
-  });
-  const [inputMessage, setInputMessage] = useState<string>('');
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [activeStep, setActiveStep] = useState<string>(() => {
-    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
-    return active ? active.activeStep : 'Exploratory onboarding';
-  });
-  const [misconceptions, setMisconceptions] = useState<string[]>(() => {
-    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
-    return active ? active.misconceptions : [];
-  });
-  const [suggestedResources, setSuggestedResources] = useState<SuggestedResource[]>(() => {
-    const active = sessions.find(s => s.id === activeSessionId) || sessions[0];
-    return active ? active.suggestedResources : [
-      {
-        title: "PhET Moving Man Simulation",
-        url: "https://phet.colorado.edu/en/simulations/moving-man",
-        reason: "Excellent for visualizing position, velocity, and acceleration vectors in real time."
-      },
-      {
-        title: "OpenStax High School Physics Textbook",
-        url: "https://openstax.org/details/books/physics",
-        reason: "Read peer-reviewed, free chapters covering kinematics with standard diagrams."
-      }
-    ];
-  });
 
-  const loadSession = (session: ChatSession) => {
-    isSwitchingSessionRef.current = true;
-    
-    setSubject(session.subject);
-    setTopic(session.topic);
-    setScaffoldingLevel(session.scaffoldingLevel);
-    setDifficultyLevel(session.difficultyLevel || 'intermediate');
-    setPersona(session.persona);
-    setMessages(session.messages);
-    setActiveStep(session.activeStep);
-    setMisconceptions(session.misconceptions);
-    setSuggestedResources(session.suggestedResources);
-    setConceptMap(session.conceptMap);
-    setActiveSessionId(session.id);
-    
-    // Load CBC-specific properties
-    setIsCbcSession(!!(session as any).isCbcMode);
-    setCbcSubject((session as any).cbcSubject || '');
-    setCbcStrand((session as any).cbcStrand || '');
-    setCbcSubStrand((session as any).cbcSubStrand || '');
-    setCbcConcept((session as any).cbcConcept || '');
-    setCbcSystemPrompt((session as any).cbcSystemPrompt || '');
-    setCbcSocraticMode((session as any).cbcSocraticMode || 'guided');
+  const handleGenerateSocraticFlashcards = async () => {
+    setIsGeneratingFlashcards(true);
+    try {
+      const selectedRes = uploadedResources.find(r => r.id === selectedResourceId);
+      const activeSubject = isCbcSession ? cbcSubject : subject;
+      const activeTopic = isCbcSession ? `${cbcStrand} - ${cbcSubStrand}` : topic;
+      const activeContent = selectedRes ? selectedRes.extractedText : messages.slice(-6).map(m => `${m.role}: ${m.text}`).join('\n');
 
-    // Auto-switch mode tab to match session type
-    if ((session as any).isCbcMode) {
-      setTutorMode('cbc-tutor');
-    } else {
-      setTutorMode('socratic');
-    }
-    
-    setTimeout(() => {
-      isSwitchingSessionRef.current = false;
-    }, 100);
-  };
-
-  // Real-time Firestore listener for user Socratic Tutor Sessions
-  useEffect(() => {
-    if (!user?.uid) return;
-
-    setIsSyncingWithFirestore(true);
-    const q = query(
-      collection(db, 'tutorSessions'),
-      where('userId', '==', user.uid)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (snapshot.empty) {
-        setIsSyncingWithFirestore(false);
-        return;
-      }
-
-      const remoteSessions: ChatSession[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        remoteSessions.push({
-          id: data.id || docSnap.id,
-          title: data.title || 'Untitled Session',
-          subject: data.subject || 'General Education',
-          topic: data.topic || 'General Topic',
-          persona: data.persona || 'Socratic Questioner',
-          scaffoldingLevel: data.scaffoldingLevel || 'medium',
-          difficultyLevel: data.difficultyLevel || 'intermediate',
-          messages: data.messages || [],
-          activeStep: data.activeStep || 'Active Discussion',
-          misconceptions: data.misconceptions || [],
-          suggestedResources: data.suggestedResources || [],
-          conceptMap: data.conceptMap || { title: 'Concept Map', nodes: [], edges: [] },
-          createdAt: data.createdAt || new Date().toISOString(),
-          isCbcMode: !!data.isCbcMode,
-          cbcSubject: data.cbcSubject || '',
-          cbcStrand: data.cbcStrand || '',
-          cbcSubStrand: data.cbcSubStrand || '',
-          cbcConcept: data.cbcConcept || '',
-          cbcSocraticMode: data.cbcSocraticMode || 'guided',
-        } as any);
+      const res = await fetch('/api/generate-flashcards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: activeSubject || 'General Studies',
+          topic: activeTopic || 'Core Socratic Lesson',
+          subtopic: cbcConcept || 'Contextual Review',
+          content: activeContent,
+          cardCount: 6,
+          isLowDifficultySupport: false,
+          language: aiLanguage,
+          targetLanguage: aiLanguage
+        })
       });
-
-      // Sort descending by createdAt
-      remoteSessions.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-
-      if (remoteSessions.length > 0) {
-        setSessions(remoteSessions);
-        try {
-          localStorage.setItem('ai_tutor_sessions_v1', JSON.stringify(remoteSessions));
-        } catch (e) {}
+      const data = await handleResponseJson(res);
+      if (data.deck) {
+        setActiveFlashcardDeck(data.deck);
+        setIsFlashcardModalOpen(true);
       }
-      setIsSyncingWithFirestore(false);
-    }, (err) => {
-      console.warn("[Firestore Tutor Sessions Listener Notice]", err);
-      setIsSyncingWithFirestore(false);
-    });
+    } catch (err) {
+      console.error("Failed to generate contextual flashcards:", err);
+    } finally {
+      setIsGeneratingFlashcards(false);
+    }
+  };
 
-    return () => unsubscribe();
-  }, [user?.uid]);
+  const handleSaveFlashcardsToLibrary = async (deck: FlashcardDeck) => {
+    if (!profile?.uid || !deck) return;
+    const cards = deck?.cards ?? [];
+    const docId = deck.id || `flashcard-${Date.now()}`;
+    const savedDoc: SavedDocument = {
+      id: docId,
+      title: deck.title || 'Flashcard Deck',
+      docType: 'flashcards',
+      curriculum: 'cbc',
+      subject: deck.subject || 'General',
+      classLevel: 'Upper Primary / Secondary',
+      topic: deck.topic || 'Socratic Lesson',
+      subTopic: '',
+      duration: '15 mins',
+      content: cards.map((c, i) => `Card ${i + 1}: Q: ${c?.front || ''}\nA: ${c?.back || ''}${c?.hint ? `\nHint: ${c.hint}` : ''}`).join('\n\n'),
+      createdAt: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+      tags: ['flashcards', 'socratic-ai', 'file-library', deck.subject || 'General'],
+      category: 'Flashcards',
+      lastModifiedByUid: profile.uid,
+      lastModifiedByName: profile.displayName || 'Teacher',
+      flashcardDeck: {
+        ...deck,
+        cards: cards,
+      },
+    };
+
+    await setDoc(doc(db, 'documents', docId), savedDoc as any);
+  };
 
   const handleCreateNewSession = () => {
     const newId = `session-${Date.now()}`;
     const newSession: ChatSession = {
       id: newId,
-      title: 'New Chat Session',
-      subject: 'Physics',
-      topic: 'Velocity and Acceleration',
-      persona: 'Socratic Questioner',
-      scaffoldingLevel: 'medium',
+      title: `${subject} - ${topic}`,
+      subject,
+      topic,
+      persona,
+      scaffoldingLevel,
       difficultyLevel,
       messages: [
         {
           role: 'model',
-          text: `Hello! I am EduNexus AI Tutor. Today we are exploring Physics - Velocity and Acceleration. What would you like to explore?`
+          text: `Welcome! Let's explore **${topic}** in **${subject}**. What would you like to start with?`
         }
       ],
       activeStep: 'Exploratory onboarding',
       misconceptions: [],
-      suggestedResources: [
-        {
-          title: "PhET Moving Man Simulation",
-          url: "https://phet.colorado.edu/en/simulations/moving-man",
-          reason: "Excellent for visualizing position, velocity, and acceleration vectors in real time."
-        }
-      ],
+      suggestedResources: [],
       conceptMap: {
-        title: "Velocity & Acceleration Starter Map",
+        title: `${topic} Concept Map`,
         nodes: [
-          { id: "node1", label: "Position", type: "concept", description: "An object's location relative to a reference point." },
-          { id: "node2", label: "Velocity", type: "concept", description: "The rate of change of position with respect to time." },
-          { id: "node3", label: "Acceleration", type: "concept", description: "The rate of change of velocity with respect to time." }
+          { id: "n1", label: topic, type: "concept", description: `Core focus topic in ${subject}` }
         ],
-        edges: [
-          { from: "node1", to: "node2", label: "rate of change" },
-          { from: "node2", to: "node3", label: "rate of change" }
-        ]
+        edges: []
       },
       createdAt: new Date().toISOString()
     };
 
-    if (user?.uid) {
-      (newSession as any).userId = user.uid;
-      const payload = cleanUndefined({
-        ...newSession,
-        userId: user.uid,
-        updatedAt: new Date().toISOString()
-      });
-      setDoc(doc(db, 'tutorSessions', newId), payload).catch(err => {
-        console.warn("[Firestore Save New Session Warning]", err);
-      });
-    }
-
     setSessions(prev => [newSession, ...prev]);
-    loadSession(newSession);
+    setActiveSessionId(newId);
+    setIsCbcSession(false);
   };
 
-  const handleCreateNewCbcSession = (subName: string, strandName: string, subStrandName: string, conceptName: string, socraticMode: 'guided' | 'direct' = 'guided') => {
+  const handleCreateNewCbcSession = (
+    subj: string,
+    strand: string,
+    subStrand: string,
+    concept: string,
+    socraticModeParam: 'guided' | 'direct'
+  ) => {
     const newId = `cbc-session-${Date.now()}`;
-    const firstUserMessage = `The student has selected: Subject: ${subName}, Topic: ${strandName}, Subtopic: ${subStrandName}, Concept: ${conceptName}. Please introduce the concept and ask a foundational question to begin.`;
-    
-    const newSession: ChatSession = {
+    const newSession: ChatSession & { isCbcMode?: boolean; cbcSubject?: string; cbcStrand?: string; cbcSubStrand?: string; cbcConcept?: string; cbcSocraticMode?: string } = {
       id: newId,
-      title: `${subName} - ${conceptName}`,
-      subject: subName,
-      topic: `${strandName} (${subStrandName})`,
+      title: `[CBC] ${subj} - ${concept}`,
+      subject: subj,
+      topic: `${strand} (${subStrand})`,
       persona: 'Socratic Questioner',
       scaffoldingLevel: 'medium',
-      difficultyLevel,
-      messages: [],
-      activeStep: 'Foundational Assessment',
+      difficultyLevel: 'intermediate',
+      isCbcMode: true,
+      cbcSubject: subj,
+      cbcStrand: strand,
+      cbcSubStrand: subStrand,
+      cbcConcept: concept,
+      cbcSocraticMode: socraticModeParam,
+      messages: [
+        {
+          role: 'model',
+          text: `Jambo! I am your Kenyan CBC AI Learning Assistant. We are exploring **${subj}** (Strand: ${strand} -> ${subStrand}) focusing on **${concept}**.\n\nLet's build deep conceptual understanding. What is your current understanding of this concept?`
+        }
+      ],
+      activeStep: 'CBC Socratic Onboarding',
       misconceptions: [],
-      suggestedResources: [],
+      suggestedResources: [
+        {
+          title: "KICD Curriculum Designs Portal",
+          url: "https://kicd.ac.ke",
+          reason: "Official Kenyan Competency-Based Curriculum guidelines and assessment rubrics."
+        }
+      ],
       conceptMap: {
-        title: `${conceptName} Concept Starter`,
+        title: `${concept} CBC Map`,
         nodes: [
-          { id: "node1", label: conceptName, type: "concept", description: `Active study of ${conceptName} in CBC curriculum.` }
+          { id: "c1", label: concept, type: "concept", description: `CBC Core Competency for ${subStrand}` }
         ],
         edges: []
       },
-      createdAt: new Date().toISOString(),
-      cbcSocraticMode: socraticMode
+      createdAt: new Date().toISOString()
     };
-
-    const dialogueStyleInstruction = socraticMode === 'direct' 
-      ? `DIALOGUE STYLE: "Direct Explanation"
-- You MUST provide clear, direct, and immediate explanations. 
-- When the student asks a question, seeks clarification, or is stuck, answer them fully and directly upfront without withholding the answer or being cryptic.
-- Do NOT guide them to find the answer when they want a direct explanation; explain it to them clearly with vivid analogies from daily Kenyan life (e.g., duka, matatu, farming) and helpful details first.
-- Once you have fully explained the concept, ask exactly ONE clear review/comprehension question to verify they understood your explanation.`
-      : `DIALOGUE STYLE: "Guided Discovery (Socratic)"
-- You MUST use active, warm, Socratic dialogue to prompt the student.
-- Never provide full, direct solutions or answers right away.
-- Guide the student step-by-step with small scaffolding steps, asking thoughtful open-ended questions to probe their assumptions and help them discover the answer on their own.`;
-
-    const customSystemPrompt = `STUDY PLAN OVERVIEW:
-The student has selected a guided learning path with the following parameters:
-- Subject / Learning Area: ${subName}
-- Strand / Topic: ${strandName}
-- Sub-strand / Subtopic: ${subStrandName}
-- Core Concept: ${conceptName}
-
-Your primary instruction is to assist the student in mastering this exact concept.
-
-${dialogueStyleInstruction}`;
-
-    // Store custom CBC attributes on session object
-    (newSession as any).isCbcMode = true;
-    (newSession as any).cbcSubject = subName;
-    (newSession as any).cbcStrand = strandName;
-    (newSession as any).cbcSubStrand = subStrandName;
-    (newSession as any).cbcConcept = conceptName;
-    (newSession as any).cbcSystemPrompt = customSystemPrompt;
-    (newSession as any).cbcSocraticMode = socraticMode;
-
-    if (user?.uid) {
-      (newSession as any).userId = user.uid;
-      const payload = cleanUndefined({
-        ...newSession,
-        userId: user.uid,
-        updatedAt: new Date().toISOString()
-      });
-      setDoc(doc(db, 'tutorSessions', newId), payload).catch(err => {
-        console.warn("[Firestore Save New CBC Session Warning]", err);
-      });
-    }
 
     setSessions(prev => [newSession, ...prev]);
-    
-    // Explicitly update all corresponding state fields before triggering the message
-    isSwitchingSessionRef.current = true;
-    setSubject(subName);
-    setTopic(`${strandName} (${subStrandName})`);
-    setScaffoldingLevel('medium');
-    setPersona('Socratic Questioner');
-    setMessages([]);
-    setActiveStep('Foundational Assessment');
-    setMisconceptions([]);
-    setSuggestedResources([]);
-    setConceptMap(newSession.conceptMap);
     setActiveSessionId(newId);
-    
     setIsCbcSession(true);
-    setCbcSubject(subName);
-    setCbcStrand(strandName);
-    setCbcSubStrand(subStrandName);
-    setCbcConcept(conceptName);
-    setCbcSystemPrompt(customSystemPrompt);
-    setCbcSocraticMode(socraticMode);
-    setTutorMode('cbc-tutor');
-
-    setTimeout(() => {
-      isSwitchingSessionRef.current = false;
-      // Trigger the initial Socratic introduction automatically via hidden system prompt!
-      handleSend(firstUserMessage, true);
-    }, 150);
+    setCbcSubject(subj);
+    setCbcStrand(strand);
+    setCbcSubStrand(subStrand);
+    setCbcConcept(concept);
+    setCbcSocraticMode(socraticModeParam);
+    setTutorMode('socratic');
   };
 
-  const handleChangeTopic = () => {
-    // Clear current learning path selections
-    setIsCbcSession(false);
-    setCbcSubject('');
-    setCbcStrand('');
-    setCbcSubStrand('');
-    setCbcConcept('');
-    
-    // Clear message history to return to the fresh Setup Form
-    setMessages([]);
-    
-    // Reset active Socratic topic/subject as well
-    setSubject('Mathematics');
-    setTopic('');
-
-    // Ensure the tab is active on cbc-tutor Setup Form
-    setTutorMode('cbc-tutor');
-  };
-
-  const handleDeleteSession = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (sessions.length <= 1) {
-      alert("You must keep at least one chat session.");
-      return;
-    }
-    const filtered = sessions.filter(s => s.id !== id);
-    setSessions(filtered);
-    if (activeSessionId === id) {
-      loadSession(filtered[0]);
-    }
-
-    if (user?.uid) {
-      try {
-        await deleteDoc(doc(db, 'tutorSessions', id));
-      } catch (err) {
-        console.warn("[Firestore Delete Session Warning]", err);
-      }
+  const processOfflineQueue = async () => {
+    if (offlineQueue.length === 0 || (typeof navigator !== 'undefined' && !navigator.onLine) || isProcessing) return;
+    const queueToProcess = [...offlineQueue];
+    for (const msgItem of queueToProcess) {
+      await handleSendMessage(msgItem.text, msgItem.id);
     }
   };
 
-  const handleExportChatLog = () => {
-    const formatSessionLog = () => {
-      let logText = `# EduNexus AI Tutor Session: ${subject} - ${topic}\n`;
-      logText += `*Persona:* ${persona}\n`;
-      logText += `*Difficulty Level:* ${difficultyLevel}\n`;
-      logText += `*Scaffolding:* ${scaffoldingLevel}\n`;
-      logText += `*Date:* ${new Date().toLocaleDateString()}\n\n`;
-      logText += `--- \n\n`;
-      
-      messages.forEach((msg) => {
-        const sender = msg.role === 'user' ? 'Student' : 'Tutor';
-        logText += `### **${sender}**:\n${msg.text}\n\n`;
-      });
-      
-      if (misconceptions.length > 0) {
-        logText += `--- \n\n## Detected Misconception Diagnoses:\n`;
-        misconceptions.forEach((mis) => {
-          logText += `- ${mis}\n`;
-        });
-        logText += `\n`;
-      }
-      
-      return logText;
-    };
-
-    const text = formatSessionLog();
-    const blob = new Blob([text], { type: 'text/markdown;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `Tutor_Session_${topic.replace(/\s+/g, '_')}.md`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  // Sync effect to save session details back to sessions list, localStorage, and Firestore
+  // Automatically trigger sync when back online and items exist in queue
   useEffect(() => {
-    if (isSwitchingSessionRef.current) return;
-    
-    setSessions(prev => {
-      let activeSessToSave: ChatSession | null = null;
-      const updated = prev.map(s => {
-        if (s.id === activeSessionId) {
-          const derivedTitle = messages.length > 1 && topic ? `${subject} - ${topic}` : s.title;
-          const updatedSession = {
-            ...s,
-            title: derivedTitle,
-            subject,
-            topic,
-            scaffoldingLevel,
-            difficultyLevel,
-            persona,
-            messages,
-            activeStep,
-            misconceptions,
-            suggestedResources,
-            conceptMap,
-            isCbcMode: isCbcSession,
-            cbcSubject,
-            cbcStrand,
-            cbcSubStrand,
-            cbcConcept,
-            cbcSocraticMode
-          };
-          activeSessToSave = updatedSession;
-          return updatedSession;
-        }
-        return s;
-      });
-      localStorage.setItem('ai_tutor_sessions_v1', JSON.stringify(updated));
-
-      // Asynchronously sync to Firestore if user is logged in
-      if (user?.uid && activeSessToSave) {
-        const payload = cleanUndefined({
-          id: (activeSessToSave as ChatSession).id,
-          userId: user.uid,
-          title: (activeSessToSave as ChatSession).title,
-          subject: (activeSessToSave as ChatSession).subject,
-          topic: (activeSessToSave as ChatSession).topic,
-          persona: (activeSessToSave as ChatSession).persona,
-          scaffoldingLevel: (activeSessToSave as ChatSession).scaffoldingLevel,
-          difficultyLevel: (activeSessToSave as ChatSession).difficultyLevel || 'intermediate',
-          messages: (activeSessToSave as ChatSession).messages,
-          activeStep: (activeSessToSave as ChatSession).activeStep,
-          misconceptions: (activeSessToSave as ChatSession).misconceptions,
-          suggestedResources: (activeSessToSave as ChatSession).suggestedResources,
-          conceptMap: (activeSessToSave as ChatSession).conceptMap,
-          createdAt: (activeSessToSave as ChatSession).createdAt || new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          isCbcMode: !!(activeSessToSave as any).isCbcMode,
-          cbcSubject: (activeSessToSave as any).cbcSubject || '',
-          cbcStrand: (activeSessToSave as any).cbcStrand || '',
-          cbcSubStrand: (activeSessToSave as any).cbcSubStrand || '',
-          cbcConcept: (activeSessToSave as any).cbcConcept || '',
-          cbcSocraticMode: (activeSessToSave as any).cbcSocraticMode || 'guided'
-        });
-
-        setDoc(doc(db, 'tutorSessions', (activeSessToSave as ChatSession).id), payload)
-          .catch(err => console.warn('[Firestore Auto-save Session Warning]', err));
-      }
-
-      return updated;
-    });
-  }, [activeSessionId, subject, topic, scaffoldingLevel, difficultyLevel, persona, messages, activeStep, misconceptions, suggestedResources, conceptMap, isCbcSession, cbcSubject, cbcStrand, cbcSubStrand, cbcConcept, cbcSocraticMode, user?.uid]);
-
-  // Voice & Hands-free dialogue states
-  const [isVoiceEnabled, setIsVoiceEnabled] = useState<boolean>(false);
-  const [isHandsFree, setIsHandsFree] = useState<boolean>(false);
-  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
-  const [speakingText, setSpeakingText] = useState<string | null>(null);
-  const [isListening, setIsListening] = useState<boolean>(false);
-  const [interimTranscript, setInterimTranscript] = useState<string>('');
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [selectedVoiceName, setSelectedVoiceName] = useState<string>('');
-  const [voiceRate, setVoiceRate] = useState<number>(1);
-  const [voicePitch, setVoicePitch] = useState<number>(1);
-  const [voiceVolume, setVoiceVolume] = useState<number>(1);
-  const [showVoiceSettings, setShowVoiceSettings] = useState<boolean>(false);
-  const [speechSupported, setSpeechSupported] = useState<boolean>(false);
-
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<any>(null);
-  const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-
-  // Auto scroll to bottom
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  // Handle Speech Synthesis Voices & Speech Recognition check
-  useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      setSpeechSupported(true);
+    if (isOnline && offlineQueue.length > 0 && !isProcessing) {
+      processOfflineQueue();
     }
+  }, [isOnline, offlineQueue.length]);
 
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      const loadVoices = () => {
-        const available = window.speechSynthesis.getVoices();
-        setVoices(available);
-        
-        // Match a natural sounding english voice by default
-        const defaultVoice = available.find(v => v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Samantha') || v.name.includes('Female'))) || available.find(v => v.lang.startsWith('en')) || available[0];
-        if (defaultVoice) {
-          setSelectedVoiceName(defaultVoice.name);
-        }
+  const handleSendMessage = async (customMessage?: string, retryMsgId?: string) => {
+    const messageToSend = customMessage || inputMessage;
+    if (!messageToSend.trim()) return;
+
+    const msgId = retryMsgId || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // Check offline status
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setIsOnline(false);
+      setAiStatus('offline');
+      const queuedUserMsg: Message = {
+        id: msgId,
+        role: 'user',
+        text: messageToSend,
+        status: 'queued',
+        timestamp: timeStr
       };
 
-      loadVoices();
-      window.speechSynthesis.onvoiceschanged = loadVoices;
-    }
+      setMessages(prev => {
+        const exists = prev.some(m => m.id === msgId);
+        if (exists) {
+          return prev.map(m => m.id === msgId ? queuedUserMsg : m);
+        }
+        return [...prev, queuedUserMsg];
+      });
 
-    return () => {
-      if (typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
-      if (recognitionRef.current) {
-        recognitionRef.current.abort();
-      }
-    };
-  }, []);
+      setOfflineQueue(prev => {
+        if (prev.some(m => m.id === msgId)) return prev;
+        return [...prev, queuedUserMsg];
+      });
 
-  // Speak Socratic Tutor output
-  const speakText = (text: string) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
-
-    window.speechSynthesis.cancel();
-    setIsSpeaking(false);
-    setSpeakingText(null);
-
-    // Filter hyperlinks and brackets for cleaner audio speech
-    const cleanText = text
-      .replace(/https?:\/\/\S+/g, '') // strip URLs
-      .replace(/[\[\]\(\)\-\+\*]/g, ' ') // strip special formatting symbols
-      .replace(/ {2,}/g, ' ')
-      .trim();
-
-    if (!cleanText) return;
-
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    
-    if (selectedVoiceName) {
-      const voice = voices.find(v => v.name === selectedVoiceName);
-      if (voice) utterance.voice = voice;
-    }
-    
-    utterance.rate = voiceRate;
-    utterance.pitch = voicePitch;
-    utterance.volume = voiceVolume;
-
-    utterance.onstart = () => {
-      setIsSpeaking(true);
-      setSpeakingText(text);
-      // Temporarily halt listening if active to prevent tutor listening to its own voice
-      if (recognitionRef.current && isListening) {
-        recognitionRef.current.abort();
-      }
-    };
-
-    utterance.onend = () => {
-      setIsSpeaking(false);
-      setSpeakingText(null);
-      // Auto-resume listening if Hands-Free dialogue loop is active
-      if (isHandsFree && isVoiceEnabled) {
-        setTimeout(() => {
-          startListening();
-        }, 400);
-      }
-    };
-
-    utterance.onerror = (e) => {
-      console.error('TTS error:', e);
-      setIsSpeaking(false);
-      setSpeakingText(null);
-    };
-
-    currentUtteranceRef.current = utterance;
-    window.speechSynthesis.speak(utterance);
-  };
-
-  // Start Speech Recognition
-  const startListening = () => {
-    if (typeof window === 'undefined') return;
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert('Your browser does not support Web Speech Recognition.');
+      if (!customMessage) setInputMessage('');
       return;
     }
 
-    // Stop speaking first
-    if (window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-    }
-
-    try {
-      if (recognitionRef.current) {
-        recognitionRef.current.abort();
-      }
-
-      const rec = new SpeechRecognition();
-      rec.continuous = false; // Turn-based dialogue
-      rec.interimResults = true;
-      rec.lang = 'en-US';
-
-      rec.onstart = () => {
-        setIsListening(true);
-        setInterimTranscript('');
-      };
-
-      rec.onresult = (event: any) => {
-        let interim = '';
-        let final = '';
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const t = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            final += t;
-          } else {
-            interim += t;
-          }
-        }
-        if (final) {
-          setInputMessage(prev => {
-            const trimmed = prev.trim();
-            return trimmed ? `${trimmed} ${final.trim()}` : final.trim();
-          });
-        } else if (interim) {
-          setInterimTranscript(interim);
-        }
-      };
-
-      rec.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
-        setIsListening(false);
-        if (event.error === 'not-allowed') {
-          alert('Microphone access was denied. Please allow microphone permissions in your browser to use voice-to-text input.');
-        }
-      };
-
-      rec.onend = () => {
-        setIsListening(false);
-        setInterimTranscript('');
-        
-        // Auto submit if dialogue is hands-free and we got text
-        setInputMessage(curr => {
-          if (curr.trim() && isHandsFree) {
-            handleSend(curr);
-            return '';
-          }
-          return curr;
-        });
-      };
-
-      recognitionRef.current = rec;
-      rec.start();
-    } catch (err) {
-      console.error('Failed to start speech recognition:', err);
-    }
-  };
-
-  // Stop Speech Recognition
-  const stopListening = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.abort();
-    }
-    setIsListening(false);
-  };
-
-  // Handle manual speaker trigger for bubble replays
-  const handleToggleSpeakMessage = (text: string) => {
-    if (isSpeaking && speakingText === text) {
-      if (window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
-      setIsSpeaking(false);
-      setSpeakingText(null);
-    } else {
-      speakText(text);
-    }
-  };
-
-  const handleMessageFeedback = (idx: number, feedbackType: 'up' | 'down') => {
-    setMessages(prev =>
-      prev.map((msg, i) => {
-        if (i === idx) {
-          return {
-            ...msg,
-            feedback: msg.feedback === feedbackType ? undefined : feedbackType
-          };
-        }
-        return msg;
-      })
-    );
-  };
-
-  // Handle document import and auto-populate parameters
-  const handleImportDocument = (docId: string) => {
-    const doc = documents.find(d => d.id === docId);
-    if (!doc) return;
-    setSelectedDocId(docId);
-    setSubject(doc.subject || 'General');
-    setTopic(doc.topic || 'General Topic');
-    
-    const textMsg = `Excellent! I have successfully imported your curriculum document: "${doc.title}". We are now tutoring in the context of this lesson plan/material on "${doc.topic}". What specific part of this lesson would you like to drill down into?`;
-    
-    // Add system-like prompt message
-    setMessages(prev => [
-      ...prev,
-      {
-        role: 'model',
-        text: textMsg
-      }
-    ]);
-
-    if (isVoiceEnabled) {
-      speakText(textMsg);
-    }
-  };
-
-  // Preset Socratic Icebreakers
-  const handleIcebreaker = (promptText: string) => {
-    setInputMessage(promptText);
-    handleSend(promptText);
-  };
-
-  const handleSend = async (customText?: string, isSystemIntro?: boolean) => {
-    const textToSend = customText || inputMessage;
-    if (!textToSend.trim() || isProcessing) return;
-
-    // Halt any listening/speaking before transmitting
-    stopListening();
-    if (window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-    }
-
-    if (isSystemIntro) {
-      const userMessage: Message = { 
-        role: 'user', 
-        text: `📚 Started Kenyan CBC Lesson: ${cbcSubject || 'CBC Subject'} - ${cbcConcept || 'CBC Concept'}` 
-      };
-      setMessages([userMessage]);
-    } else {
-      const userMessage: Message = { role: 'user', text: textToSend };
-      setMessages(prev => [...prev, userMessage]);
-    }
-    
-    if (!customText) setInputMessage('');
+    // Online execution
+    setAiStatus('connecting');
     setIsProcessing(true);
 
-    // Retrieve context document if selected
-    const activeDoc = documents.find(d => d.id === selectedDocId);
-    const activeUploadedRes = uploadedResources.find(r => r.id === selectedResourceId);
+    const activeUserMsg: Message = {
+      id: msgId,
+      role: 'user',
+      text: messageToSend,
+      status: 'sending',
+      timestamp: timeStr
+    };
 
-    const docContextParts = [];
-    if (activeDoc) {
-      docContextParts.push(`[Generated Lesson Document: ${activeDoc.title}]\n${activeDoc.content}`);
-    }
-    if (activeUploadedRes) {
-      docContextParts.push(`[Uploaded Curriculum Resource: ${activeUploadedRes.fileName}]\n${activeUploadedRes.extractedText}`);
-    }
-    const docContext = docContextParts.join('\n\n');
+    setMessages(prev => {
+      const exists = prev.some(m => m.id === msgId);
+      if (exists) {
+        return prev.map(m => m.id === msgId ? activeUserMsg : m);
+      }
+      return [...prev, activeUserMsg];
+    });
+
+    if (!customMessage) setInputMessage('');
 
     try {
-      const response = await fetch('/api/tutor-chat', {
+      setAiStatus('thinking');
+      const selectedRes = uploadedResources.find(r => r.id === selectedResourceId);
+      const activeDoc = documents.find(d => d.id === selectedDocId);
+      const contextualContent = selectedRes ? selectedRes.extractedText : (activeDoc ? activeDoc.content : undefined);
+
+      const historyForApi = messages.map(m => ({
+        role: m.role,
+        text: m.text
+      }));
+
+      const res = await fetch('/api/ai-tutor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: textToSend,
-          history: isSystemIntro ? [] : messages,
+          userRole: activeRole,
+          userName: profile?.displayName || user?.displayName || 'EduNexus User',
           subject: isCbcSession ? cbcSubject : subject,
-          topic: isCbcSession ? `${cbcStrand} - ${cbcSubStrand}` : topic,
+          topic: isCbcSession ? `${cbcStrand} - ${cbcSubStrand}: ${cbcConcept}` : topic,
+          persona,
           scaffoldingLevel,
           difficultyLevel,
-          documentContext: docContext,
-          persona,
+          cognitiveLevel,
+          languageStyle,
+          dialogueStyle,
+          message: messageToSend,
+          history: historyForApi,
+          contextDocument: contextualContent,
           isCbcMode: isCbcSession,
-          cbcSubject: isCbcSession ? cbcSubject : undefined,
-          cbcStrand: isCbcSession ? cbcStrand : undefined,
-          cbcSubStrand: isCbcSession ? cbcSubStrand : undefined,
-          cbcConcept: isCbcSession ? cbcConcept : undefined,
-          systemPrompt: isCbcSession ? cbcSystemPrompt : undefined,
-          cbcSocraticMode: isCbcSession ? cbcSocraticMode : undefined,
-          targetLanguage: aiLanguage,
-          language: aiLanguage
+          socraticMode: dialogueStyle
         })
       });
 
-      const data = await handleResponseJson(response, 'Communication failed with the tutor service.');
+      const data = await handleResponseJson(res, 'Failed to connect to AI Tutor.');
       
-      // Dispatch custom event to track Socratic interactions globally
-      window.dispatchEvent(new CustomEvent('socratic-interaction'));
+      // Update message status to delivered (double tick)
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'delivered' } : m));
+      setOfflineQueue(prev => prev.filter(m => m.id !== msgId));
+      setAiStatus('ready');
+
+      const botResponseText = data.message || data.text || "That's an insightful observation. Let's dig deeper: how does that relate to our core formula?";
       
-      const tutorReply = data.message || "I'm processing our next scaffolding step. Could you explain your thinking more?";
-      
-      setMessages(prev => [
-        ...prev,
-        { role: 'model', text: tutorReply }
-      ]);
+      const mediaPayload = data.media || data.generatedMedia;
+      const modelMsg: Message = {
+        id: `model_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        role: 'model',
+        text: botResponseText,
+        media: mediaPayload ? {
+          type: mediaPayload.type,
+          url: mediaPayload.url,
+          prompt: mediaPayload.prompt || messageToSend,
+          generatorUsed: mediaPayload.generatorUsed
+        } : undefined,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setMessages(prev => [...prev, modelMsg]);
 
-      if (data.scaffoldingStep) {
-        setActiveStep(data.scaffoldingStep);
+      if (data.activeStep || data.scaffoldingStep) setActiveStep(data.activeStep || data.scaffoldingStep);
+      if ((data.misconceptions || data.detectedMisconceptions) && Array.isArray(data.misconceptions || data.detectedMisconceptions)) {
+        setMisconceptions(data.misconceptions || data.detectedMisconceptions);
       }
+      if (data.suggestedResources && Array.isArray(data.suggestedResources)) setSuggestedResources(data.suggestedResources);
+      if (data.conceptMap && data.conceptMap.nodes) setConceptMap(data.conceptMap);
 
-      if (data.detectedMisconceptions && data.detectedMisconceptions.length > 0) {
-        setMisconceptions(prev => {
-          const combined = [...prev, ...data.detectedMisconceptions];
-          return Array.from(new Set(combined)); // unique
-        });
-      }
-
-      if (data.suggestedResources && data.suggestedResources.length > 0) {
-        setSuggestedResources(data.suggestedResources);
-      }
-
-      if (data.conceptVisualization && data.conceptVisualization.nodes && data.conceptVisualization.nodes.length > 0) {
-        setConceptMap(data.conceptVisualization);
-      }
-
-      // Automatically speak response if voice is enabled
       if (isVoiceEnabled) {
-        speakText(tutorReply);
+        speakText(botResponseText);
       }
+    } catch (err) {
+      console.error("AI Tutor API Error:", err);
+      
+      // Mark user message as failed and add to queue
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'failed' } : m));
+      setOfflineQueue(prev => {
+        const queuedMsg: Message = { id: msgId, role: 'user', text: messageToSend, status: 'failed', timestamp: timeStr };
+        if (prev.some(m => m.id === msgId)) return prev;
+        return [...prev, queuedMsg];
+      });
+      setAiStatus('ready');
 
-    } catch (err: any) {
-      console.error(err);
-      const errMsg = `Connection Issue: ${err.message || 'I had trouble reaching our pedagogical core. Let me retry our tutoring cycle.'}`;
-      setMessages(prev => [
-        ...prev,
-        { role: 'model', text: errMsg }
-      ]);
-      if (isVoiceEnabled) {
-        speakText(errMsg);
-      }
+      const errorMsg: Message = {
+        id: `err_${Date.now()}`,
+        role: 'model',
+        text: "I experienced a connection issue. Let's re-examine that last thought!",
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setMessages(prev => [...prev, errorMsg]);
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleIcebreaker = (promptText: string) => {
+    setInputMessage(promptText);
+    handleSendMessage(promptText);
+  };
+
+  const handleRequestHint = () => {
+    const hintPrompt = "Can you give me a subtle Socratic hint without spoiling the final answer?";
+    setInputMessage(hintPrompt);
+    handleSendMessage(hintPrompt);
+  };
+
+  const handleImportDocument = (docId: string) => {
+    setSelectedDocId(docId);
+    const selectedDoc = documents.find(d => d.id === docId);
+    if (selectedDoc) {
+      setSubject(selectedDoc.subject || 'General');
+      setTopic(selectedDoc.topic || 'Lesson Document');
     }
   };
 
   const confirmClearChat = async () => {
     setIsClearingChat(true);
     try {
-      if (window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
-      stopListening();
-      setIsSpeaking(false);
-
-      const resetMessage = {
-        role: 'model' as const,
-        text: `Tutor reset. Let's start fresh with a clean slate! We are focusing on ${subject} - ${topic}. What concept should we break down first?`
-      };
-
-      setMessages([resetMessage]);
-      setActiveStep('Exploratory onboarding');
+      const resetMessages: Message[] = [
+        {
+          role: 'model',
+          text: `Chat history cleared. What topic or concept in **${subject}** shall we explore next?`
+        }
+      ];
+      setMessages(resetMessages);
       setMisconceptions([]);
-
-      if (user?.uid && activeSessionId) {
-        const activeSess = sessions.find(s => s.id === activeSessionId);
-        const payload = cleanUndefined({
-          id: activeSessionId,
-          userId: user.uid,
-          title: activeSess?.title || `${subject} - ${topic}`,
-          subject: subject,
-          topic: topic,
-          persona: persona,
-          scaffoldingLevel: scaffoldingLevel,
-          difficultyLevel: difficultyLevel,
-          messages: [resetMessage],
-          activeStep: 'Exploratory onboarding',
-          misconceptions: [],
-          suggestedResources: suggestedResources || [],
-          conceptMap: conceptMap || { title: 'Concept Map', nodes: [], edges: [] },
-          createdAt: activeSess?.createdAt || new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          isCbcMode: isCbcSession,
-          cbcSubject: cbcSubject || '',
-          cbcStrand: cbcStrand || '',
-          cbcSubStrand: cbcSubStrand || '',
-          cbcConcept: cbcConcept || '',
-          cbcSocraticMode: cbcSocraticMode || 'guided'
-        });
-
-        await setDoc(doc(db, 'tutorSessions', activeSessionId), payload);
-      }
-    } catch (err) {
-      console.warn('[Firestore Clear Chat Error]', err);
+      setActiveStep('Exploratory onboarding');
+      
+      setSessions(prev => prev.map(s => {
+        if (s.id === activeSessionId) {
+          return {
+            ...s,
+            messages: resetMessages,
+            misconceptions: [],
+            activeStep: 'Exploratory onboarding'
+          };
+        }
+        return s;
+      }));
+    } catch (e) {
+      console.error("Failed to clear chat log", e);
     } finally {
       setIsClearingChat(false);
       setShowClearConfirmModal(false);
     }
   };
 
-  const clearChat = () => {
-    setShowClearConfirmModal(true);
+  const handleExportChatLog = () => {
+    const chatContent = messages.map(m => `### ${m.role === 'user' ? 'Student' : 'EduNexus AI Tutor'}\n${m.text}\n`).join('\n---\n\n');
+    const blob = new Blob([`# EduNexus Socratic Session Log\n**Subject:** ${subject}\n**Topic:** ${topic}\n**Date:** ${new Date().toLocaleDateString()}\n\n${chatContent}`], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `socratic-session-${topic.toLowerCase().replace(/\s+/g, '-')}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
-  // Fallback links for standard simulation libraries
   const defaultVisualAids = [
     { name: "PhET Simulations", url: "https://phet.colorado.edu/", desc: "Physics, math, chemistry simulations" },
-    { name: "OpenStax Portal", url: "https://openstax.org/", desc: "Free, high-quality textbooks" },
-    { name: "GeoGebra Tools", url: "https://www.geogebra.org/", desc: "Geometry & math worksheets" },
-    { name: "Khan Academy", url: "https://www.khanacademy.org/", desc: "Guided micro-lessons & videos" }
+    { name: "OpenStax Portal", url: "https://openstax.org/", desc: "Free high-quality peer-reviewed textbooks" },
+    { name: "GeoGebra Tools", url: "https://www.geogebra.org/", desc: "Geometry, algebra & math worksheets" },
+    { name: "Khan Academy", url: "https://www.khanacademy.org/", desc: "Guided micro-lessons & practice problems" }
   ];
 
   return (
-    <div className="flex flex-col gap-4 h-[calc(100vh-200px)] min-h-[600px] overflow-hidden">
-      {/* Mode Navigation Header */}
-      <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center bg-white border border-[#e5e1da] rounded-2xl p-3.5 sm:p-4 shadow-2xs gap-3 shrink-0 transition-all duration-200">
-        <div className="flex items-center gap-3.5">
-          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#5f6f52]/15 to-[#5f6f52]/5 border border-[#5f6f52]/25 flex items-center justify-center text-[#5f6f52] shrink-0 shadow-2xs">
-            <GraduationCap className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="font-serif font-bold text-base text-slate-900 leading-tight">EduNexus AI Tutor</h2>
-              <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#5f6f52]/10 text-[#5f6f52] border border-[#5f6f52]/20 tracking-wider">
-                Socratic Active Recall Engine
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-              Interactive Socratic Pedagogy, Adaptive AI Guidance & Curriculum Workspace
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap md:flex-nowrap justify-between md:justify-end">
-          <div className="flex bg-slate-100/90 p-1 rounded-xl border border-slate-200/60 shadow-2xs">
-            <button
-              onClick={() => {
-                setTutorMode('socratic');
-              }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                tutorMode === 'socratic'
-                  ? 'bg-[#5f6f52] text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-[#5f6f52] hover:bg-slate-200/50'
-              }`}
-            >
-              <Cpu className="w-3.5 h-3.5" />
-              <span>Socratic Dialogue</span>
-            </button>
-            <button
-              onClick={() => setTutorMode('dashboard')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                tutorMode === 'dashboard'
-                  ? 'bg-[#5f6f52] text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-[#5f6f52] hover:bg-slate-200/50'
-              }`}
-            >
-              <Gauge className="w-3.5 h-3.5" />
-              <span>Tutor Dashboard</span>
-            </button>
-            <button
-              onClick={() => {
-                setTutorMode('cbc-tutor');
-              }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                tutorMode === 'cbc-tutor'
-                  ? 'bg-[#5f6f52] text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-[#5f6f52] hover:bg-slate-200/50'
-              }`}
-            >
-              <GraduationCap className="w-3.5 h-3.5" />
-              <span>EduNexus CBC Tutor</span>
-            </button>
-            <button
-              onClick={() => setTutorMode('learning-path')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                tutorMode === 'learning-path'
-                  ? 'bg-[#5f6f52] text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-[#5f6f52] hover:bg-slate-200/50'
-              }`}
-            >
-              <Compass className="w-3.5 h-3.5" />
-              <span>Learning Path</span>
-            </button>
-          </div>
-
-          {(tutorMode === 'socratic' || tutorMode === 'cbc-tutor') && (
-            <button
-              type="button"
-              onClick={() => setFullscreenWidget(fullscreenWidget === 'chat' ? null : 'chat')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold tracking-wider uppercase transition flex items-center gap-1.5 cursor-pointer shadow-2xs border ${
-                fullscreenWidget === 'chat'
-                  ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100 hover:text-rose-700'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-[#5f6f52]/5 hover:text-[#5f6f52] hover:border-slate-300'
-              }`}
-              title={fullscreenWidget === 'chat' ? "Minimize Window" : "Maximize Socratic Conversation to Full Screen"}
-            >
-              {fullscreenWidget === 'chat' ? (
-                <>
-                  <Minimize2 className="w-3.5 h-3.5 text-rose-500 animate-pulse" />
-                  <span>Exit Full Screen</span>
-                </>
-              ) : (
-                <>
-                  <Maximize2 className="w-3.5 h-3.5 text-[#5f6f52]" />
-                  <span>Full Screen</span>
-                </>
-              )}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {(tutorMode === 'socratic' || tutorMode === 'cbc-tutor') ? (
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 flex-1 min-h-0 overflow-hidden">
+    <div className="flex flex-col gap-6 min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans pb-16 aitutor-workspace module-workspace">
       
-      {/* Configuration & Document Import Sidebar - 3 Columns */}
-      <div className="xl:col-span-3 flex flex-col gap-3 bg-white border border-[#e5e1da] rounded-2xl p-4 shadow-xs overflow-y-auto max-h-full">
-        {/* Left Sidebar Sub-Navigation Segmented Control */}
-        <div className="flex bg-slate-100/80 p-1 rounded-xl gap-1 shrink-0 border border-slate-200/60">
-          <button
-            type="button"
-            onClick={() => setLeftSidebarTab('config')}
-            className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
-              leftSidebarTab === 'config'
-                ? 'bg-[#5f6f52] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-          >
-            <Settings className="w-3 h-3" />
-            <span>Config</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setLeftSidebarTab('materials')}
-            className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
-              leftSidebarTab === 'materials'
-                ? 'bg-[#5f6f52] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-          >
-            <FileText className="w-3 h-3" />
-            <span>Docs</span>
-            {(documents.length > 0 || uploadedResources.length > 0) && (
-              <span className={`text-[8px] font-bold px-1 rounded-full ${leftSidebarTab === 'materials' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'}`}>
-                {documents.length + uploadedResources.length}
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => setLeftSidebarTab('voice')}
-            className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
-              leftSidebarTab === 'voice'
-                ? 'bg-[#5f6f52] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-          >
-            <Headphones className="w-3 h-3" />
-            <span>Voice</span>
-            {isVoiceEnabled && (
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            )}
-          </button>
-        </div>
+      {/* 1. MASTER HEADER */}
+      <header className="sticky top-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 px-4 sm:px-6 py-3 shadow-2xs transition-all">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+          
+          {/* Brand & Breadcrumbs */}
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#0E5E4B] to-[#19B37D] p-0.5 shadow-md shadow-emerald-900/10 flex items-center justify-center text-white shrink-0">
+              <Bot className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-sm text-slate-900 dark:text-white tracking-tight">EduNexus</span>
+                {isAdmin ? (
+                  <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[10px] font-bold shadow-2xs">
+                    <ShieldCheck className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span>Engine:</span>
+                    <select
+                      value={adminSelectedEngine}
+                      onChange={(e) => setAdminSelectedEngine(e.target.value)}
+                      className="bg-transparent font-black text-amber-900 dark:text-amber-100 outline-none cursor-pointer text-[10px]"
+                      title="Admin Only: Select Active AI Engine Strategy"
+                    >
+                      <option value="emgen_fallback_nanobanana" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">🍌 Nano Banana as Fallback for Emgen (Dual-Engine)</option>
+                      <option value="emgen_only" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">🎨 Emgen Only (High Quality)</option>
+                      <option value="nanobanana_only" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">🍌 Nano Banana Only (Rapid)</option>
+                      <option value="gemini-3.5-flash" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">⚡ Gemini 3.5 Flash (Text)</option>
+                      <option value="gemini-3.1-flash-lite" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">🚀 Gemini 3.1 Flash Lite (Text)</option>
+                    </select>
+                  </div>
+                ) : (
+                  <span className="text-[10px] font-bold uppercase bg-emerald-100 dark:bg-emerald-950/60 text-[#0E5E4B] dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <span>Socratic AI</span>
+                    <span className="text-[9px] opacity-80">(Emgen + Nano Banana Fallback)</span>
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
+                <span>Home</span>
+                <ChevronRight className="w-3 h-3 text-slate-300" />
+                <span className="text-[#0E5E4B] dark:text-emerald-400 font-bold">AI Tutor</span>
+              </div>
+            </div>
+          </div>
 
-        {/* TAB 1: CONFIGURATIONS & SESSIONS */}
-        {leftSidebarTab === 'config' && (
-          <div className="space-y-4 animate-fadeIn">
-            {/* Tutor Sessions section */}
-            <div className={`flex flex-col gap-2 ${
-              fullscreenWidget === 'sessions' 
-                ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn' 
-                : ''
-            }`}>
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
-                  <History className="w-3.5 h-3.5 text-[#a9b388]" />
-                  Pedagogical Sessions
+          {/* Global Search Bar */}
+          <div className="hidden md:flex items-center flex-1 max-w-md mx-4">
+            <div className="relative w-full">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search topics, concepts, documents..."
+                value={sessionSearchQuery}
+                onChange={(e) => setSessionSearchQuery(e.target.value)}
+                className="w-full bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl pl-10 pr-4 py-2 text-xs text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#19B37D]/30 focus:border-[#0E5E4B] transition-all shadow-2xs"
+              />
+            </div>
+          </div>
+
+          {/* Profile & Controls */}
+          <div className="flex items-center gap-3">
+            {/* Active Role Assistant Badge Selector */}
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold shadow-2xs">
+              <span className="text-slate-400 font-medium hidden sm:inline">Role:</span>
+              <select
+                value={activeRole}
+                onChange={(e) => setActiveRole(e.target.value as any)}
+                className="bg-transparent text-slate-800 dark:text-slate-100 font-bold outline-none cursor-pointer text-xs"
+                title="Active EduNexus Multi-Role AI Assistant Mode"
+              >
+                <option value="Student" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">🎓 Student Assistant</option>
+                <option value="Teacher" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">👨‍🏫 Teacher Assistant</option>
+                <option value="Parent" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">👨‍👩‍👧 Parent Assistant</option>
+                <option value="Administrator" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">🏛️ Admin Assistant</option>
+              </select>
+            </div>
+
+            {/* Dynamic AI Status Badge */}
+            <div className={`hidden sm:flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-bold transition-all shadow-2xs ${
+              aiStatus === 'ready'
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                : aiStatus === 'thinking'
+                ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800'
+                : aiStatus === 'connecting'
+                ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+            }`} title="Real-time status of backend AI Tutor connection">
+              <span className={`w-2 h-2 rounded-full ${
+                aiStatus === 'ready' ? 'bg-emerald-500 animate-pulse' :
+                aiStatus === 'thinking' ? 'bg-purple-500 animate-ping' :
+                aiStatus === 'connecting' ? 'bg-amber-500 animate-pulse' :
+                'bg-rose-500'
+              }`} />
+              <span className="capitalize">
+                {aiStatus === 'ready' && 'AI Status: Ready'}
+                {aiStatus === 'thinking' && 'AI Status: Thinking...'}
+                {aiStatus === 'connecting' && 'AI Status: Connecting...'}
+                {aiStatus === 'offline' && 'AI Status: Offline'}
+              </span>
+              {offlineQueue.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.2 rounded-full bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 text-[10px] font-black">
+                  {offlineQueue.length} queued
                 </span>
-                <div className="flex items-center gap-1.5">
-                  {user?.uid ? (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60" title="Sessions automatically persisted to Firestore">
-                      <Cloud className="w-3 h-3 text-emerald-600 animate-pulse" />
-                      <span>{isSyncingWithFirestore ? 'Syncing...' : 'Cloud Synced'}</span>
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-50 text-amber-700 border border-amber-200/60" title="Local Storage persistence">
-                      <CloudOff className="w-3 h-3 text-amber-600" />
-                      <span>Local</span>
-                    </span>
-                  )}
-                  <button
-                    onClick={handleCreateNewSession}
-                    className="text-[#5f6f52] hover:bg-[#5f6f52]/10 px-2 py-0.5 rounded-lg transition cursor-pointer flex items-center gap-1 text-[10px] font-bold border border-[#5f6f52]/20"
-                    title="Start New Tutor Chat"
-                  >
-                    <Plus className="w-3 h-3" />
-                    New
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFullscreenWidget(fullscreenWidget === 'sessions' ? null : 'sessions')}
-                    className="text-slate-400 hover:text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
-                    title={fullscreenWidget === 'sessions' ? "Minimize Window" : "Maximize to Full Screen"}
-                  >
-                    {fullscreenWidget === 'sessions' ? (
-                      <Minimize2 className="w-3.5 h-3.5" />
-                    ) : (
-                      <Maximize2 className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </div>
+              )}
+            </div>
+
+            <button className="p-2 rounded-xl text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition relative cursor-pointer" title="Notifications">
+              <Bell className="w-4 h-4" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-900" />
+            </button>
+
+            <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block" />
+
+            <div className="flex items-center gap-2.5 pl-1">
+              <div className="w-8 h-8 rounded-full bg-slate-800 text-white font-bold flex items-center justify-center text-xs shadow-xs border border-slate-700">
+                {profile?.displayName?.charAt(0) || 'G'}
+              </div>
+              <div className="hidden lg:block text-left leading-tight">
+                <span className="font-extrabold text-xs text-slate-800 dark:text-white block">{profile?.displayName || 'Godfrey Odhiambo'}</span>
+                <span className="text-[10px] text-slate-400 font-semibold uppercase">{profile?.role || 'Administrator'}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 space-y-6">
+
+        {/* 2. AI WORKSPACE HERO BANNER */}
+        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#0E5E4B] via-[#12725B] to-[#19B37D] text-white p-6 sm:p-8 shadow-xl border border-emerald-400/20">
+          {/* Subtle background glow graphics */}
+          <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-300/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-10 left-1/3 w-64 h-64 bg-teal-400/10 rounded-full blur-2xl pointer-events-none" />
+
+          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+            
+            {/* Banner Text */}
+            <div className="lg:col-span-8 space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-emerald-100 text-xs font-bold">
+                <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                <span>Next-Gen Socratic Dialogue Engine</span>
               </div>
 
-              {/* Session Search Input */}
-              {sessions.length > 2 && (
-                <div className="relative">
-                  <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    value={sessionSearchQuery}
-                    onChange={(e) => setSessionSearchQuery(e.target.value)}
-                    placeholder="Search past Socratic chats..."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-7 pr-2 py-1 text-[10px] text-slate-700 focus:outline-none focus:border-[#5f6f52]"
-                  />
-                  {sessionSearchQuery && (
-                    <button
-                      onClick={() => setSessionSearchQuery('')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-[10px]"
-                    >
-                      ×
-                    </button>
+              <h1 className="font-serif text-2xl sm:text-4xl font-bold tracking-tight leading-tight text-white">
+                EduNexus AI Tutor
+              </h1>
+
+              <p className="text-sm sm:text-base text-emerald-50 max-w-2xl font-normal leading-relaxed">
+                Personalized Socratic learning powered by AI. Create adaptive learning journeys that build deep conceptual understanding rather than rote memorization.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <button
+                  onClick={() => setTutorMode('learning-path')}
+                  className="px-5 py-2.5 rounded-2xl bg-white text-[#0E5E4B] hover:bg-emerald-50 font-extrabold text-xs transition-all shadow-md hover:shadow-lg cursor-pointer flex items-center gap-2"
+                >
+                  <Compass className="w-4 h-4 text-[#0E5E4B]" />
+                  <span>Generate Learning Path</span>
+                </button>
+
+                <button
+                  onClick={() => setTutorMode('socratic')}
+                  className="px-5 py-2.5 rounded-2xl bg-white/15 hover:bg-white/25 text-white border border-white/20 font-bold text-xs transition-all cursor-pointer flex items-center gap-2 backdrop-blur-md"
+                >
+                  <MessageSquare className="w-4 h-4 text-emerald-200" />
+                  <span>Continue Session</span>
+                </button>
+
+                <button
+                  onClick={() => setTutorMode('dashboard')}
+                  className="px-4 py-2.5 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs transition-all cursor-pointer flex items-center gap-2"
+                >
+                  <Gauge className="w-4 h-4 text-emerald-200" />
+                  <span>Open Dashboard</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Banner Illustration Visual */}
+            <div className="lg:col-span-4 flex justify-center lg:justify-end">
+              <div className="relative w-48 h-48 sm:w-56 sm:h-56 flex items-center justify-center">
+                
+                {/* Floating Robot & Icons Illustration */}
+                <div className="relative z-10 w-36 h-36 sm:w-44 sm:h-44 rounded-3xl bg-white/10 backdrop-blur-xl border border-white/30 p-4 shadow-2xl flex flex-col items-center justify-center gap-2 text-center group hover:scale-105 transition-all duration-300">
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white shadow-lg shadow-emerald-900/30">
+                    <Bot className="w-9 h-9 animate-bounce" />
+                  </div>
+                  <span className="text-xs font-black text-white tracking-wide">EduNexus Bot</span>
+                  <span className="text-[10px] text-emerald-100 font-medium">Socratic Guide v2.7</span>
+                </div>
+
+                {/* Floating Node Badges */}
+                <div className="absolute -top-2 -left-2 p-2.5 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 text-amber-300 shadow-lg animate-pulse">
+                  <Brain className="w-5 h-5" />
+                </div>
+
+                <div className="absolute bottom-2 -left-4 p-2.5 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 text-cyan-200 shadow-lg">
+                  <GraduationCap className="w-5 h-5" />
+                </div>
+
+                <div className="absolute top-4 -right-2 p-2.5 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 text-emerald-200 shadow-lg">
+                  <Zap className="w-5 h-5" />
+                </div>
+
+                <div className="absolute -bottom-2 -right-2 p-2.5 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 text-emerald-100 shadow-lg">
+                  <Activity className="w-5 h-5" />
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        {/* 3. TOP NAVIGATION CARDS (MODE SELECTOR) */}
+        <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {[
+            { id: 'socratic', name: 'Socratic Dialogue', icon: Cpu, desc: 'Interactive AI Querying' },
+            { id: 'dashboard', name: 'Tutor Dashboard', icon: Gauge, desc: 'Analytics & Metrics' },
+            { id: 'cbc-tutor', name: 'EduNexus CBC Tutor', icon: GraduationCap, desc: 'Kenyan Curriculum' },
+            { id: 'learning-path', name: 'Learning Path', icon: Compass, desc: 'Adaptive Pathways' },
+            { id: 'diagnostics', name: 'Diagnostics', icon: Activity, desc: 'Gaps & Misconceptions' },
+            { id: 'fullscreen', name: 'Full Screen', icon: Maximize2, desc: 'Immersive Focus' }
+          ].map((modeItem) => {
+            const Icon = modeItem.icon;
+            const isActive = tutorMode === modeItem.id || (modeItem.id === 'fullscreen' && fullscreenWidget === 'chat');
+            
+            return (
+              <button
+                key={modeItem.id}
+                onClick={() => {
+                  if (modeItem.id === 'fullscreen') {
+                    setFullscreenWidget(fullscreenWidget === 'chat' ? null : 'chat');
+                  } else {
+                    setTutorMode(modeItem.id as any);
+                  }
+                }}
+                className={`p-4 rounded-2xl border text-left transition-all duration-300 cursor-pointer flex flex-col gap-2 relative overflow-hidden group ${
+                  isActive
+                    ? 'bg-white dark:bg-slate-800 border-[#19B37D] shadow-lg ring-2 ring-[#19B37D]/20 text-[#0E5E4B] dark:text-emerald-400'
+                    : 'bg-white/80 dark:bg-slate-900/80 hover:bg-white border-slate-200/90 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className={`p-2 rounded-xl transition-colors ${
+                    isActive ? 'bg-[#0E5E4B] text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 group-hover:text-[#0E5E4B]'
+                  }`}>
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  {isActive && (
+                    <span className="w-2 h-2 rounded-full bg-[#19B37D] animate-ping" />
                   )}
                 </div>
-              )}
+                <div>
+                  <span className="font-extrabold text-xs block leading-tight">{modeItem.name}</span>
+                  <span className="text-[10px] text-slate-400 font-medium">{modeItem.desc}</span>
+                </div>
+              </button>
+            );
+          })}
+        </section>
 
-              <div className={`space-y-1.5 overflow-y-auto pr-1 ${
-                fullscreenWidget === 'sessions' 
-                  ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 space-y-0 mt-4' 
-                  : 'max-h-[170px]'
-              }`}>
-                {sessions
-                  .filter(sess => {
-                    if (!sessionSearchQuery.trim()) return true;
-                    const q = sessionSearchQuery.toLowerCase();
-                    return (
-                      sess.title?.toLowerCase().includes(q) ||
-                      sess.subject?.toLowerCase().includes(q) ||
-                      sess.topic?.toLowerCase().includes(q) ||
-                      (sess as any).cbcConcept?.toLowerCase().includes(q) ||
-                      sess.messages?.some(m => m.text?.toLowerCase().includes(q))
-                    );
-                  })
-                  .map((sess) => (
-                    <div
-                      key={sess.id}
-                      onClick={() => {
-                        loadSession(sess);
-                        if (fullscreenWidget === 'sessions') setFullscreenWidget(null);
-                      }}
-                      className={`group w-full p-2.5 rounded-xl text-left border transition text-[11px] flex items-center justify-between cursor-pointer ${
-                        activeSessionId === sess.id
-                          ? 'border-[#5f6f52] bg-[#5f6f52]/5 text-[#5f6f52] font-semibold'
-                          : 'border-slate-150 bg-slate-50/50 hover:bg-slate-50 hover:border-slate-300 text-slate-600'
-                      } ${fullscreenWidget === 'sessions' ? 'shadow-xs hover:shadow-md hover:-translate-y-0.5 duration-300' : ''}`}
+        {/* 4. MAIN THREE-COLUMN WORKSPACE */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+          {/* LEFT PANEL: LEARNING CONFIGURATION (3 Cols) */}
+          <aside className="lg:col-span-3 space-y-4 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-3xl p-4 shadow-2xs">
+            
+            {/* Segmented Control Header */}
+            <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl gap-1 border border-slate-200/60 dark:border-slate-700">
+              {[
+                { id: 'config', name: 'CONFIG', icon: Settings },
+                { id: 'materials', name: 'DOCS', icon: FileText },
+                { id: 'voice', name: 'TEMPLATES', icon: Headphones }
+              ].map((tab) => {
+                const TabIcon = tab.icon;
+                const isTabActive = leftSidebarTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setLeftSidebarTab(tab.id as any)}
+                    className={`flex-1 py-1.5 px-2 rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
+                      isTabActive
+                        ? 'bg-[#0E5E4B] text-white shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
+                    }`}
+                  >
+                    <TabIcon className="w-3 h-3" />
+                    <span>{tab.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* TAB 1: CONFIG & PARAMETERS */}
+            {leftSidebarTab === 'config' && (
+              <div className="space-y-4">
+                
+                {/* Card 1: Pedagogical Session */}
+                <div className="p-3.5 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-800/60 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase text-[#0E5E4B] dark:text-emerald-400 tracking-wider">
+                      Pedagogical Session
+                    </span>
+                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 flex items-center gap-1">
+                      <Cloud className="w-2.5 h-2.5 animate-pulse text-emerald-600" />
+                      Cloud Synced
+                    </span>
+                  </div>
+
+                  <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-emerald-100 dark:border-slate-700">
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block truncate">
+                      {isCbcSession ? `${cbcSubject} - ${cbcStrand}` : topic}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-medium block mt-0.5">
+                      {isCbcSession ? `Form 3 • CBC Competency` : `${subject} • Core Curriculum`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Card 2: Tutor Parameters */}
+                <div className="space-y-3 pt-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
+                    Tutor Parameters
+                  </span>
+
+                  {/* Subject Dropdown */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">Subject</label>
+                    <EditableSelect
+                      value={subject}
+                      onChange={setSubject}
+                      options={["Physics", "Mathematics", "Chemistry", "Biology", "English", "Computer Studies"]}
+                      placeholder=""
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-[#0E5E4B]"
+                    />
+                  </div>
+
+                  {/* Active Topic */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">Active Topic of Inquiry</label>
+                    <EditableSelect
+                      value={topic}
+                      onChange={setTopic}
+                      options={["Velocity and Acceleration", "Newtonian Kinematics", "Mass vs Weight", "Photosynthesis Cycles", "Cell Biology"]}
+                      placeholder=""
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-[#0E5E4B]"
+                    />
+                  </div>
+
+                  {/* Persona Selection */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">Pedagogical Persona</label>
+                    <EditableSelect
+                      value={persona}
+                      onChange={(v) => setPersona(v as any)}
+                      options={["Socratic Questioner", "Encouraging Mentor", "Critical Examiner"]}
+                      placeholder=""
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-[#0E5E4B]"
+                    />
+                  </div>
+
+                  {/* Cognitive Focus */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">Cognitive Level Focus</label>
+                    <EditableSelect
+                      value={cognitiveLevel}
+                      onChange={setCognitiveLevel}
+                      options={["Remember & Understand", "Understand & Apply", "Analyze & Evaluate", "Create & Synthesize"]}
+                      placeholder=""
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-[#0E5E4B]"
+                    />
+                  </div>
+
+                  {/* Difficulty Level Buttons */}
+                  <div className="space-y-1 pt-1">
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">Difficulty</label>
+                    <div className="grid grid-cols-3 gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                      {(['beginner', 'intermediate', 'advanced'] as const).map((lvl) => (
+                        <button
+                          key={lvl}
+                          onClick={() => setDifficultyLevel(lvl)}
+                          className={`py-1.5 rounded-lg text-[10px] font-extrabold capitalize transition cursor-pointer ${
+                            difficultyLevel === lvl
+                              ? 'bg-[#0E5E4B] text-white shadow-2xs'
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          {lvl}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Scaffolding Granularity */}
+                  <div className="space-y-1 pt-1">
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">Scaffolding Granularity</label>
+                    <div className="grid grid-cols-3 gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                      {(['low', 'medium', 'high'] as const).map((lvl) => (
+                        <button
+                          key={lvl}
+                          onClick={() => setScaffoldingLevel(lvl)}
+                          className={`py-1.5 rounded-lg text-[10px] font-extrabold capitalize transition cursor-pointer ${
+                            scaffoldingLevel === lvl
+                              ? 'bg-[#0E5E4B] text-white shadow-2xs'
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          {lvl}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card 3: AI Behaviour */}
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 space-y-2">
+                  <span className="text-[10px] font-extrabold uppercase text-slate-500 block">AI Behaviour Mode</span>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      onClick={() => setDialogueStyle('guided')}
+                      className={`p-2 rounded-xl border text-[11px] font-bold transition text-left ${
+                        dialogueStyle === 'guided'
+                          ? 'border-[#19B37D] bg-emerald-50/50 text-[#0E5E4B] dark:text-emerald-300'
+                          : 'border-slate-200 bg-white text-slate-600'
+                      }`}
                     >
-                      <div className="flex flex-col min-w-0 flex-1">
-                        <div className="flex items-center gap-1">
-                          <span className="font-bold truncate pr-1 text-xs">{sess.title}</span>
-                          {(sess as any).isCbcMode && (
-                            <span className="text-[8px] font-extrabold uppercase bg-amber-100 text-amber-800 px-1 rounded shrink-0">
-                              CBC
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-[10px] text-slate-400 mt-0.5 capitalize flex items-center gap-1 truncate">
-                          <span>{sess.subject || 'General'}</span>
-                          <span>•</span>
-                          <span>{sess.messages?.length || 0} msgs</span>
-                          {sess.difficultyLevel && (
-                            <>
-                              <span>•</span>
-                              <span className="uppercase text-[8px] font-bold tracking-tight">{sess.difficultyLevel}</span>
-                            </>
-                          )}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(e) => handleDeleteSession(sess.id, e)}
-                        className="opacity-0 group-hover:opacity-100 hover:text-red-500 p-1 transition rounded-md hover:bg-red-50 cursor-pointer shrink-0"
-                        title="Delete Session"
-                      >
-                        <Trash2 className="w-3 h-3" />
+                      Guided Discovery
+                    </button>
+                    <button
+                      onClick={() => setDialogueStyle('direct')}
+                      className={`p-2 rounded-xl border text-[11px] font-bold transition text-left ${
+                        dialogueStyle === 'direct'
+                          ? 'border-[#19B37D] bg-emerald-50/50 text-[#0E5E4B] dark:text-emerald-300'
+                          : 'border-slate-200 bg-white text-slate-600'
+                      }`}
+                    >
+                      Direct Explanation
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            {/* TAB 2: DOCUMENTS & MATERIALS */}
+            {leftSidebarTab === 'materials' && (
+              <div className="space-y-4">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
+                  Reference Files & Uploads
+                </span>
+
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-2 border-dashed border-emerald-500/30 hover:border-[#19B37D] bg-emerald-50/30 rounded-2xl p-4 text-center cursor-pointer transition flex flex-col items-center gap-1.5"
+                >
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    accept=".pdf,.docx"
+                    className="hidden"
+                  />
+                  <Upload className="w-5 h-5 text-[#0E5E4B]" />
+                  <span className="text-xs font-bold text-slate-700">Upload PDF or DOCX</span>
+                  <span className="text-[9px] text-slate-400 font-medium">Ground Socratic answers in curriculum docs</span>
+                </div>
+
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {uploadedResources.map((res) => (
+                    <div key={res.id} className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between text-xs">
+                      <span className="font-bold truncate max-w-[140px] text-slate-700">{res.fileName}</span>
+                      <button onClick={(e) => handleDeleteResource(res, e)} className="text-slate-400 hover:text-rose-500 p-1">
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   ))}
-              </div>
-            </div>
-
-            <hr className="border-slate-100" />
-
-            {/* Configurations section */}
-            <div className={
-              fullscreenWidget === 'configurations'
-                ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn'
-                : 'space-y-3'
-            }>
-              <div className="flex items-center justify-between border-b border-slate-50 pb-2">
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
-                  <Sliders className="w-3.5 h-3.5 text-[#a9b388]" />
-                  Tutor Parameters
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setFullscreenWidget(fullscreenWidget === 'configurations' ? null : 'configurations')}
-                  className="text-slate-400 hover:text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
-                  title={fullscreenWidget === 'configurations' ? "Minimize Window" : "Maximize to Full Screen"}
-                >
-                  {fullscreenWidget === 'configurations' ? (
-                    <Minimize2 className="w-3.5 h-3.5" />
-                  ) : (
-                    <Maximize2 className="w-3.5 h-3.5" />
-                  )}
-                </button>
-              </div>
-
-              <div className={`space-y-3 text-xs ${
-                fullscreenWidget === 'configurations' 
-                  ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 space-y-0 mt-6' 
-                  : ''
-              }`}>
-                {isCbcSession && (
-                  <div className={`bg-amber-50/70 border border-amber-200/60 rounded-xl p-3 space-y-2 animate-fadeIn mb-2 ${
-                    fullscreenWidget === 'configurations' ? 'md:col-span-2 lg:col-span-3 mb-0' : ''
-                  }`}>
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-800 flex items-center gap-1">
-                      <GraduationCap className="w-3.5 h-3.5 text-amber-600" />
-                      Active CBC Pathway
-                    </span>
-                    <div className="text-[11px] space-y-1 text-slate-700 bg-white/65 p-2 rounded-lg border border-amber-100">
-                      <div><span className="text-slate-400 font-medium block text-[9px] uppercase">Subject</span> <span className="font-bold">{cbcSubject}</span></div>
-                      <div><span className="text-slate-400 font-medium block text-[9px] uppercase">Strand / Topic</span> <span className="font-bold">{cbcStrand}</span></div>
-                      <div><span className="text-slate-400 font-medium block text-[9px] uppercase">Substrand / Subtopic</span> <span className="font-bold">{cbcSubStrand}</span></div>
-                      <div><span className="text-slate-400 font-medium block text-[9px] uppercase">Concept</span> <span className="font-bold">{cbcConcept}</span></div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleChangeTopic}
-                      className="w-full py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[10px] tracking-wider uppercase rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-xs"
-                    >
-                      <BookOpen className="w-3.5 h-3.5" />
-                      Change Topic
-                    </button>
-                  </div>
-                )}
-
-                {/* Subject selector */}
-                <div className="flex flex-col justify-between">
-                  <label className="block text-slate-500 font-bold mb-1">Subject</label>
-                  <EditableSelect
-                    value={subject}
-                    onChange={setSubject}
-                    options={[
-                      "Physics",
-                      "Mathematics",
-                      "Chemistry",
-                      "Biology",
-                      "General Science",
-                      "History & Geography",
-                      "Languages & Literature"
-                    ]}
-                    placeholder=""
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52]"
-                  />
-                </div>
-
-                {/* Topic textbox */}
-                <div className="flex flex-col justify-between">
-                  <label className="block text-slate-500 font-bold mb-1">Active Topic of Inquiry</label>
-                  <input
-                    type="text"
-                    value={topic}
-                    onChange={(e) => setTopic(e.target.value)}
-                    placeholder="e.g. Newton's Second Law"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52]"
-                  />
-                </div>
-
-                {/* Pedagogical Persona */}
-                <div className="flex flex-col justify-between">
-                  <div>
-                    <label className="block text-slate-500 font-bold mb-1">Pedagogical Persona</label>
-                    <EditableSelect
-                      value={persona}
-                      onChange={(val) => setPersona(val as any)}
-                      options={["Socratic Questioner", "Encouraging Mentor", "Critical Examiner"]}
-                      placeholder=""
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52]"
-                    />
-                  </div>
-                  <p className="text-[9px] text-slate-400 mt-1 leading-normal">
-                    {persona === 'Socratic Questioner' && "Warm, inquisitive Socratic dialogue probing your assumptions."}
-                    {persona === 'Encouraging Mentor' && "Highly reinforcing, supportive guide celebrating your growth."}
-                    {persona === 'Critical Examiner' && "Rigorous, analytical challenger testing proofs and logic."}
-                    {persona !== 'Socratic Questioner' && persona !== 'Encouraging Mentor' && persona !== 'Critical Examiner' && `Custom tutor personality: "${persona}"`}
-                  </p>
-                </div>
-
-                {/* Difficulty Level selector */}
-                <div className="flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-slate-500 font-bold flex items-center gap-1">
-                        <Gauge className="w-3.5 h-3.5 text-[#5f6f52]" />
-                        Difficulty Level
-                      </label>
-                      <span className={`text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${
-                        difficultyLevel === 'beginner' 
-                          ? 'bg-emerald-100 text-emerald-800 border-emerald-200' 
-                          : difficultyLevel === 'intermediate'
-                          ? 'bg-amber-100 text-amber-800 border-amber-200'
-                          : 'bg-rose-100 text-rose-800 border-rose-200'
-                      }`}>
-                        {difficultyLevel}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-lg">
-                      {(['beginner', 'intermediate', 'advanced'] as const).map((level) => (
-                        <button
-                          key={level}
-                          type="button"
-                          onClick={() => setDifficultyLevel(level)}
-                          className={`py-1 text-[10px] font-extrabold rounded text-center transition capitalize cursor-pointer ${
-                            difficultyLevel === level
-                              ? level === 'beginner' 
-                                ? 'bg-emerald-600 text-white shadow-2xs'
-                                : level === 'intermediate'
-                                ? 'bg-amber-600 text-white shadow-2xs'
-                                : 'bg-rose-600 text-white shadow-2xs'
-                              : 'text-slate-500 hover:text-slate-700'
-                          }`}
-                        >
-                          {level}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <p className="text-[9px] text-slate-400 mt-1 leading-normal">
-                    {difficultyLevel === 'beginner' && "Simplifies vocabulary, uses relatable analogies & gentle single-step prompts."}
-                    {difficultyLevel === 'intermediate' && "Balanced Socratic questioning with standard curriculum terminology & structured hints."}
-                    {difficultyLevel === 'advanced' && "High-rigor academic depth, multi-variable logic puzzles, counter-examples & proofs."}
-                  </p>
-                </div>
-
-                {/* Scaffolding level */}
-                <div className="flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-slate-500 font-bold">Scaffolding Granularity</label>
-                      <span className="text-[10px] font-extrabold uppercase bg-[#5f6f52]/10 text-[#5f6f52] px-1.5 py-0.5 rounded">
-                        {scaffoldingLevel}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-lg">
-                      {(['low', 'medium', 'high'] as const).map((level) => (
-                        <button
-                          key={level}
-                          type="button"
-                          onClick={() => setScaffoldingLevel(level)}
-                          className={`py-1 text-[10px] font-extrabold rounded text-center transition capitalize cursor-pointer ${
-                            scaffoldingLevel === level
-                              ? 'bg-[#5f6f52] text-white shadow-2xs'
-                              : 'text-slate-500 hover:text-slate-700'
-                          }`}
-                        >
-                          {level}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <p className="text-[9px] text-slate-400 mt-1 leading-normal">
-                    {scaffoldingLevel === 'high' && "Breaks reasoning into small, bite-sized questions."}
-                    {scaffoldingLevel === 'medium' && "Guides step-by-step, helping locate mistakes incrementally."}
-                    {scaffoldingLevel === 'low' && "Relies on conceptual hints and higher-level questions."}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 2: MATERIALS & CONTEXT UPLOADS */}
-        {leftSidebarTab === 'materials' && (
-          <div className="space-y-4 animate-fadeIn">
-            {/* Lesson Material Importer */}
-            <div className="flex flex-col">
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] block mb-1">Import Lesson Context</span>
-              <p className="text-[10px] text-slate-400 leading-normal mb-2">
-                Ground the tutor conversation in any generated lesson materials.
-              </p>
-
-              <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
-                {documents.length === 0 ? (
-                  <div className="p-3 border border-dashed border-slate-200 rounded-xl text-center text-slate-400 text-[10px]">
-                    No generated materials found to import.
-                  </div>
-                ) : (
-                  documents.map((doc) => (
-                    <button
-                      key={doc.id}
-                      onClick={() => handleImportDocument(doc.id)}
-                      className={`w-full p-2 rounded-xl text-left border transition text-xs flex flex-col gap-0.5 cursor-pointer ${
-                        selectedDocId === doc.id
-                          ? 'border-[#5f6f52] bg-[#5f6f52]/5 text-[#5f6f52] font-semibold'
-                          : 'border-slate-150 bg-slate-50/50 hover:bg-slate-50 hover:border-slate-300 text-slate-600'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <FileText className="w-3.5 h-3.5 shrink-0" />
-                        <span className="font-bold truncate">{doc.topic}</span>
-                      </div>
-                      <div className="flex justify-between items-center text-[9px] text-slate-400 mt-0.5">
-                        <span>{doc.classLevel}</span>
-                        <span>{doc.subject}</span>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <hr className="border-slate-100" />
-
-            {/* Uploaded Curriculum Resources */}
-            <div className="flex flex-col gap-2">
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] block">Curriculum Guides & Uploads</span>
-              <p className="text-[10px] text-slate-400 leading-normal mb-1">
-                Upload PDF or DOCX files to ground EduNexus AI Tutor in curriculum guides.
-              </p>
-
-              {/* Drag & Drop zone */}
-              <div
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  handleFileUpload(e);
-                }}
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-[#5f6f52]/30 hover:border-[#5f6f52] bg-slate-50/50 hover:bg-[#5f6f52]/5 transition rounded-xl p-3 text-center cursor-pointer flex flex-col items-center justify-center gap-1.5"
-              >
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileUpload}
-                  accept=".pdf,.docx"
-                  className="hidden"
-                />
-                {isUploading ? (
-                  <div className="flex flex-col items-center gap-1.5">
-                    <Loader2 className="w-5 h-5 text-[#5f6f52] animate-spin" />
-                    <span className="text-[10px] font-bold text-[#5f6f52]">Processing... {uploadProgress}%</span>
-                  </div>
-                ) : (
-                  <>
-                    <Upload className="w-5 h-5 text-slate-400 hover:text-[#5f6f52] transition" />
-                    <span className="text-[10px] font-bold text-slate-500">Drag & drop or Click to upload</span>
-                    <span className="text-[8px] text-slate-400 uppercase font-extrabold">PDF or DOCX (Max 10MB)</span>
-                  </>
-                )}
-              </div>
-
-              {uploadError && (
-                <p className="text-[9px] text-red-500 font-semibold leading-tight mt-1">{uploadError}</p>
-              )}
-
-              {/* Uploaded Resources List */}
-              <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1 mt-1.5">
-                {uploadedResources.length === 0 ? (
-                  <div className="p-3 border border-dashed border-slate-100 rounded-xl text-center text-slate-300 text-[10px]">
-                    No custom resources uploaded yet.
-                  </div>
-                ) : (
-                  uploadedResources.map((res) => {
-                    const isSelected = selectedResourceId === res.id;
-                    return (
-                      <div
-                        key={res.id}
-                        onClick={() => setSelectedResourceId(isSelected ? '' : res.id)}
-                        className={`group w-full p-2.5 rounded-xl border transition text-xs flex items-center justify-between cursor-pointer ${
-                          isSelected
-                            ? 'border-[#5f6f52] bg-[#5f6f52]/5 text-[#5f6f52]'
-                            : 'border-slate-150 bg-slate-50/30 hover:bg-slate-50 text-slate-600'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
-                          <div className={`p-1.5 rounded-lg shrink-0 ${isSelected ? 'bg-[#5f6f52]/10 text-[#5f6f52]' : 'bg-slate-100 text-slate-400'}`}>
-                            {res.fileType === 'pdf' ? (
-                              <Paperclip className="w-3.5 h-3.5" />
-                            ) : (
-                              <FileUp className="w-3.5 h-3.5" />
-                            )}
-                          </div>
-                          <div className="flex flex-col min-w-0">
-                            <span className="font-bold truncate text-[11px] leading-tight">{res.fileName}</span>
-                            <span className="text-[8px] text-slate-400 mt-0.5">
-                              {new Date(res.uploadedAt).toLocaleDateString()}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1 shrink-0">
-                          {isSelected && (
-                            <span className="p-0.5 bg-emerald-500 text-white rounded-full">
-                              <Check className="w-2.5 h-2.5" />
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteResource(res, e)}
-                            className="opacity-0 group-hover:opacity-100 hover:text-red-500 p-1 transition rounded-md hover:bg-red-50 cursor-pointer"
-                            title="Delete resource context"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: VOICE & AUDIO SETTINGS */}
-        {leftSidebarTab === 'voice' && (
-          <div className="space-y-3 bg-[#5f6f52]/5 border border-[#5f6f52]/10 p-3 rounded.xl animate-fadeIn">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#5f6f52] flex items-center gap-1.5">
-                <Headphones className="w-3.5 h-3.5" />
-                Dialogue Speech Controls
-              </span>
-              <button
-                onClick={() => setShowVoiceSettings(!showVoiceSettings)}
-                className="text-[#5f6f52] hover:text-[#4d5a42] p-0.5 transition cursor-pointer"
-                title="Voice Customization Settings"
-              >
-                <Settings className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            <div className="space-y-2.5 text-xs">
-              {/* Auto Voice Output Toggle */}
-              <label className="flex items-center justify-between cursor-pointer p-1.5 bg-white border border-slate-200/80 rounded-xl transition">
-                <span className="text-slate-700 font-semibold text-[11px]">Tutor Audio Output</span>
-                <div className="relative inline-flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={isVoiceEnabled}
-                    onChange={(e) => {
-                      const val = e.target.checked;
-                      setIsVoiceEnabled(val);
-                      if (!val && window.speechSynthesis) {
-                        window.speechSynthesis.cancel();
-                        setIsSpeaking(false);
-                      } else if (val && messages.length > 0) {
-                        speakText(messages[messages.length - 1].text);
-                      }
-                    }}
-                    className="sr-only peer"
-                  />
-                  <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3.5 after:transition-all peer-checked:bg-[#5f6f52]"></div>
-                </div>
-              </label>
-
-              {/* Hands-free auto voice sequence toggle */}
-              <label className="flex items-center justify-between cursor-pointer p-1.5 bg-white border border-slate-200/80 rounded-xl transition">
-                <div className="flex flex-col">
-                  <span className="text-slate-700 font-semibold text-[11px]">Hands-Free Mode</span>
-                  <span className="text-[9px] text-slate-400 leading-tight">Auto-listen after tutor speaks</span>
-                </div>
-                <div className="relative inline-flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={isHandsFree}
-                    onChange={(e) => {
-                      setIsHandsFree(e.target.checked);
-                      if (e.target.checked) {
-                        setIsVoiceEnabled(true);
-                      }
-                    }}
-                    className="sr-only peer"
-                  />
-                  <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3.5 after:transition-all peer-checked:bg-[#5f6f52]"></div>
-                </div>
-              </label>
-
-              {/* Dropdowns for Browser Voices & Playback Speed */}
-              <div className="pt-2 border-t border-slate-200/60 grid grid-cols-1 gap-2">
-                <div>
-                  <label className="block text-slate-500 font-semibold mb-1 text-[10px] uppercase tracking-wider">Tutor Voice</label>
-                  <div className="relative">
-                    <select
-                      value={selectedVoiceName}
-                      onChange={(e) => setSelectedVoiceName(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-lg p-2 pr-8 text-xs text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52] appearance-none cursor-pointer truncate"
-                    >
-                      {voices.length === 0 ? (
-                        <option value="">Default voice</option>
-                      ) : (
-                        voices.map((v, i) => (
-                          <option key={i} value={v.name}>
-                            {v.name.replace('Microsoft', '').replace('Google', '').trim()}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
-                      <ChevronDown className="w-3.5 h-3.5" />
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-slate-500 font-semibold mb-1 text-[10px] uppercase tracking-wider">Playback Speed</label>
-                  <div className="relative">
-                    <select
-                      value={voiceRate}
-                      onChange={(e) => setVoiceRate(parseFloat(e.target.value))}
-                      className="w-full bg-white border border-slate-200 rounded-lg p-2 pr-8 text-xs text-slate-700 font-medium focus:outline-none focus:border-[#5f6f52] appearance-none cursor-pointer"
-                    >
-                      <option value="0.5">0.5x (Slow)</option>
-                      <option value="0.75">0.75x</option>
-                      <option value="1">1.0x (Normal)</option>
-                      <option value="1.25">1.25x</option>
-                      <option value="1.5">1.5x (Fast)</option>
-                      <option value="1.75">1.75x</option>
-                      <option value="2">2.0x (Very Fast)</option>
-                    </select>
-                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
-                      <ChevronDown className="w-3.5 h-3.5" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Advanced synthesis settings */}
-              <AnimatePresence>
-                {showVoiceSettings && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="space-y-2 pt-2 border-t border-slate-150 overflow-hidden"
-                  >
-                    <div>
-                      <div className="flex justify-between text-[10px] text-slate-500 font-semibold">
-                        <span>Speaking Speed</span>
-                        <span>{voiceRate}x</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0.5"
-                        max="2"
-                        step="0.1"
-                        value={voiceRate}
-                        onChange={(e) => setVoiceRate(parseFloat(e.target.value))}
-                        className="w-full accent-[#5f6f52]"
-                      />
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-[10px] text-slate-500 font-semibold">
-                        <span>Tone Pitch</span>
-                        <span>{voicePitch}x</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0.5"
-                        max="1.5"
-                        step="0.1"
-                        value={voicePitch}
-                        onChange={(e) => setVoicePitch(parseFloat(e.target.value))}
-                        className="w-full accent-[#5f6f52]"
-                      />
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between items-center text-[10px] text-slate-500 font-semibold">
-                        <span className="flex items-center gap-1">
-                          {voiceVolume === 0 ? (
-                            <VolumeX className="w-3 h-3 text-slate-400" />
-                          ) : voiceVolume < 0.5 ? (
-                            <Volume1 className="w-3 h-3 text-[#5f6f52]" />
-                          ) : (
-                            <Volume2 className="w-3 h-3 text-[#5f6f52]" />
-                          )}
-                          Voice Volume
-                        </span>
-                        <span>{Math.round(voiceVolume * 100)}%</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.05"
-                        value={voiceVolume}
-                        onChange={(e) => setVoiceVolume(parseFloat(e.target.value))}
-                        className="w-full accent-[#5f6f52]"
-                      />
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
-        )}
-
-        <div className="mt-auto pt-2">
-          <button
-            onClick={clearChat}
-            className="w-full py-2 border border-slate-200 hover:bg-red-50 hover:border-red-200 text-slate-500 hover:text-red-600 rounded-xl text-[10px] font-extrabold tracking-wider transition uppercase cursor-pointer flex items-center justify-center gap-1.5"
-          >
-            <Trash2 className="w-3 h-3" />
-            Clear Chat Log
-          </button>
-        </div>
-      </div>
-
-      {/* Main Interactive Chat Panel - 6 Columns */}
-      <div className={
-        fullscreenWidget === 'chat'
-          ? 'fixed inset-0 z-50 bg-white flex flex-col h-screen w-screen overflow-hidden animate-fadeIn'
-          : 'xl:col-span-6 flex flex-col bg-white border border-[#e5e1da] rounded-2xl shadow-xs overflow-hidden max-h-full'
-      }>
-        
-        {tutorMode === 'cbc-tutor' && (!isCbcSession || messages.length === 0) ? (
-          /* Render CBC Setup Form */
-          <div className="flex-1 flex flex-col justify-center items-center p-8 bg-slate-50/50 overflow-y-auto relative">
-            <button
-              type="button"
-              onClick={() => setFullscreenWidget(fullscreenWidget === 'chat' ? null : 'chat')}
-              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 hover:bg-slate-100 p-2 rounded-xl transition cursor-pointer"
-              title={fullscreenWidget === 'chat' ? "Minimize Window" : "Maximize to Full Screen"}
-            >
-              {fullscreenWidget === 'chat' ? (
-                <Minimize2 className="w-5 h-5" />
-              ) : (
-                <Maximize2 className="w-5 h-5" />
-              )}
-            </button>
-            <SetupForm onStart={(path) => handleCreateNewCbcSession(path.subject, path.strand, path.subStrand, path.concept, path.socraticMode)} />
-          </div>
-        ) : (
-          /* Render normal Socratic conversation interface */
-          <>
-            {/* Tutor Header Info bar */}
-            <div className="px-5 py-3 bg-[#5f6f52] text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-white relative">
-                  <Sparkles className="w-4.5 h-4.5 text-[#fefae0]" />
-                  {isProcessing && (
-                    <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-yellow-400 rounded-full border-2 border-[#5f6f52] animate-ping" />
-                  )}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-serif font-bold text-sm block leading-none">
-                      {isCbcSession ? 'EduNexus AI Tutor' : (
-                        <>
-                          {persona === 'Socratic Questioner' && 'Socratic Sage'}
-                          {persona === 'Encouraging Mentor' && 'Encouraging Mentor'}
-                          {persona === 'Critical Examiner' && 'Critical Examiner'}
-                        </>
-                      )}
-                    </span>
-                    {isVoiceEnabled && (
-                      <span className="text-[9px] bg-white/20 text-[#fefae0] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider flex items-center gap-1">
-                        <Volume2 className="w-2.5 h-2.5 animate-bounce" /> Voice Mode
-                      </span>
-                    )}
-                    <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 border ${
-                      difficultyLevel === 'beginner' 
-                        ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/30' 
-                        : difficultyLevel === 'intermediate'
-                        ? 'bg-amber-500/20 text-amber-200 border-amber-400/30'
-                        : 'bg-rose-500/20 text-rose-200 border-rose-400/30'
-                    }`}>
-                      <Gauge className="w-2.5 h-2.5" />
-                      {difficultyLevel}
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-white/80 block mt-0.5">
-                    {isCbcSession ? "Learning Design Specialist | St. Mary's Girls Secondary School Persona" : (
-                      <>
-                        {persona === 'Socratic Questioner' && 'Guiding you step-by-step to discover answers on your own'}
-                        {persona === 'Encouraging Mentor' && 'Nurturing your learning journey with positive reassurance'}
-                        {persona === 'Critical Examiner' && 'Rigorously testing your logical and scientific proofs'}
-                      </>
-                    )}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap justify-start sm:justify-end w-full sm:w-auto">
-                <div className="text-right text-[10px] font-mono opacity-85 shrink-0 hidden sm:block">
-                  {isCbcSession ? 'Kenyan CBC Model' : subject} ➔ {topic}
-                </div>
-                {isCbcSession && (
-                  <button
-                    onClick={handleChangeTopic}
-                    className="px-2.5 py-1.5 text-[10px] font-extrabold tracking-wider uppercase bg-[#d4a373] hover:bg-[#c39262] border border-[#bfa285]/20 rounded-lg transition-all flex items-center gap-1 cursor-pointer text-white shrink-0 shadow-sm"
-                    title="Change Topic & Return to Setup Form"
-                  >
-                    <BookOpen className="w-3 h-3" />
-                    Change Topic
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={handleGenerateSocraticFlashcards}
-                  disabled={isGeneratingFlashcards}
-                  className="px-2.5 py-1 text-[10px] font-extrabold tracking-wider uppercase bg-[#d4a373] hover:bg-[#c39262] border border-white/20 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-white shrink-0 shadow-sm disabled:opacity-50"
-                  title="Automatically generate context-aware flashcards based on the specific lesson or study guide"
-                >
-                  {isGeneratingFlashcards ? (
-                    <>
-                      <Loader2 className="w-3 h-3 animate-spin text-white" />
-                      <span>Generating...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Layers className="w-3 h-3 text-[#fefae0]" />
-                      <span>Generate Flashcards</span>
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={clearChat}
-                  className="px-2.5 py-1 text-[10px] font-extrabold tracking-wider uppercase bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/30 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-rose-100 hover:text-white shrink-0"
-                  title="Clear Active Chat History (With Confirmation)"
-                >
-                  <Trash2 className="w-3 h-3 text-rose-200" />
-                  Clear Chat
-                </button>
-                <button
-                  onClick={handleExportChatLog}
-                  className="px-2.5 py-1 text-[10px] font-extrabold tracking-wider uppercase bg-white/10 hover:bg-white/20 border border-white/25 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-[#fefae0] hover:text-white shrink-0"
-                  title="Export Chat Log (.md)"
-                >
-                  <Download className="w-3 h-3 text-[#fefae0]" />
-                  Export Log
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFullscreenWidget(fullscreenWidget === 'chat' ? null : 'chat')}
-                  className="p-1.5 hover:bg-white/10 border border-white/10 hover:border-white/25 rounded-lg transition-all flex items-center justify-center cursor-pointer text-[#fefae0] hover:text-white shrink-0"
-                  title={fullscreenWidget === 'chat' ? "Minimize Chat Window" : "Maximize Chat to Full Screen"}
-                >
-                  {fullscreenWidget === 'chat' ? (
-                    <Minimize2 className="w-4 h-4" />
-                  ) : (
-                    <Maximize2 className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Breadcrumb Indicator */}
-            <div className="px-5 py-2 bg-slate-100 border-b border-[#e5e1da]/65 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 font-medium shrink-0 shadow-2xs">
-              <span className="text-slate-400 uppercase tracking-wider font-extrabold text-[9px] shrink-0">Current Focus:</span>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {/* Subject */}
-                <span className="bg-white/80 border border-slate-200/60 px-2 py-0.5 rounded text-slate-700 font-semibold" title="Subject">
-                  {isCbcSession ? cbcSubject : (subject || 'Physics')}
-                </span>
-                
-                <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
-                
-                {/* Strand / Topic */}
-                <span className="bg-white/80 border border-slate-200/60 px-2 py-0.5 rounded text-slate-700 font-semibold" title="Strand">
-                  {isCbcSession ? cbcStrand : (topic.includes('(') ? topic.split('(')[0].trim() : (topic || 'Velocity and Acceleration'))}
-                </span>
-
-                <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
-                
-                {/* Sub-strand */}
-                <span className="bg-white/80 border border-slate-200/60 px-2 py-0.5 rounded text-slate-700 font-semibold" title="Sub-strand">
-                  {isCbcSession ? (cbcSubStrand || 'General') : (topic.includes('(') ? topic.split('(')[1].replace(')', '').trim() : 'Kinematics')}
-                </span>
-
-                <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
-                
-                {/* Concept */}
-                <span className="bg-[#5f6f52]/10 text-[#5f6f52] border border-[#5f6f52]/20 px-2.5 py-0.5 rounded-full font-bold" title="Concept">
-                  {isCbcSession ? (cbcConcept || 'Introductory Concept') : (conceptMap.nodes?.[0]?.label || 'Velocity & Acceleration')}
-                </span>
-              </div>
-            </div>
-
-            {/* Dynamic Speech Waveform Panel */}
-            {(isSpeaking || isListening) && (
-              <div className={`px-5 py-2.5 flex items-center justify-between transition-all ${
-                isSpeaking ? 'bg-emerald-50 text-emerald-800 border-b border-emerald-100' : 'bg-amber-50 text-amber-800 border-b border-amber-100'
-              }`}>
-                <div className="flex items-center gap-2.5 text-xs font-semibold">
-                  <Activity className={`w-4 h-4 shrink-0 ${isSpeaking ? 'text-emerald-600 animate-pulse' : 'text-amber-600 animate-bounce'}`} />
-                  <span>
-                    {isSpeaking ? "Socratic Sage is speaking aloud..." : "Voice Dialogue Listening... Talk now!"}
-                  </span>
-                </div>
-
-                {/* Audio Waveform Bars */}
-                <div className="flex gap-1 items-end h-4 pr-1">
-                  {[1, 2, 3, 4, 5, 6, 7].map((bar) => (
-                    <motion.div
-                      key={bar}
-                      animate={{
-                        height: isSpeaking 
-                          ? [4, 16, 6, 12, 4][bar % 5] 
-                          : [4, 14, 8, 16, 4][bar % 5]
-                      }}
-                      transition={{
-                        duration: 0.8 + (bar * 0.1),
-                        repeat: Infinity,
-                        ease: "easeInOut"
-                      }}
-                      className={`w-1 rounded-full ${isSpeaking ? 'bg-emerald-500' : 'bg-amber-500'}`}
-                      style={{ height: '4px' }}
-                    />
-                  ))}
                 </div>
               </div>
             )}
 
-            {/* Scrollable Conversation History */}
-            <div className="flex-1 p-5 overflow-y-auto bg-slate-50/50 space-y-4">
+            {/* TAB 3: VOICE & SPEECH */}
+            {leftSidebarTab === 'voice' && (
+              <div className="space-y-3 p-3 bg-emerald-50/30 rounded-2xl border border-emerald-100">
+                <span className="text-[10px] font-bold uppercase text-[#0E5E4B] block">Speech & Audio Output</span>
+                <label className="flex items-center justify-between p-2 bg-white rounded-xl border text-xs font-bold text-slate-700">
+                  <span>Enable Tutor Speech</span>
+                  <input
+                    type="checkbox"
+                    checked={isVoiceEnabled}
+                    onChange={(e) => setIsVoiceEnabled(e.target.checked)}
+                    className="accent-[#0E5E4B]"
+                  />
+                </label>
+              </div>
+            )}
+
+          </aside>
+
+          {/* CENTER PANEL: PRIMARY LEARNING WORKSPACE (6 Cols) */}
+          <main className="lg:col-span-6 space-y-5 flex flex-col">
+            
+            {/* Top Concept Selectors */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-3xl p-5 shadow-2xs space-y-4">
               
-              {/* Quick Icebreakers for onboarding */}
-              {messages.length === 1 && (
-                <div className="space-y-2 animate-fadeIn">
-                  <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Suggested Inquiry Pathways</span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button
-                      onClick={() => handleIcebreaker("Help me conceptualize what velocity means vs acceleration.")}
-                      className="p-2.5 bg-white border border-slate-200 rounded-xl text-left hover:border-[#5f6f52] hover:bg-[#5f6f52]/5 text-xs text-slate-600 transition"
-                    >
-                      <span className="font-bold text-[#5f6f52] block mb-0.5">Velocity vs Acceleration</span>
-                      <span className="text-[10px] text-slate-400">Identify standard misconceptions in movement.</span>
-                    </button>
-                    <button
-                      onClick={() => handleIcebreaker("I'm confused about mass vs. weight. Can we step through the math?")}
-                      className="p-2.5 bg-white border border-slate-200 rounded-xl text-left hover:border-[#5f6f52] hover:bg-[#5f6f52]/5 text-xs text-slate-600 transition"
-                    >
-                      <span className="font-bold text-[#5f6f52] block mb-0.5">Mass vs Weight</span>
-                      <span className="text-[10px] text-slate-400">Drill down on gravity, force, and kilograms.</span>
-                    </button>
-                    <button
-                      onClick={() => handleIcebreaker("Let's break down photosynthesis step-by-step.")}
-                      className="p-2.5 bg-white border border-slate-200 rounded-xl text-left hover:border-[#5f6f52] hover:bg-[#5f6f52]/5 text-xs text-slate-600 transition"
-                    >
-                      <span className="font-bold text-[#5f6f52] block mb-0.5">Photosynthesis Loops</span>
-                      <span className="text-[10px] text-slate-400">Step through light-dependent and Calvin cycles.</span>
-                    </button>
-                    <button
-                      onClick={() => handleIcebreaker("Can you help me solve a tough physics kinematics equation?")}
-                      className="p-2.5 bg-white border border-slate-200 rounded-xl text-left hover:border-[#5f6f52] hover:bg-[#5f6f52]/5 text-xs text-slate-600 transition"
-                    >
-                      <span className="font-bold text-[#5f6f52] block mb-0.5">Kinematic Equation Scaffold</span>
-                      <span className="text-[10px] text-slate-400">Break down variables, unknowns, and formulas.</span>
-                    </button>
+              {/* Dropdowns row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                    <BookOpen className="w-3 h-3 text-[#0E5E4B]" />
+                    Subtopic / Substrand
+                  </label>
+                  <EditableSelect
+                    value={subTopicSelection}
+                    onChange={setSubTopicSelection}
+                    options={["Kinematics & Vector Motion", "Forces & Newton's Laws", "Energy & Work", "Wave Mechanics"]}
+                    placeholder="Select a Subtopic / Substrand"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:border-[#0E5E4B]"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                    <Target className="w-3 h-3 text-[#0E5E4B]" />
+                    Specific Concept
+                  </label>
+                  <EditableSelect
+                    value={specificConceptSelection}
+                    onChange={setSpecificConceptSelection}
+                    options={["Instantaneous vs Average Acceleration", "Velocity-Time Graphs", "Free Fall Mechanics", "Projectile Motion Vectors"]}
+                    placeholder="Select a Specific Concept"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:border-[#0E5E4B]"
+                  />
+                </div>
+              </div>
+
+              {/* Dialogue Style Cards */}
+              <div className="space-y-2 pt-1">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">Tutor Dialogue Style</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  
+                  {/* Guided Discovery Card */}
+                  <div
+                    onClick={() => setDialogueStyle('guided')}
+                    className={`p-4 rounded-2xl border text-left cursor-pointer transition-all duration-300 relative ${
+                      dialogueStyle === 'guided'
+                        ? 'bg-emerald-50/50 border-[#19B37D] ring-2 ring-[#19B37D]/20'
+                        : 'bg-slate-50/50 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${
+                          dialogueStyle === 'guided' ? 'border-[#0E5E4B] bg-[#0E5E4B]' : 'border-slate-300'
+                        }`}>
+                          {dialogueStyle === 'guided' && <Check className="w-2.5 h-2.5 text-white" />}
+                        </span>
+                        <span className="font-extrabold text-xs text-slate-900 dark:text-white">Guided Discovery</span>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-500 font-medium leading-relaxed mb-2">
+                      Active Socratic prompts with guiding questions to help you discover answers independently.
+                    </p>
+                    <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-emerald-100 text-[#0E5E4B]">
+                      Guided Socratic
+                    </span>
+                  </div>
+
+                  {/* Direct Explanation Card */}
+                  <div
+                    onClick={() => setDialogueStyle('direct')}
+                    className={`p-4 rounded-2xl border text-left cursor-pointer transition-all duration-300 relative ${
+                      dialogueStyle === 'direct'
+                        ? 'bg-emerald-50/50 border-[#19B37D] ring-2 ring-[#19B37D]/20'
+                        : 'bg-slate-50/50 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${
+                          dialogueStyle === 'direct' ? 'border-[#0E5E4B] bg-[#0E5E4B]' : 'border-slate-300'
+                        }`}>
+                          {dialogueStyle === 'direct' && <Check className="w-2.5 h-2.5 text-white" />}
+                        </span>
+                        <span className="font-extrabold text-xs text-slate-900 dark:text-white">Direct Explanation</span>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-500 font-medium leading-relaxed mb-2">
+                      Immediate, clear and structured explanations with comprehension checks along the way.
+                    </p>
+                    <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-slate-200 text-slate-700">
+                      Direct Teaching
+                    </span>
+                  </div>
+
+                </div>
+              </div>
+
+              {/* Glowing Primary Button */}
+              <button
+                onClick={() => setTutorMode('learning-path')}
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-[#0E5E4B] via-[#12725B] to-[#19B37D] text-white font-black text-xs sm:text-sm tracking-wide shadow-lg shadow-emerald-900/20 hover:brightness-110 active:scale-[0.99] transition-all cursor-pointer flex items-center justify-center gap-2 border border-emerald-400/30"
+              >
+                <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                <span>START LEARNING PATH — Generate your personalized learning pathway</span>
+              </button>
+
+              <p className="text-[11px] text-center text-slate-400 font-medium">
+                💡 AI adapts questions in real time based on your responses and mastery level.
+              </p>
+
+            </div>
+
+            {/* Socratic Conversation Panel */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-3xl shadow-2xs overflow-hidden flex-1 flex flex-col min-h-[480px]">
+              
+              {/* Header Bar */}
+              <div className="px-5 py-3 bg-[#0E5E4B] text-white flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-white">
+                    <Sparkles className="w-4 h-4 text-emerald-200" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-xs block leading-tight">Socratic Active Dialogue</span>
+                      {/* Real-time AI Status Indicator */}
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                        aiStatus === 'ready' ? 'bg-emerald-900/80 text-emerald-200 border-emerald-500/50' :
+                        aiStatus === 'thinking' ? 'bg-purple-900/80 text-purple-200 border-purple-500/50' :
+                        aiStatus === 'connecting' ? 'bg-amber-900/80 text-amber-200 border-amber-500/50' :
+                        'bg-rose-900/80 text-rose-200 border-rose-500/50'
+                      }`} title="Backend AI Connection Status">
+                        {aiStatus === 'ready' && <Zap className="w-2.5 h-2.5 text-emerald-400" />}
+                        {aiStatus === 'thinking' && <Loader2 className="w-2.5 h-2.5 text-purple-300 animate-spin" />}
+                        {aiStatus === 'connecting' && <RefreshCw className="w-2.5 h-2.5 text-amber-300 animate-spin" />}
+                        {aiStatus === 'offline' && <WifiOff className="w-2.5 h-2.5 text-rose-300" />}
+                        <span className="capitalize">
+                          {aiStatus === 'ready' && 'Ready'}
+                          {aiStatus === 'thinking' && 'Thinking...'}
+                          {aiStatus === 'connecting' && 'Connecting...'}
+                          {aiStatus === 'offline' && 'Offline'}
+                        </span>
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-emerald-100 font-medium">{subject} ➔ {topic}</span>
                   </div>
                 </div>
-              )}
 
-              {/* Conversation history bubbles */}
-              <div className="space-y-3.5">
+                <div className="flex items-center gap-2">
+                  {offlineQueue.length > 0 && (
+                    <button
+                      onClick={processOfflineQueue}
+                      className="px-2.5 py-1 rounded-full bg-amber-500/30 hover:bg-amber-500/50 text-amber-100 border border-amber-400/50 text-[10px] font-extrabold transition cursor-pointer flex items-center gap-1"
+                      title="Sync and send queued offline messages"
+                    >
+                      <RotateCcw className="w-3 h-3 text-amber-300 animate-spin" />
+                      <span>Sync Queue ({offlineQueue.length})</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => setIsWhatsAppModalOpen(true)}
+                    className="px-2.5 py-1.5 rounded-lg bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 border border-emerald-400/50 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    title="Open WhatsApp AI Tutor Channel & Setup"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-emerald-300" />
+                    <span className="hidden sm:inline">WhatsApp AI</span>
+                  </button>
+
+                  <button
+                    onClick={handleExportChatLog}
+                    className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition text-xs flex items-center gap-1 cursor-pointer"
+                    title="Export Chat Log"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setShowClearConfirmModal(true)}
+                    className="p-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-100 transition text-xs flex items-center gap-1 cursor-pointer"
+                    title="Clear Chat History"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Chat Message History */}
+              <div className="flex-1 p-5 overflow-y-auto space-y-4 max-h-[380px] bg-slate-50/40 dark:bg-slate-900/40">
                 {messages.map((msg, idx) => (
-                  <motion.div 
-                    key={idx} 
-                    initial={{ opacity: 0, y: 15, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    transition={{ duration: 0.22, ease: "easeOut" }}
+                  <motion.div
+                    key={msg.id || idx}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
                     className={`flex gap-3 max-w-[85%] ${
                       msg.role === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'
                     }`}
                   >
-                    {/* Avatar */}
-                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs shrink-0 ${
-                      msg.role === 'user' 
-                        ? 'bg-[#d4a373] text-white' 
-                        : 'bg-[#5f6f52]/10 text-[#5f6f52] border border-[#5f6f52]/20'
+                    <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs shrink-0 ${
+                      msg.role === 'user' ? 'bg-[#19B37D] text-white' : 'bg-[#0E5E4B] text-white'
                     }`}>
-                      {msg.role === 'user' ? <User className="w-4 h-4" /> : <Cpu className="w-4 h-4" />}
+                      {msg.role === 'user' ? <User className="w-3.5 h-3.5" /> : <Bot className="w-3.5 h-3.5" />}
                     </div>
 
-                    {/* Bubble message */}
-                    <div className="flex flex-col gap-1 items-start">
-                      <div className={`p-3.5 rounded-2xl text-xs leading-relaxed shadow-xs ${
+                    <div className="space-y-1">
+                      <div className={`p-3.5 rounded-2xl text-xs leading-relaxed shadow-2xs ${
                         msg.role === 'user'
-                          ? 'bg-[#5f6f52] text-white rounded-tr-none font-medium'
-                          : 'bg-white border border-[#e5e1da] text-slate-700 rounded-tl-none'
+                          ? 'bg-[#0E5E4B] text-white rounded-tr-none font-medium'
+                          : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 rounded-tl-none'
                       }`}>
                         <p className="whitespace-pre-wrap">{msg.text}</p>
+
+                        {/* Inline Generated Media Card (Image Studio & Video Studio) */}
+                        {(() => {
+                          let displayMedia = msg.media;
+
+                          if (!displayMedia && msg.text) {
+                            const mediaUrlMatch = msg.text.match(/(https?:\/\/[^\s\n]+|data:(image|video)\/[^;]+;base64,[^\s\n]+|\/api\/media\/serve\/[^\s\n]+)/i);
+                            if (mediaUrlMatch) {
+                              const url = mediaUrlMatch[0];
+                              const isVid = url.includes('.mp4') || url.includes('video') || msg.text.toLowerCase().includes('video') || msg.text.toLowerCase().includes('animation');
+                              displayMedia = {
+                                type: isVid ? 'video' : 'image',
+                                url: url,
+                                prompt: msg.text.slice(0, 100),
+                                generatorUsed: isVid ? 'Veo' : 'Emergen'
+                              };
+                            }
+                          }
+
+                          if (!displayMedia) return null;
+
+                          return (
+                            <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-900 text-white shadow-md">
+                              <div className="relative group">
+                                {displayMedia.type === 'image' ? (
+                                  <img
+                                    src={displayMedia.url}
+                                    alt={displayMedia.prompt}
+                                    className="w-full h-auto max-h-72 object-cover cursor-pointer transition transform hover:scale-[1.01]"
+                                    onClick={() => setLightboxMedia(displayMedia!)}
+                                  />
+                                ) : (
+                                  <video
+                                    src={displayMedia.url}
+                                    controls
+                                    className="w-full h-auto max-h-72 bg-black"
+                                  />
+                                )}
+                                <div className="absolute top-2 left-2 px-2 py-1 rounded-md bg-black/70 backdrop-blur-md text-[10px] font-bold text-emerald-400 flex items-center gap-1">
+                                  {displayMedia.type === 'image' ? '🖼️ Image Studio' : '🎥 Video Studio'}
+                                  <span className="text-slate-300">({displayMedia.generatorUsed || (displayMedia.type === 'image' ? 'Emergen' : 'Veo')})</span>
+                                </div>
+                              </div>
+
+                              {/* Action Options Bar (Download, Regenerate, Edit, Share, Explain, Quiz, Revision Notes, Turn into Video) */}
+                              <div className="p-3 bg-slate-800/95 flex flex-wrap items-center justify-between gap-2 text-xs border-t border-slate-700/80">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <a
+                                    href={displayMedia.url}
+                                    download={`edunexus_${displayMedia.type}_${Date.now()}`}
+                                    className="px-2.5 py-1.5 rounded-lg bg-slate-700/80 hover:bg-slate-600 text-slate-100 font-medium flex items-center gap-1.5 cursor-pointer transition"
+                                    title="Download media file"
+                                  >
+                                    <Download className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span>Download</span>
+                                  </a>
+
+                                  <button
+                                    onClick={() => handleSendMessage(`Generate a new ${displayMedia!.type} for: ${displayMedia!.prompt}`)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-slate-700/80 hover:bg-slate-600 text-slate-100 font-medium flex items-center gap-1.5 cursor-pointer transition"
+                                    title="Regenerate media"
+                                  >
+                                    <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
+                                    <span>Regenerate</span>
+                                  </button>
+
+                                  {displayMedia.type === 'image' ? (
+                                    <button
+                                      onClick={() => onOpenImageStudio?.(displayMedia!.prompt)}
+                                      className="px-2.5 py-1.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1.5 cursor-pointer transition shadow-2xs"
+                                      title="Edit in Image Studio"
+                                    >
+                                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                                      <span>Edit</span>
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => onOpenVideoStudio?.(displayMedia!.prompt)}
+                                      className="px-2.5 py-1.5 rounded-lg bg-cyan-600/90 hover:bg-cyan-500 text-white font-semibold flex items-center gap-1.5 cursor-pointer transition shadow-2xs"
+                                      title="Edit in Video Studio"
+                                    >
+                                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                                      <span>Edit</span>
+                                    </button>
+                                  )}
+
+                                  <button
+                                    onClick={() => {
+                                      if (typeof navigator !== 'undefined' && navigator.share) {
+                                        navigator.share({ title: 'EduNexus AI Media', text: displayMedia!.prompt, url: displayMedia!.url }).catch(() => {});
+                                      } else if (typeof navigator !== 'undefined') {
+                                        navigator.clipboard.writeText(displayMedia!.url);
+                                        alert('Media link copied to clipboard!');
+                                      }
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg bg-slate-700/80 hover:bg-slate-600 text-slate-100 font-medium flex items-center gap-1.5 cursor-pointer transition"
+                                    title="Share media link"
+                                  >
+                                    <Share2 className="w-3.5 h-3.5 text-amber-400" />
+                                    <span>Share</span>
+                                  </button>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <button
+                                    onClick={() => handleSendMessage(`Explain this ${displayMedia!.type} in detail: ${displayMedia!.prompt}`)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-emerald-950/70 border border-emerald-500/30 hover:bg-emerald-900/80 text-emerald-300 font-medium flex items-center gap-1.5 cursor-pointer transition"
+                                    title="Explain media concepts"
+                                  >
+                                    <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span>Explain</span>
+                                  </button>
+
+                                  <button
+                                    onClick={() => handleSendMessage(`Create a 3-question quiz based on this ${displayMedia!.type}: ${displayMedia!.prompt}`)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-amber-950/70 border border-amber-500/30 hover:bg-amber-900/80 text-amber-300 font-medium flex items-center gap-1.5 cursor-pointer transition"
+                                    title="Generate quiz from media"
+                                  >
+                                    <Brain className="w-3.5 h-3.5 text-amber-400" />
+                                    <span>Quiz</span>
+                                  </button>
+
+                                  <button
+                                    onClick={() => handleSendMessage(`Generate structured revision notes and key takeaways for this ${displayMedia!.type}: ${displayMedia!.prompt}`)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-indigo-950/70 border border-indigo-500/30 hover:bg-indigo-900/80 text-indigo-300 font-medium flex items-center gap-1.5 cursor-pointer transition"
+                                    title="Create revision notes"
+                                  >
+                                    <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                                    <span>Notes</span>
+                                  </button>
+
+                                  {displayMedia.type === 'image' && (
+                                    <button
+                                      onClick={() => handleSendMessage(`Create a video animation based on this image: ${displayMedia!.prompt}`)}
+                                      className="px-2.5 py-1.5 rounded-lg bg-cyan-950/70 border border-cyan-500/30 hover:bg-cyan-900/80 text-cyan-300 font-medium flex items-center gap-1.5 cursor-pointer transition"
+                                      title="Turn image into video animation"
+                                    >
+                                      <Video className="w-3.5 h-3.5 text-cyan-400" />
+                                      <span>Make Video</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
 
-                      {/* Accessible Text-to-Speech & Feedback Controls */}
-                      {msg.role === 'model' && (
-                        <div className="flex items-center gap-2 mt-0.5 px-0.5">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleSpeakMessage(msg.text)}
-                            className={`px-2 py-0.5 rounded border text-[10px] font-bold tracking-wide transition flex items-center gap-1 cursor-pointer ${
-                              isSpeaking && speakingText === msg.text
-                                ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100 animate-pulse'
-                                : 'bg-white border-slate-200 text-[#5f6f52] hover:bg-[#5f6f52]/5 hover:border-[#5f6f52]/30'
-                            }`}
-                            title={isSpeaking && speakingText === msg.text ? "Stop reading" : "Read explanation aloud"}
-                          >
-                            {isSpeaking && speakingText === msg.text ? (
-                              <>
-                                <VolumeX className="w-3 h-3 text-rose-600" />
-                                <span>Stop Reading</span>
-                              </>
-                            ) : (
-                              <>
-                                <Volume2 className="w-3 h-3" />
-                                <span>Read Aloud</span>
-                              </>
-                            )}
-                          </button>
-                          
-                          {/* Mini dynamic waveform during active TTS */}
-                          {isSpeaking && speakingText === msg.text && (
-                            <div className="flex gap-0.5 items-end h-2 px-1">
-                              {[1, 2, 3].map((b) => (
-                                <motion.div
-                                  key={b}
-                                  animate={{ height: [2, 8, 4, 6, 2][b % 5] }}
-                                  transition={{ duration: 0.5 + b * 0.1, repeat: Infinity, ease: 'easeInOut' }}
-                                  className="w-0.5 bg-rose-500 rounded-full"
-                                  style={{ height: '3px' }}
-                                />
-                              ))}
-                            </div>
+                      {/* Delivery Status & Resend Options for User Messages */}
+                      {msg.role === 'user' && (
+                        <div className="flex items-center justify-end gap-2 text-[10px] text-slate-400 pt-0.5">
+                          {msg.timestamp && <span>{msg.timestamp}</span>}
+
+                          {msg.status === 'sending' && (
+                            <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold" title="Sending message to AI Tutor">
+                              <Loader2 className="w-3 h-3 animate-spin text-amber-500" />
+                              <Check className="w-3 h-3 text-amber-500" />
+                              <span>Sending...</span>
+                            </span>
                           )}
 
-                          {/* Thumbs Feedback Buttons */}
-                          <div className="flex items-center gap-1 border-l border-slate-200 pl-2 ml-1">
+                          {msg.status === 'delivered' && (
+                            <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-extrabold" title="Delivered to AI Tutor (Double Tick)">
+                              <CheckCheck className="w-3.5 h-3.5 text-emerald-500" />
+                              <span>Delivered</span>
+                            </span>
+                          )}
+
+                          {msg.status === 'queued' && (
+                            <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-extrabold" title="Queued in offline storage (Single Tick)">
+                              <Check className="w-3 h-3 text-amber-500" />
+                              <span>Queued Offline</span>
+                            </span>
+                          )}
+
+                          {(msg.status === 'failed' || msg.status === 'queued') && (
                             <button
-                              type="button"
-                              onClick={() => handleMessageFeedback(idx, 'up')}
-                              className={`p-1 rounded transition flex items-center justify-center gap-1 cursor-pointer ${
-                                msg.feedback === 'up'
-                                  ? 'bg-green-50 border border-green-200 text-green-600 font-bold scale-105'
-                                  : 'bg-white border border-slate-150 text-slate-400 hover:text-green-600 hover:bg-green-50/50'
-                              }`}
-                              title="Helpful Socratic guidance"
+                              onClick={() => handleSendMessage(msg.text, msg.id)}
+                              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-200 hover:bg-rose-200 border border-rose-300 dark:border-rose-800 font-black text-[10px] transition cursor-pointer shadow-2xs"
+                              title="Resend this message"
                             >
-                              <ThumbsUp className={`w-3 h-3 ${msg.feedback === 'up' ? 'fill-green-600' : ''}`} />
+                              <RotateCcw className="w-3 h-3 text-rose-600" />
+                              <span>Resend</span>
                             </button>
-                            
-                            <button
-                              type="button"
-                              onClick={() => handleMessageFeedback(idx, 'down')}
-                              className={`p-1 rounded transition flex items-center justify-center gap-1 cursor-pointer ${
-                                msg.feedback === 'down'
-                                  ? 'bg-red-50 border border-red-200 text-red-600 font-bold scale-105'
-                                  : 'bg-white border border-slate-150 text-slate-400 hover:text-red-600 hover:bg-red-50/50'
-                              }`}
-                              title="Unhelpful / Off-topic / Non-Socratic"
-                            >
-                              <ThumbsDown className={`w-3 h-3 ${msg.feedback === 'down' ? 'fill-red-600' : ''}`} />
+                          )}
+                        </div>
+                      )}
+
+                      {msg.role === 'model' && (
+                        <div className="flex items-center gap-2 pl-1">
+                          <button
+                            onClick={() => handleToggleSpeakMessage(msg.text)}
+                            className="text-[10px] text-slate-400 hover:text-[#0E5E4B] font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Volume2 className="w-3 h-3" /> Read Aloud
+                          </button>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => handleMessageFeedback(idx, 'up')} className="p-1 text-slate-400 hover:text-emerald-600">
+                              <ThumbsUp className="w-3 h-3" />
+                            </button>
+                            <button onClick={() => handleMessageFeedback(idx, 'down')} className="p-1 text-slate-400 hover:text-rose-600">
+                              <ThumbsDown className="w-3 h-3" />
                             </button>
                           </div>
                         </div>
@@ -2595,677 +2131,320 @@ ${dialogueStyleInstruction}`;
                 ))}
 
                 {isProcessing && (
-                  <div className="flex gap-3 max-w-[80%] mr-auto items-center animate-pulse">
-                    <div className="w-8 h-8 rounded-xl bg-[#5f6f52]/10 flex items-center justify-center">
-                      <Cpu className="w-4 h-4 text-[#5f6f52] animate-spin" />
-                    </div>
-                    <div className="p-3.5 rounded-2xl bg-white border border-[#e5e1da] text-xs text-slate-400 rounded-tl-none italic shadow-xs">
-                      {isCbcSession ? 'EduNexus AI Tutor is reflecting on your input...' : 'Socratic Sage is analyzing your conceptual thread...'}
-                    </div>
+                  <div className="flex gap-2 items-center text-xs text-slate-400 font-medium italic">
+                    <Loader2 className="w-4 h-4 animate-spin text-[#0E5E4B]" />
+                    <span>EduNexus AI Tutor is thinking Socratic questions...</span>
                   </div>
                 )}
-
-                <div ref={chatEndRef} />
+                <div ref={chatBottomRef} />
               </div>
-            </div>
 
-            {/* Input Text Box Bar with Mic Toggle */}
-            <div className="p-3.5 border-t border-slate-150 bg-white shrink-0">
-              {isListening && (
-                <div className="mb-2 p-2 bg-[#5f6f52]/10 text-[#5f6f52] rounded-xl border border-[#5f6f52]/20 text-[11px] flex items-center justify-between animate-fadeIn">
-                  <div className="flex items-center gap-1.5">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#5f6f52] opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-[#5f6f52]"></span>
+              {/* Offline Queue Notification Banner */}
+              {(!isOnline || offlineQueue.length > 0) && (
+                <div className="mx-3 mt-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 flex items-center justify-between text-xs text-amber-800 dark:text-amber-200">
+                  <div className="flex items-center gap-2 font-medium">
+                    <WifiOff className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span>
+                      {!isOnline
+                        ? 'Offline Mode: Messages will be added to queue and delivered when connected.'
+                        : `${offlineQueue.length} message(s) stored in offline queue.`}
                     </span>
-                    <span className="font-semibold">Microphone Active: Speak your response...</span>
                   </div>
-                  <div className="flex items-center gap-0.5 h-3">
-                    <span className="w-0.5 bg-[#5f6f52] rounded-full animate-bounce h-2" style={{ animationDelay: '0ms' }} />
-                    <span className="w-0.5 bg-[#5f6f52] rounded-full animate-bounce h-3" style={{ animationDelay: '150ms' }} />
-                    <span className="w-0.5 bg-[#5f6f52] rounded-full animate-bounce h-1" style={{ animationDelay: '300ms' }} />
-                    <span className="w-0.5 bg-[#5f6f52] rounded-full animate-bounce h-2.5" style={{ animationDelay: '450ms' }} />
-                  </div>
+                  {offlineQueue.length > 0 && isOnline && (
+                    <button
+                      onClick={processOfflineQueue}
+                      className="px-2.5 py-1 rounded-lg bg-amber-600 text-white font-bold text-[11px] hover:bg-amber-700 transition flex items-center gap-1 cursor-pointer shrink-0"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Sync All ({offlineQueue.length})</span>
+                    </button>
+                  )}
                 </div>
               )}
 
-              {interimTranscript && (
-                <div className="mb-2 p-2 bg-amber-50 text-amber-800 rounded-xl border border-amber-100 text-[11px] italic flex items-center gap-1.5 animate-fadeIn">
-                  <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping shrink-0" />
-                  <span>{interimTranscript}</span>
-                </div>
-              )}
+              {/* Chat Input Bar */}
+              <div className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleRequestHint}
+                    className="px-2.5 py-1.5 rounded-xl bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Lightbulb className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Request Hint</span>
+                  </button>
 
-              <form 
-                onSubmit={(e) => { e.preventDefault(); handleSend(); }}
-                className="flex items-center gap-2"
-              >
-                {/* Voice-to-Text Microphone trigger button */}
-                <button
-                  type="button"
-                  id="ai-tutor-mic-input-btn"
-                  onClick={isListening ? stopListening : startListening}
-                  disabled={isProcessing}
-                  className={`px-3 py-2.5 rounded-xl border transition-all duration-300 cursor-pointer flex items-center justify-center gap-1.5 shadow-xs relative shrink-0 ${
-                    isListening
-                      ? 'bg-rose-600 border-rose-500 text-white hover:bg-rose-700 ring-4 ring-rose-200 animate-pulse'
-                      : !speechSupported
-                      ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed opacity-60'
-                      : 'bg-[#5f6f52]/10 border-[#5f6f52]/30 text-[#5f6f52] hover:bg-[#5f6f52]/20 hover:border-[#5f6f52]/50'
-                  }`}
-                  title={
-                    !speechSupported
-                      ? 'Speech recognition not supported in your browser or iframe environment'
-                      : isListening
-                      ? 'Recording audio... Click to stop listening'
-                      : 'Click to speak your question to AI Tutor (Voice-to-Text)'
-                  }
-                >
-                  {isListening ? (
-                    <MicOff className="w-4 h-4 text-white animate-bounce" />
-                  ) : (
+                  <button
+                    onClick={toggleListening}
+                    className={`p-2 rounded-xl border transition cursor-pointer ${
+                      isListening ? 'bg-rose-500 text-white border-rose-600 animate-pulse' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                    }`}
+                    title="Voice Input"
+                  >
                     <Mic className="w-4 h-4" />
-                  )}
-                  <span className="text-[11px] font-bold hidden sm:inline">
-                    {isListening ? 'Listening...' : 'Voice'}
-                  </span>
-                  {isListening && (
-                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-600"></span>
-                    </span>
-                  )}
-                </button>
+                  </button>
 
-                <input
-                  type="text"
-                  value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
-                  placeholder={isListening ? "Listening to your voice... stop speaking to send!" : "Explain your reasoning or ask a question..."}
-                  className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs text-slate-700 focus:outline-none focus:border-[#5f6f52] focus:bg-white transition"
-                  disabled={isProcessing}
-                />
+                  <input
+                    type="text"
+                    placeholder="Type your response or ask a Socratic question..."
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                    className="flex-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-2.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#19B37D]/30 focus:border-[#0E5E4B]"
+                  />
 
-                <button
-                  type="submit"
-                  disabled={!inputMessage.trim() || isProcessing}
-                  className="p-2.5 bg-[#5f6f52] hover:bg-[#4d5a42] text-white rounded-xl disabled:opacity-40 transition cursor-pointer flex items-center justify-center shadow-xs"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              </form>
-            </div>
-          </>
-        )}
-
-      </div>
-
-      {/* State Diagnostics & Resource Mapping Panel - 3 Columns */}
-      <div className="xl:col-span-3 flex flex-col gap-3 bg-white border border-[#e5e1da] rounded-2xl p-4 shadow-xs max-h-full overflow-y-auto">
-        
-        {/* Right Sidebar Sub-Navigation Segmented Control */}
-        <div className="flex bg-slate-100/80 p-1 rounded-xl gap-1 shrink-0 border border-slate-200/60 mb-1">
-          <button
-            type="button"
-            onClick={() => setRightSidebarTab('all')}
-            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
-              rightSidebarTab === 'all'
-                ? 'bg-[#5f6f52] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-            title="Show all diagnostic widgets"
-          >
-            <span>All</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setRightSidebarTab('concept')}
-            className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
-              rightSidebarTab === 'concept'
-                ? 'bg-[#5f6f52] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-          >
-            <Activity className="w-3 h-3" />
-            <span className="truncate">Concept</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setRightSidebarTab('pedagogy')}
-            className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
-              rightSidebarTab === 'pedagogy'
-                ? 'bg-[#5f6f52] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-          >
-            <Layers className="w-3 h-3" />
-            <span className="truncate">Diagnostics</span>
-            {misconceptions.length > 0 && (
-              <span className="bg-rose-500 text-white text-[8px] font-extrabold px-1 rounded-full shrink-0">
-                {misconceptions.length}
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => setRightSidebarTab('resources')}
-            className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition flex items-center justify-center gap-1 cursor-pointer ${
-              rightSidebarTab === 'resources'
-                ? 'bg-[#5f6f52] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-          >
-            <ExternalLink className="w-3 h-3" />
-            <span className="truncate">Resources</span>
-          </button>
-        </div>
-
-        {/* Dynamic Concept Map Visualization Card */}
-        {(rightSidebarTab === 'all' || rightSidebarTab === 'concept') && (
-        <div className={
-          fullscreenWidget === 'visualizer'
-            ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn'
-            : 'bg-white border border-[#e5e1da] rounded-2xl p-3.5 shadow-2xs flex flex-col animate-fadeIn'
-        }>
-          <div className="flex items-center justify-between mb-2 border-b border-slate-50 pb-2">
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
-              <Activity className="w-3.5 h-3.5 text-[#a9b388]" />
-              Concept Visualizer
-            </span>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => setFullscreenWidget(fullscreenWidget === 'visualizer' ? null : 'visualizer')}
-                className="text-slate-400 hover:text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
-                title={fullscreenWidget === 'visualizer' ? "Minimize Window" : "Maximize to Full Screen"}
-              >
-                {fullscreenWidget === 'visualizer' ? (
-                  <Minimize2 className="w-3.5 h-3.5" />
-                ) : (
-                  <Maximize2 className="w-3.5 h-3.5" />
-                )}
-              </button>
-              
-              {fullscreenWidget !== 'visualizer' && (
-                <button
-                  type="button"
-                  onClick={() => setShowConceptMap(!showConceptMap)}
-                  className="text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
-                  title={showConceptMap ? "Hide Concept Map" : "Show Concept Map"}
-                >
-                  {showConceptMap ? (
-                    <ChevronUp className="w-3.5 h-3.5" />
-                  ) : (
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  )}
-                </button>
-              )}
-              <span className="text-[9px] font-bold text-[#5f6f52] bg-[#5f6f52]/5 px-2 py-0.5 rounded-full border border-[#5f6f52]/10 truncate max-w-[110px]">
-                {conceptMap.title || 'Inquiry Connections'}
-              </span>
-            </div>
-          </div>
-
-          <AnimatePresence initial={false}>
-            {(showConceptMap || fullscreenWidget === 'visualizer') && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.25 }}
-                className="overflow-hidden flex flex-col flex-1"
-              >
-                {/* Map canvas container */}
-                <div className={`relative w-full bg-slate-50 border border-slate-150 rounded-xl overflow-hidden select-none mb-3 ${
-                  fullscreenWidget === 'visualizer' ? 'flex-1 min-h-[450px] md:min-h-[550px]' : 'h-56'
-                }`}>
-                  {/* SVG edge connections */}
-                  <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 300 220" preserveAspectRatio="none">
-                    <defs>
-                      <marker
-                        id="arrow"
-                        viewBox="0 0 10 10"
-                        refX="16"
-                        refY="5"
-                        markerWidth="5"
-                        markerHeight="5"
-                        orient="auto-start-reverse"
-                      >
-                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#a9b388" />
-                      </marker>
-                    </defs>
-                    {conceptMap.edges.map((edge, idx) => {
-                      const indexA = conceptMap.nodes.findIndex(n => n.id === edge.from);
-                      const indexB = conceptMap.nodes.findIndex(n => n.id === edge.to);
-                      if (indexA === -1 || indexB === -1) return null;
-                      
-                      // SVG dimensions coordinate helper
-                      const getNodeCoords = (idxNode: number, totalNodes: number) => {
-                        if (totalNodes <= 1) return { x: 150, y: 110 };
-                        if (totalNodes === 2) {
-                          return [
-                            { x: 80, y: 110 },
-                            { x: 220, y: 110 }
-                          ][idxNode];
-                        }
-                        if (totalNodes === 3) {
-                          return [
-                            { x: 150, y: 55 },
-                            { x: 70, y: 155 },
-                            { x: 230, y: 155 }
-                          ][idxNode];
-                        }
-                        if (totalNodes === 4) {
-                          return [
-                            { x: 80, y: 65 },
-                            { x: 220, y: 65 },
-                            { x: 220, y: 155 },
-                            { x: 80, y: 155 }
-                          ][idxNode];
-                        }
-                        // Circle layout for 5+ nodes
-                        const angle = (idxNode / totalNodes) * 2 * Math.PI - Math.PI / 2;
-                        const rx = 95;
-                        const ry = 55;
-                        return {
-                          x: 150 + rx * Math.cos(angle),
-                          y: 110 + ry * Math.sin(angle)
-                        };
-                      };
-
-                      const posA = getNodeCoords(indexA, conceptMap.nodes.length);
-                      const posB = getNodeCoords(indexB, conceptMap.nodes.length);
-                      
-                      const midX = (posA.x + posB.x) / 2;
-                      const midY = (posA.y + posB.y) / 2;
-
-                      return (
-                        <g key={idx}>
-                          <line
-                            x1={posA.x}
-                            y1={posA.y}
-                            x2={posB.x}
-                            y2={posB.y}
-                            stroke="#cbd5e1"
-                            strokeWidth="1.5"
-                            strokeDasharray="3 3"
-                            markerEnd="url(#arrow)"
-                          />
-                          {/* Edge relationship label tag */}
-                          <g>
-                            <rect
-                              x={midX - 25}
-                              y={midY - 5}
-                              width="50"
-                              height="10"
-                              fill="#f8fafc"
-                              rx="3"
-                              stroke="#e2e8f0"
-                              strokeWidth="0.5"
-                            />
-                            <text
-                              x={midX}
-                              y={midY + 2.5}
-                              textAnchor="middle"
-                              className="fill-slate-400 font-extrabold"
-                              style={{ fontSize: '6px' }}
-                            >
-                              {edge.label}
-                            </text>
-                          </g>
-                        </g>
-                      );
-                    })}
-                  </svg>
-
-                  {/* Absolute interactive node tags */}
-                  {conceptMap.nodes.map((node, idx) => {
-                    // SVG dimensions coordinate helper duplicate for rendering divs
-                    const getNodeCoords = (idxNode: number, totalNodes: number) => {
-                      if (totalNodes <= 1) return { x: 150, y: 110 };
-                      if (totalNodes === 2) {
-                        return [
-                          { x: 80, y: 110 },
-                          { x: 220, y: 110 }
-                        ][idxNode];
-                      }
-                      if (totalNodes === 3) {
-                        return [
-                          { x: 150, y: 55 },
-                          { x: 70, y: 155 },
-                          { x: 230, y: 155 }
-                        ][idxNode];
-                      }
-                      if (totalNodes === 4) {
-                        return [
-                          { x: 80, y: 65 },
-                          { x: 220, y: 65 },
-                          { x: 220, y: 155 },
-                          { x: 80, y: 155 }
-                        ][idxNode];
-                      }
-                      // Circle layout for 5+ nodes
-                      const angle = (idxNode / totalNodes) * 2 * Math.PI - Math.PI / 2;
-                      const rx = 95;
-                      const ry = 55;
-                      return {
-                        x: 150 + rx * Math.cos(angle),
-                        y: 110 + ry * Math.sin(angle)
-                      };
-                    };
-
-                    const coords = getNodeCoords(idx, conceptMap.nodes.length);
-                    const isHovered = hoveredNodeId === node.id;
-                    
-                    // Color schemes by node type
-                    let colorClasses = "bg-[#5f6f52]/10 border-[#5f6f52]/20 text-[#5f6f52] hover:bg-[#5f6f52]/20";
-                    if (node.type === 'variable') {
-                      colorClasses = "bg-blue-50 border-blue-100 text-blue-800 hover:bg-blue-100";
-                    } else if (node.type === 'process') {
-                      colorClasses = "bg-amber-50 border-amber-100 text-amber-800 hover:bg-amber-100";
-                    }
-
-                    return (
-                      <button
-                        key={node.id}
-                        type="button"
-                        onClick={() => {
-                          setInputMessage(`Can you explain more about "${node.label}"?`);
-                        }}
-                        onMouseEnter={() => setHoveredNodeId(node.id)}
-                        onMouseLeave={() => setHoveredNodeId(null)}
-                        className={`absolute px-2 py-1 text-[9px] font-extrabold shadow-2xs rounded-lg border transition-all duration-200 transform -translate-x-1/2 -translate-y-1/2 flex items-center gap-1 cursor-pointer whitespace-nowrap ${colorClasses} ${
-                          isHovered ? 'scale-110 z-10 ring-2 ring-[#5f6f52]/30' : ''
-                        }`}
-                        style={{ 
-                          left: `${(coords.x / 300) * 100}%`, 
-                          top: `${(coords.y / 220) * 100}%` 
-                        }}
-                      >
-                        <span className="w-1 h-1 rounded-full bg-current shrink-0" />
-                        <span className="truncate max-w-[85px]">{node.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Interactive Tooltip explanation box */}
-                <div className="bg-slate-50 border border-slate-150 rounded-xl p-2.5 min-h-[50px] text-[10px] text-slate-500 leading-normal flex flex-col justify-center">
-                  {hoveredNodeId ? (
-                    (() => {
-                      const node = conceptMap.nodes.find(n => n.id === hoveredNodeId);
-                      if (!node) return null;
-                      return (
-                        <div>
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            <span className="font-bold text-[#5f6f52] uppercase text-[9px] tracking-wider">{node.label}</span>
-                            <span className="text-[8px] uppercase font-extrabold bg-slate-200/60 px-1 py-0.2 rounded text-slate-500">{node.type || 'concept'}</span>
-                          </div>
-                          <p className="text-slate-600 font-medium">{node.description}</p>
-                        </div>
-                      );
-                    })()
-                  ) : (
-                    <span className="text-center block text-slate-400 font-medium">
-                      💡 Hover over nodes to see descriptions. Click a node to formulate a Socratic question!
-                    </span>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-        )}
-        
-        {/* Scaffolding Progress & Misconception Diagnostics */}
-        {(rightSidebarTab === 'all' || rightSidebarTab === 'pedagogy') && (
-        <>
-          <div className={
-            fullscreenWidget === 'pedagogicalState'
-              ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn'
-              : 'bg-white border border-[#e5e1da] rounded-2xl p-3.5 shadow-2xs animate-fadeIn'
-          }>
-            <div className="flex items-center justify-between mb-3 border-b border-slate-50 pb-2">
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-[#a9b388]" />
-                AI Pedagogical State
-              </span>
-              <button
-                type="button"
-                onClick={() => setFullscreenWidget(fullscreenWidget === 'pedagogicalState' ? null : 'pedagogicalState')}
-                className="text-slate-400 hover:text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
-                title={fullscreenWidget === 'pedagogicalState' ? "Minimize Window" : "Maximize to Full Screen"}
-              >
-                {fullscreenWidget === 'pedagogicalState' ? (
-                  <Minimize2 className="w-3.5 h-3.5" />
-                ) : (
-                  <Maximize2 className="w-3.5 h-3.5" />
-                )}
-              </button>
-            </div>
-            <div className="space-y-3">
-              <div className="p-2.5 bg-[#5f6f52]/5 border border-[#5f6f52]/20 rounded-xl flex items-center gap-2.5">
-                <Layers className="w-4 h-4 text-[#5f6f52] shrink-0" />
-                <div className="min-w-0">
-                  <span className="text-[9px] font-bold text-slate-400 block uppercase">Active Scaffolding Step</span>
-                  <span className="text-xs font-bold text-slate-700 truncate block capitalize">{activeStep}</span>
+                  <button
+                    onClick={() => handleSendMessage()}
+                    disabled={isProcessing || !inputMessage.trim()}
+                    className="p-2.5 rounded-2xl bg-[#0E5E4B] hover:bg-[#12725B] text-white shadow-md transition disabled:opacity-40 cursor-pointer"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
-              
-              {fullscreenWidget === 'pedagogicalState' ? (
-                <div className="mt-8 space-y-6 flex-1">
-                  <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider border-b pb-2">Socratic Scaffolding Progress Timeline</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4 relative">
-                    {[
-                      { name: 'Exploratory onboarding', title: '1. Onboarding', desc: 'Orientation, baseline context setting, and initial subject exploration.' },
-                      { name: 'Foundational Assessment', title: '2. Diagnostic', desc: 'Socratic probes testing prior understanding and identifying initial knowledge gaps.' },
-                      { name: 'Cognitive challenge', title: '3. Cognitive Inquiry', desc: 'Active guiding prompts that prompt cognitive dissonance to dismantle misconceptions.' },
-                      { name: 'Guided synthesis', title: '4. Consolidation', desc: 'Concept mastery confirmation, guided summary, and real-world synthesis application.' }
-                    ].map((step, idx, arr) => {
-                      const isActive = activeStep.toLowerCase().includes(step.name.toLowerCase().split(' ')[0]) || 
-                                       (step.name === 'Cognitive challenge' && activeStep.toLowerCase().includes('inquiry'));
-                      const activeIndex = arr.findIndex(item => activeStep.toLowerCase().includes(item.name.toLowerCase().split(' ')[0]));
-                      const isCompleted = activeIndex !== -1 && idx < activeIndex;
 
-                      return (
-                        <div key={idx} className={`p-5 rounded-2xl border transition-all duration-300 relative ${
-                          isActive 
-                            ? 'bg-[#5f6f52]/10 border-[#5f6f52] shadow-md ring-1 ring-[#5f6f52]' 
-                            : isCompleted 
-                            ? 'bg-emerald-50/40 border-emerald-200 text-slate-600' 
-                            : 'bg-slate-50/50 border-slate-150 text-slate-400'
-                        }`}>
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-extrabold ${
-                              isActive 
-                                ? 'bg-[#5f6f52] text-white' 
-                                : isCompleted 
-                                ? 'bg-emerald-500 text-white' 
-                                : 'bg-slate-200 text-slate-500'
-                            }`}>
-                              {isCompleted ? '✓' : idx + 1}
-                            </span>
-                            <span className={`text-xs font-extrabold tracking-tight ${isActive ? 'text-[#5f6f52]' : isCompleted ? 'text-slate-700' : 'text-slate-500'}`}>
-                              {step.title}
-                            </span>
-                          </div>
-                          <p className="text-[11px] leading-relaxed font-medium text-slate-500">
-                            {step.desc}
-                          </p>
-                          {isActive && (
-                            <span className="absolute -top-2.5 right-4 text-[8px] font-extrabold tracking-wider uppercase bg-[#5f6f52] text-white px-2 py-0.5 rounded-full animate-pulse">
-                              Active Stage
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[10px] text-slate-500 leading-normal">
-                  Tracks Socratic inquiry level. The Sage asks targeted prompts to guide concept mastery.
-                </p>
-              )}
             </div>
-          </div>
 
-          {/* Misconception Triangulator */}
-          <div className={
-            fullscreenWidget === 'misconceptions'
-              ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn'
-              : 'bg-white border border-[#e5e1da] rounded-2xl p-3.5 shadow-2xs flex-1 flex flex-col min-h-[140px] animate-fadeIn'
-          }>
-            <div className="flex items-center justify-between mb-2.5 border-b border-slate-50 pb-2">
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5 text-[#a9b388]" />
-                Misconception Diagnoses
-              </span>
-              <button
-                type="button"
-                onClick={() => setFullscreenWidget(fullscreenWidget === 'misconceptions' ? null : 'misconceptions')}
-                className="text-slate-400 hover:text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
-                title={fullscreenWidget === 'misconceptions' ? "Minimize Window" : "Maximize to Full Screen"}
-              >
-                {fullscreenWidget === 'misconceptions' ? (
-                  <Minimize2 className="w-3.5 h-3.5" />
-                ) : (
-                  <Maximize2 className="w-3.5 h-3.5" />
-                )}
-              </button>
-            </div>
+          </main>
+
+          {/* RIGHT PANEL: AI LEARNING INSIGHTS (3 Cols) */}
+          <aside className="lg:col-span-3 space-y-4 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-3xl p-4 shadow-2xs">
             
-            <div className={`flex-1 overflow-y-auto pr-1 ${fullscreenWidget === 'misconceptions' ? 'mt-4' : 'max-h-[180px]'}`}>
-              {misconceptions.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center p-4 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-                  <CheckCircle className="w-7 h-7 text-emerald-500 mb-2" />
-                  <span className="text-xs font-bold text-slate-700 block">No Gaps Detected Yet</span>
-                  <span className="text-[10px] text-slate-400 max-w-sm mx-auto mt-0.5 leading-relaxed">
-                    Explain your reasoning step-by-step. EduNexus AI Tutor continuously parses inputs to pinpoint conceptual gaps.
-                  </span>
+            {/* Header & Tabs */}
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+              <span className="text-[10px] font-black uppercase tracking-widest text-[#0E5E4B] dark:text-emerald-400">
+                AI Learning Insights
+              </span>
+              <div className="flex gap-1">
+                {(['ALL', 'CONCEPT MAP', 'DIAGNOSTIC'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setRightSidebarTab(tab.toLowerCase() as any)}
+                    className="px-2 py-0.5 rounded-md text-[9px] font-extrabold text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* CONCEPT VISUALIZER */}
+            <div className="space-y-3">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                Concept Visualizer
+              </span>
+
+              {/* Node Graph Box */}
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 relative min-h-[220px] overflow-hidden">
+                <svg className="w-full h-44">
+                  {conceptMap.edges.map((edge, i) => (
+                    <line
+                      key={i}
+                      x1={40 + (i * 40)}
+                      y1={30}
+                      x2={120 + (i * 30)}
+                      y2={110}
+                      stroke="#19B37D"
+                      strokeWidth="1.5"
+                      strokeDasharray="3 3"
+                    />
+                  ))}
+                </svg>
+
+                {/* Nodes rendered */}
+                <div className="absolute inset-0 p-3 grid grid-cols-2 gap-2">
+                  {conceptMap.nodes.map((node) => (
+                    <button
+                      key={node.id}
+                      onClick={() => setInputMessage(`Explain ${node.label}`)}
+                      onMouseEnter={() => setHoveredNodeId(node.id)}
+                      onMouseLeave={() => setHoveredNodeId(null)}
+                      className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xs text-left hover:border-[#19B37D] transition cursor-pointer"
+                    >
+                      <span className="text-[11px] font-extrabold text-slate-800 dark:text-slate-100 block">{node.label}</span>
+                      <span className="text-[9px] text-slate-400 truncate block">{node.type}</span>
+                    </button>
+                  ))}
                 </div>
-              ) : (
-                <div className={`grid gap-3 ${fullscreenWidget === 'misconceptions' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
-                  {misconceptions.map((mis, idx) => (
-                    <div key={idx} className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-800 flex items-start gap-2.5 animate-fadeIn shadow-2xs hover:shadow-xs transition-all duration-300">
-                      <AlertTriangle className="w-4 h-4 text-rose-500 mt-0.5 shrink-0" />
-                      <div>
-                        <span className="font-extrabold block uppercase tracking-wider text-[9px] text-rose-700">Detected Gap {idx + 1}</span>
-                        <p className="font-semibold leading-relaxed mt-0.5 text-rose-900 text-[11px]">{mis}</p>
-                      </div>
-                    </div>
+              </div>
+
+              <p className="text-[10px] text-slate-400 leading-normal font-medium">
+                💡 Hover over nodes to see explanations. Click a node to generate Socratic questions or explore examples.
+              </p>
+            </div>
+
+            {/* AI Pedagogical State & Misconception Diagnostics */}
+            <div className="space-y-3 pt-2">
+              <div className="p-3 rounded-2xl bg-amber-50/60 border border-amber-200/80 space-y-1">
+                <span className="text-[10px] font-black uppercase text-amber-800 block">Active Scaffolding Step</span>
+                <span className="text-xs font-bold text-slate-800 block capitalize">{activeStep}</span>
+              </div>
+
+              {misconceptions.length > 0 && (
+                <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 space-y-1">
+                  <span className="text-[10px] font-black uppercase text-rose-800 block">Detected Gaps ({misconceptions.length})</span>
+                  {misconceptions.map((m, idx) => (
+                    <p key={idx} className="text-[10px] text-rose-900 font-semibold leading-tight">• {m}</p>
                   ))}
                 </div>
               )}
             </div>
-          </div>
-        </>
-        )}
 
-        {/* Resource Mapping - Interactive External Links */}
-        {(rightSidebarTab === 'all' || rightSidebarTab === 'resources') && (
-        <div className={
-          fullscreenWidget === 'breakthroughMaps'
-            ? 'fixed inset-0 z-50 bg-white p-6 md:p-10 overflow-y-auto flex flex-col h-screen w-screen animate-fadeIn'
-            : 'bg-white border border-[#e5e1da] rounded-2xl p-3.5 shadow-2xs animate-fadeIn'
-        }>
-          <div className="flex items-center justify-between mb-2.5 border-b border-slate-50 pb-2">
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#a9b388] flex items-center gap-1.5">
-              <ExternalLink className="w-3.5 h-3.5 text-[#a9b388]" />
-              Visual Breakthrough Maps
-            </span>
-            <button
-              type="button"
-              onClick={() => setFullscreenWidget(fullscreenWidget === 'breakthroughMaps' ? null : 'breakthroughMaps')}
-              className="text-slate-400 hover:text-[#5f6f52] hover:bg-[#5f6f52]/10 p-1 rounded-lg transition cursor-pointer flex items-center justify-center"
-              title={fullscreenWidget === 'breakthroughMaps' ? "Minimize Window" : "Maximize to Full Screen"}
-            >
-              {fullscreenWidget === 'breakthroughMaps' ? (
-                <Minimize2 className="w-3.5 h-3.5" />
-              ) : (
-                <Maximize2 className="w-3.5 h-3.5" />
-              )}
-            </button>
-          </div>
-          
-          <div className={fullscreenWidget === 'breakthroughMaps' ? 'grid grid-cols-1 lg:grid-cols-2 gap-8 mt-4' : 'space-y-2.5'}>
-            <div className={fullscreenWidget === 'breakthroughMaps' ? 'space-y-4' : 'space-y-2'}>
-              <span className="text-[9px] font-bold uppercase text-slate-400 block mb-1">Tailored Breakthrough References</span>
-              {suggestedResources.map((res, idx) => (
-                <a
-                  key={idx}
-                  href={res.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block p-2.5 border border-slate-150 rounded-xl bg-slate-50 hover:bg-slate-100 transition group shadow-2xs hover:shadow-xs duration-200"
-                >
-                  <div className="flex items-center justify-between gap-1.5">
-                    <span className="text-[11px] font-bold text-[#5f6f52] truncate group-hover:underline">{res.title}</span>
-                    <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-[#5f6f52] shrink-0" />
-                  </div>
-                  <p className="text-[10px] text-slate-500 leading-normal mt-1 font-medium">
-                    {res.reason}
-                  </p>
-                </a>
-              ))}
-            </div>
-
-            <div className={fullscreenWidget === 'breakthroughMaps' ? 'space-y-4' : 'pt-2'}>
-              <span className="text-[9px] font-bold uppercase text-slate-400 block mb-1.5">Open-Source Visual Portals</span>
-              <div className={`grid gap-2 ${fullscreenWidget === 'breakthroughMaps' ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-2'}`}>
+            {/* External Breakthrough References */}
+            <div className="space-y-2 pt-2 border-t border-slate-100">
+              <span className="text-[10px] font-bold uppercase text-slate-400 block">Recommended Portals</span>
+              <div className="grid grid-cols-2 gap-1.5">
                 {defaultVisualAids.map((aid) => (
                   <a
                     key={aid.name}
                     href={aid.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="p-2 border border-slate-150 bg-white hover:bg-slate-50 rounded-xl text-center hover:border-slate-300 transition block text-[10px] font-bold text-slate-600 truncate shadow-2xs"
+                    className="p-2 rounded-xl border border-slate-200 bg-slate-50 text-[10px] font-bold text-slate-700 hover:bg-white text-center truncate block shadow-2xs"
                   >
                     {aid.name}
                   </a>
                 ))}
               </div>
             </div>
-          </div>
+
+          </aside>
+
         </div>
-        )}
+
+        {/* 5. BOTTOM FEATURE SUMMARY CARDS */}
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4">
+          {[
+            {
+              title: "Adaptive Learning",
+              desc: "Questions adapt to your understanding in real time.",
+              icon: Brain,
+              color: "text-purple-600 bg-purple-50 border-purple-200"
+            },
+            {
+              title: "Socratic Method",
+              desc: "Promotes deep conceptual reasoning through targeted inquiry.",
+              icon: Cpu,
+              color: "text-emerald-600 bg-emerald-50 border-emerald-200"
+            },
+            {
+              title: "Curriculum Alignment",
+              desc: "100% aligned with Kenyan CBC and global core standards.",
+              icon: GraduationCap,
+              color: "text-teal-600 bg-teal-50 border-teal-200"
+            },
+            {
+              title: "Mastery Focused",
+              desc: "Guides learners from recall to synthesis & application.",
+              icon: Award,
+              color: "text-amber-600 bg-amber-50 border-amber-200"
+            }
+          ].map((card, i) => {
+            const CardIcon = card.icon;
+            return (
+              <div key={i} className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xs hover:shadow-md transition-all duration-300 space-y-2">
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border ${card.color}`}>
+                  <CardIcon className="w-5 h-5" />
+                </div>
+                <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">{card.title}</h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-normal leading-relaxed">{card.desc}</p>
+              </div>
+            );
+          })}
+        </section>
 
       </div>
-      </div>
-      ) : tutorMode === 'dashboard' ? (
-        <div className="flex-1 overflow-y-auto min-h-0 pr-1 pb-4">
-          <TutorDashboard
-            subject={subject}
-            topic={topic}
-            scaffoldingLevel={scaffoldingLevel}
-            persona={persona}
-            activeStep={activeStep}
-            misconceptions={misconceptions}
-            suggestedResources={suggestedResources}
-            conceptMap={conceptMap}
-            messages={messages}
-            onSelectTopic={(t) => {
-              setTopic(t);
-              setTutorMode('socratic');
-            }}
-            onSelectPrompt={(p) => {
-              setInputMessage(p);
-              setTutorMode('socratic');
-            }}
-            onChangeScaffolding={(scaff) => setScaffoldingLevel(scaff)}
-            onChangePersona={(p) => setPersona(p)}
-            onSwitchToChat={() => setTutorMode('socratic')}
-            onResetSession={() => {
-              setMisconceptions([]);
-              setActiveStep('Session metrics reset to baseline');
-            }}
-          />
-        </div>
-      ) : (
-        <LearningPathWorkspace />
-      )}
 
-      {/* Socratic Context-Aware Flashcard Player */}
+      {/* 6. FLOATING AI COPILOT ASSISTANT */}
+      <div className="fixed bottom-6 right-6 z-50">
+        <AnimatePresence>
+          {isCopilotOpen && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="absolute bottom-16 right-0 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl p-5 space-y-4"
+            >
+              <div className="flex items-center justify-between border-b pb-3 border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-xl bg-[#0E5E4B] text-white flex items-center justify-center">
+                    <Bot className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-extrabold text-xs text-slate-900 dark:text-white block">Ask EduNexus AI</span>
+                    <span className="text-[9px] text-emerald-600 font-bold uppercase">Copilot Assistant</span>
+                  </div>
+                </div>
+                <button onClick={() => setIsCopilotOpen(false)} className="p-1 text-slate-400 hover:text-slate-600">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Quick Actions</span>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    "Explain this concept",
+                    "Generate questions",
+                    "Create assessment",
+                    "Suggest experiment",
+                    "Find misconceptions"
+                  ].map((promptText) => (
+                    <button
+                      key={promptText}
+                      onClick={() => {
+                        handleIcebreaker(promptText);
+                        setIsCopilotOpen(false);
+                      }}
+                      className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800 hover:bg-emerald-50 border border-slate-200 dark:border-slate-700 text-left text-[10.5px] font-bold text-slate-700 dark:text-slate-200 transition"
+                    >
+                      {promptText}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <input
+                  type="text"
+                  placeholder="Ask copilot anything..."
+                  value={copilotInput}
+                  onChange={(e) => setCopilotInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && copilotInput.trim()) {
+                      handleIcebreaker(copilotInput);
+                      setCopilotInput('');
+                      setIsCopilotOpen(false);
+                    }
+                  }}
+                  className="flex-1 bg-slate-100 dark:bg-slate-800 border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#0E5E4B]"
+                />
+                <button
+                  onClick={() => {
+                    if (copilotInput.trim()) {
+                      handleIcebreaker(copilotInput);
+                      setCopilotInput('');
+                      setIsCopilotOpen(false);
+                    }
+                  }}
+                  className="p-2 bg-[#0E5E4B] text-white rounded-xl"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <button
+          onClick={() => setIsCopilotOpen(!isCopilotOpen)}
+          className="p-4 rounded-full bg-gradient-to-br from-[#0E5E4B] to-[#19B37D] text-white shadow-xl hover:scale-105 active:scale-95 transition-all cursor-pointer flex items-center justify-center border-2 border-white/20"
+          title="Ask EduNexus AI"
+        >
+          <Bot className="w-6 h-6 animate-pulse" />
+        </button>
+      </div>
+
+      {/* Modals */}
       <FlashcardDeckModal
         deck={activeFlashcardDeck}
         isOpen={isFlashcardModalOpen}
@@ -3273,75 +2452,91 @@ ${dialogueStyleInstruction}`;
         onSaveToLibrary={handleSaveFlashcardsToLibrary}
       />
 
-      {/* Clear Chat Confirmation Modal */}
+      {/* Clear Confirmation Modal */}
       <AnimatePresence>
         {showClearConfirmModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white border border-slate-200 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4"
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4"
             >
-              <div className="flex items-start gap-3.5">
-                <div className="w-10 h-10 rounded-full bg-rose-100 border border-rose-200 flex items-center justify-center text-rose-600 shrink-0 mt-0.5">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-2xl bg-rose-100 text-rose-600">
                   <AlertTriangle className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-800">Clear Socratic Chat History?</h3>
+                  <h3 className="font-extrabold text-base text-slate-800 dark:text-white">Clear Socratic Chat History?</h3>
                   <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    This will permanently delete the current session's chat history from Firestore and reset your discussion. This operation cannot be undone.
+                    This will reset your conversation history for this topic. Saved documents will remain safe in your library.
                   </p>
                 </div>
               </div>
 
-              <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 text-[11px] text-slate-600 space-y-1.5">
-                <div className="flex justify-between font-medium">
-                  <span className="text-slate-500">Subject:</span>
-                  <span className="font-bold text-slate-800">{subject}</span>
-                </div>
-                <div className="flex justify-between font-medium">
-                  <span className="text-slate-500">Topic:</span>
-                  <span className="font-bold text-slate-800">{topic}</span>
-                </div>
-                <div className="flex justify-between font-medium">
-                  <span className="text-slate-500">Stored Messages:</span>
-                  <span className="font-bold text-slate-800">{messages.length} messages</span>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+              <div className="flex items-center justify-end gap-2 pt-2">
                 <button
-                  type="button"
                   onClick={() => setShowClearConfirmModal(false)}
-                  disabled={isClearingChat}
-                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition cursor-pointer disabled:opacity-50"
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
                 >
                   Cancel
                 </button>
                 <button
-                  type="button"
                   onClick={confirmClearChat}
-                  disabled={isClearingChat}
-                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl"
                 >
-                  {isClearingChat ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Deleting History...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Confirm & Permanently Clear</span>
-                    </>
-                  )}
+                  Clear History
                 </button>
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
+
+      {/* WhatsApp Integration & Simulation Modal */}
+      <WhatsAppIntegrationModal
+        isOpen={isWhatsAppModalOpen}
+        onClose={() => setIsWhatsAppModalOpen(false)}
+        defaultPrompt={topic ? `Can you explain ${topic} in ${subject}?` : "Explain Newton's Second Law of Motion"}
+        userPhone="+254740183394"
+      />
+
+      {/* Lightbox Modal for Generated Media (Image & Video) */}
+      <AnimatePresence>
+        {lightboxMedia && (
+          <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-lg flex flex-col items-center justify-center p-4">
+            <button
+              onClick={() => setLightboxMedia(null)}
+              className="absolute top-4 right-4 p-2.5 rounded-full bg-slate-800 text-white hover:bg-slate-700 cursor-pointer shadow-lg transition"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <div className="max-w-4xl max-h-[85vh] w-full flex flex-col items-center justify-center">
+              {lightboxMedia.type === 'image' ? (
+                <img
+                  src={lightboxMedia.url}
+                  alt={lightboxMedia.prompt}
+                  className="max-w-full max-h-[70vh] rounded-2xl shadow-2xl object-contain border border-slate-700"
+                />
+              ) : (
+                <video
+                  src={lightboxMedia.url}
+                  controls
+                  autoPlay
+                  className="max-w-full max-h-[70vh] rounded-2xl shadow-2xl border border-slate-700"
+                />
+              )}
+              <div className="mt-4 text-center bg-slate-900/90 text-slate-100 text-xs sm:text-sm font-medium px-5 py-3 rounded-2xl max-w-2xl border border-slate-800 shadow-xl flex flex-col items-center gap-1">
+                <span className="text-[10px] uppercase tracking-wider font-extrabold text-emerald-400">
+                  {lightboxMedia.type === 'image' ? '🖼️ EduNexus Image Studio' : '🎥 EduNexus Video Studio'}
+                </span>
+                <p className="italic">"{lightboxMedia.prompt}"</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }

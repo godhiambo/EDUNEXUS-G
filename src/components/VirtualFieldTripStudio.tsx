@@ -75,7 +75,10 @@ import {
   Megaphone,
   UserCheck,
   Cast,
-  ArrowRight
+  ArrowRight,
+  ShieldAlert,
+  Play,
+  Pause
 } from 'lucide-react';
 import {
   subscribeToTeacherSession,
@@ -98,6 +101,7 @@ import {
 } from '../types/virtualFieldTrip';
 import { VirtualFieldTripService, PRESET_FIELD_TRIPS } from '../services/virtualFieldTripService';
 import { FieldTripNotesService } from '../services/fieldTripNotesService';
+import { VirtualFieldTripEcosystemModals } from './VirtualFieldTripEcosystemModals';
 import {
   ambientAudioEngine,
   detectAmbientPreset,
@@ -118,6 +122,247 @@ const GOOGLE_MAPS_API_KEY =
   (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY ||
   (globalThis as any).GOOGLE_MAPS_PLATFORM_KEY ||
   '';
+
+const MainStageVideoPlayer: React.FC<{
+  currentStop: VirtualFieldTripStop;
+}> = ({ currentStop }) => {
+  const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [progress, setProgress] = useState<number>(20);
+  const [currentTime, setCurrentTime] = useState<number>(48);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  const [showCaptions, setShowCaptions] = useState<boolean>(true);
+  const [showTranscript, setShowTranscript] = useState<boolean>(false);
+
+  const durationSeconds = 240; // 04:00
+
+  useEffect(() => {
+    let interval: any = null;
+    if (isPlaying) {
+      interval = setInterval(() => {
+        setCurrentTime(prev => {
+          const next = prev + 1;
+          if (next >= durationSeconds) {
+            setIsPlaying(false);
+            return 0;
+          }
+          setProgress((next / durationSeconds) * 100);
+          return next;
+        });
+      }, 1000 / playbackSpeed);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isPlaying, playbackSpeed]);
+
+  const formatTime = (secs: number) => {
+    const mins = Math.floor(secs / 60);
+    const remainder = Math.floor(secs % 60);
+    return `${mins.toString().padStart(2, '0')}:${remainder.toString().padStart(2, '0')}`;
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const newPct = Math.max(0, Math.min(100, (clickX / rect.width) * 100));
+    const newTime = Math.round((newPct / 100) * durationSeconds);
+    setProgress(newPct);
+    setCurrentTime(newTime);
+  };
+
+  const handleCycleSpeed = () => {
+    const speeds = [1.0, 1.25, 1.5, 2.0];
+    const currIdx = speeds.indexOf(playbackSpeed);
+    const nextIdx = (currIdx + 1) % speeds.length;
+    setPlaybackSpeed(speeds[nextIdx]);
+  };
+
+  const galleryVideo = currentStop.mediaGallery?.find(m => m.type === 'video');
+  const rawUrl = currentStop.videoUrl || galleryVideo?.url || 'https://www.youtube-nocookie.com/embed/S_8qM7W_Jm4';
+  const embedUrl = rawUrl.includes('youtube.com/watch')
+    ? rawUrl.replace('watch?v=', 'embed/')
+    : rawUrl;
+
+  return (
+    <div className="w-full h-full bg-slate-950 text-white flex flex-col justify-between relative overflow-hidden select-none">
+      {/* Header Bar */}
+      <div className="bg-slate-900/95 border-b border-white/10 px-4 py-2.5 flex items-center justify-between text-xs shrink-0 z-10 backdrop-blur-md">
+        <div className="flex items-center gap-2">
+          <span className="px-2.5 py-1 rounded-lg bg-amber-400 text-slate-950 font-black text-[10px] uppercase tracking-wider flex items-center gap-1.5 shadow-md">
+            🎥 NatGeo / Educational Video Archive
+          </span>
+          <span className="font-bold text-amber-200 truncate max-w-[250px] sm:max-w-md text-sm">
+            {currentStop.title}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-[11px] font-mono">
+          <span className="text-amber-300 font-bold bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">
+            📍 {currentStop.locationName}
+          </span>
+          <span className="text-emerald-400 hidden sm:inline font-bold">1080p HD</span>
+        </div>
+      </div>
+
+      {/* Main Video Viewport & Overlay Controls Container */}
+      <div className="flex-1 w-full h-full bg-black relative flex flex-col justify-between overflow-hidden">
+        {/* Video Iframe */}
+        <div className="absolute inset-0 z-0">
+          <iframe
+            title={`NatGeo Video Tour - ${currentStop.locationName}`}
+            src={embedUrl}
+            className="w-full h-full border-none opacity-95"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+          />
+        </div>
+
+        {/* Top Watermark Badge Overlay */}
+        <div className="relative z-10 p-3 flex items-center justify-between bg-gradient-to-b from-slate-950/90 via-slate-950/40 to-transparent pointer-events-none">
+          <div className="flex items-center gap-2 bg-amber-400 text-slate-950 px-2.5 py-1 rounded-md font-black text-[10px] uppercase tracking-wider shadow-lg border border-amber-300">
+            <span>NATIONAL GEOGRAPHIC ARCHIVE</span>
+          </div>
+          <span className="text-[10px] font-mono font-bold text-amber-300 bg-slate-950/80 px-2 py-1 rounded border border-white/10 backdrop-blur-md">
+            Interactive Video Studio
+          </span>
+        </div>
+
+        {/* Closed Captions Subtitle Overlay */}
+        {showCaptions && (
+          <div className="relative z-10 px-6 my-auto pointer-events-none max-w-2xl mx-auto">
+            <div className="bg-slate-950/90 text-amber-100 border border-amber-400/50 p-3 rounded-2xl backdrop-blur-xl text-xs sm:text-sm font-medium leading-relaxed shadow-2xl text-center animate-in fade-in">
+              <span className="font-black text-amber-400 mr-2 bg-amber-400/20 px-1.5 py-0.5 rounded">[CC] Subtitles:</span>
+              <span>{currentStop.readingPassage || 'Observing geological formations and ecological species dynamics in their natural protected habitat.'}</span>
+            </div>
+          </div>
+        )}
+
+        {/* CUSTOM PLAYBACK CONTROLS OVERLAY BAR */}
+        <div className="relative z-10 bg-slate-950/95 border-t border-amber-400/40 p-3 space-y-2 backdrop-blur-xl shadow-2xl">
+          {/* Interactive Progress Scrubber */}
+          <div
+            onClick={handleSeek}
+            className="w-full h-2.5 bg-slate-800 hover:bg-slate-700 rounded-full cursor-pointer relative overflow-hidden group/scrubber"
+            title="Click to jump timeline position"
+          >
+            <div
+              style={{ width: `${progress}%` }}
+              className="h-full bg-gradient-to-r from-amber-500 via-amber-400 to-amber-300 rounded-full transition-all duration-300 relative"
+            >
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-white border-2 border-amber-400 shadow-lg transform scale-0 group-hover/scrubber:scale-100 transition" />
+            </div>
+          </div>
+
+          {/* Controls Action Row */}
+          <div className="flex items-center justify-between text-white text-xs">
+            {/* Left Controls: Play, Mute, Volume, Elapsed Time */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsPlaying(!isPlaying)}
+                className="p-1.5 rounded-xl bg-amber-400 text-slate-950 hover:bg-amber-300 transition cursor-pointer font-extrabold flex items-center gap-1 shadow-md"
+                title={isPlaying ? 'Pause' : 'Play'}
+              >
+                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-slate-950" />}
+                <span className="text-[11px] font-bold px-1">{isPlaying ? 'PAUSE' : 'PLAY'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsMuted(!isMuted)}
+                className="p-1.5 rounded-lg bg-slate-900 border border-white/10 hover:border-amber-400 text-slate-200 transition cursor-pointer"
+                title={isMuted ? 'Unmute Sound' : 'Mute Sound'}
+              >
+                {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-amber-300" />}
+              </button>
+
+              <span className="font-mono text-xs text-amber-300 bg-slate-900/90 px-2.5 py-1 rounded-lg border border-white/10">
+                {formatTime(currentTime)} / {formatTime(durationSeconds)}
+              </span>
+            </div>
+
+            {/* Right Controls: Playback Speed, CC Toggle, Transcript */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleCycleSpeed}
+                className="px-2.5 py-1 rounded-lg bg-slate-900 border border-white/10 hover:border-amber-400 text-amber-200 text-xs font-mono font-bold transition cursor-pointer"
+                title="Change Playback Speed"
+              >
+                Speed: {playbackSpeed}x
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowCaptions(!showCaptions)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-black transition cursor-pointer ${
+                  showCaptions
+                    ? 'bg-amber-400 text-slate-950 shadow-md'
+                    : 'bg-slate-900 border border-white/10 text-slate-400 hover:text-white'
+                }`}
+                title="Toggle Subtitles [CC]"
+              >
+                CC
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowTranscript(!showTranscript)}
+                className="px-2.5 py-1 rounded-lg bg-slate-900 border border-white/10 hover:border-amber-400 text-amber-300 text-xs font-bold transition cursor-pointer flex items-center gap-1"
+                title="Open Educational Transcript"
+              >
+                <span>📜 Transcript</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Educational Transcript Drawer Overlay */}
+        {showTranscript && (
+          <div className="absolute inset-0 z-20 bg-slate-950/95 p-5 backdrop-blur-2xl flex flex-col justify-between text-white animate-in slide-in-from-bottom duration-300">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded bg-amber-400 text-slate-950 font-black text-xs">
+                  NATIONAL GEOGRAPHIC TRANSCRIPT
+                </span>
+                <span className="font-serif font-bold text-amber-200 text-sm">
+                  {currentStop.title}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowTranscript(false)}
+                className="p-1.5 text-slate-400 hover:text-white bg-slate-900 rounded-lg border border-white/10 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="my-auto space-y-3 bg-slate-900/80 p-4 rounded-2xl border border-white/10 max-h-64 overflow-y-auto scrollbar-thin">
+              <h5 className="text-xs font-mono text-amber-400 uppercase font-bold tracking-wider">
+                Full Educational Audio Narrative:
+              </h5>
+              <p className="text-sm text-slate-200 leading-relaxed font-sans">
+                {currentStop.readingPassage || 'This interactive National Geographic archive documentary explores the natural biology, historical context, and ecosystem dynamics of this milestone location.'}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-white/10 text-xs font-mono">
+              <span className="text-slate-400">Location: {currentStop.locationName}</span>
+              <button
+                type="button"
+                onClick={() => setShowTranscript(false)}
+                className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-xl transition cursor-pointer"
+              >
+                Return to Video Player
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 export const VirtualFieldTripStudio: React.FC<VirtualFieldTripStudioProps> = ({
   initialTripId,
@@ -213,6 +458,79 @@ export const VirtualFieldTripStudio: React.FC<VirtualFieldTripStudioProps> = ({
   const [hoverStars, setHoverStars] = useState<number>(0);
   const [ratingComment, setRatingComment] = useState<string>('');
   const [isRatingSubmitted, setIsRatingSubmitted] = useState<boolean>(false);
+
+  // AI Immersive Journey Ecosystem States
+  // 1. AI Destination Discovery
+  const [isDiscoveryModalOpen, setIsDiscoveryModalOpen] = useState<boolean>(false);
+  const [discoveryCategory, setDiscoveryCategory] = useState<'parks' | 'museums' | 'factories' | 'space' | 'volcanoes' | 'marine' | 'hospitals' | 'banks' | 'power' | 'labs' | 'universities'>('parks');
+
+  // 2. Camera Intelligence & Object Identification
+  const [isCameraIntelModalOpen, setIsCameraIntelModalOpen] = useState<boolean>(false);
+  const [scanSampleType, setScanSampleType] = useState<'plant' | 'fossil' | 'machine' | 'bird' | 'animal' | 'rock' | 'lab'>('animal');
+  const [isAnalyzingScan, setIsAnalyzingScan] = useState<boolean>(false);
+  const [scanResult, setScanResult] = useState<{
+    objectName: string;
+    scientificName: string;
+    category: string;
+    description: string;
+    curriculumLinks: string;
+    safetyNotes: string;
+    keyFacts: string[];
+  } | null>(null);
+
+  // 3. Interactive Missions & Scavenger Challenges
+  const [isMissionsModalOpen, setIsMissionsModalOpen] = useState<boolean>(false);
+  const [activeMissions, setActiveMissions] = useState([
+    { id: 'm1', title: 'Find 3 Renewable Energy Sources or Solar Systems', category: 'Sustainability', xp: 100, completed: false },
+    { id: 'm2', title: 'Identify Flora Species or Leaf Venation Pattern', category: 'Biology', xp: 100, completed: false },
+    { id: 'm3', title: 'Measure Environmental Water pH or Soil Compaction', category: 'Chemistry', xp: 150, completed: false },
+    { id: 'm4', title: 'Socratic Inquiry Session with AI Guide', category: 'Socratic Inquiry', xp: 100, completed: true },
+    { id: 'm5', title: 'Locate 5 Indigenous Tree / Rock Formations', category: 'Geology & Ecology', xp: 150, completed: false }
+  ]);
+  const [selectedMissionId, setSelectedMissionId] = useState<string>('m1');
+  const [missionAnswerText, setMissionAnswerText] = useState<string>('');
+  const [missionFeedback, setMissionFeedback] = useState<string | null>(null);
+
+  // 4. AI Field Notebook & Revision Suite
+  const [isNotebookModalOpen, setIsNotebookModalOpen] = useState<boolean>(false);
+  const [isGeneratingNotebook, setIsGeneratingNotebook] = useState<boolean>(false);
+  const [notebookOutput, setNotebookOutput] = useState<{
+    report: string;
+    revisionNotes: string[];
+    flashcards: Array<{ q: string; a: string }>;
+    mindMap: string[];
+    quiz: Array<{ question: string; options: string[]; answer: number }>;
+  } | null>(null);
+
+  // 5. Learning Analytics & Mastery Dashboard
+  const [isAnalyticsModalOpen, setIsAnalyticsModalOpen] = useState<boolean>(false);
+
+  // 6. Parent Portal & Digital Consent
+  const [isParentPortalModalOpen, setIsParentPortalModalOpen] = useState<boolean>(false);
+  const [parentSignedName, setParentSignedName] = useState<string>('');
+  const [isParentConsentSigned, setIsParentConsentSigned] = useState<boolean>(false);
+
+  // 7. AI Story & Media Portfolio Generator
+  const [isStoryModalOpen, setIsStoryModalOpen] = useState<boolean>(false);
+  const [storyFormat, setStoryFormat] = useState<'journal' | 'photobook' | 'newsletter' | 'presentation' | 'video_script'>('journal');
+  const [isGeneratingStory, setIsGeneratingStory] = useState<boolean>(false);
+  const [generatedStoryText, setGeneratedStoryText] = useState<string | null>(null);
+
+  // 8. Sustainability & Eco Logger
+  const [isEcoModalOpen, setIsEcoModalOpen] = useState<boolean>(false);
+  const [ecoLitterKg, setEcoLitterKg] = useState<number>(2.5);
+  const [ecoSpeciesCount, setEcoSpeciesCount] = useState<number>(12);
+  const [ecoCarbonSaved, setEcoCarbonSaved] = useState<string>('14.2 kg CO₂e saved vs physical flight');
+
+  // 9. Emergency & Logistics Console
+  const [isLogisticsModalOpen, setIsLogisticsModalOpen] = useState<boolean>(false);
+  const [attendanceRoster, setAttendanceRoster] = useState([
+    { id: '1', name: 'Amina K.', present: true, medicalAlert: 'None' },
+    { id: '2', name: 'Ethan M.', present: true, medicalAlert: 'Asthma Inhaler in Backpack' },
+    { id: '3', name: 'Jabari O.', present: true, medicalAlert: 'Peanut Allergy' },
+    { id: '4', name: 'Sofia R.', present: true, medicalAlert: 'None' },
+    { id: '5', name: 'Liam T.', present: false, medicalAlert: 'None' }
+  ]);
 
   // Ambient Background Audio State
   const [isAmbientPlaying, setIsAmbientPlaying] = useState<boolean>(false);
@@ -806,7 +1124,7 @@ export const VirtualFieldTripStudio: React.FC<VirtualFieldTripStudioProps> = ({
               setCurrentStopIndex(sessionData.currentStopIndex);
             }
           }
-          if (sessionData.mapViewMode && sessionData.mapViewMode !== activeViewerTab) {
+          if (sessionData.mapViewMode && (sessionData.mapViewMode as any) !== (activeViewerTab as any)) {
             if (sessionData.mapViewMode === 'street') {
               setActiveViewerTab('streetview');
             } else if (sessionData.mapViewMode === 'ar') {
@@ -2080,11 +2398,11 @@ DIFFERENTIATION STRATEGIES:
       return `https://maps.google.com/maps?q=${lat},${lng}&layer=c&cbll=${lat},${lng}&cbp=12,${currentStop.streetViewPov?.heading || 0},0,0,0&output=embed`;
     }
 
-    if (activeViewerTab === 'satellite') {
-      return `https://maps.google.com/maps?q=${lat},${lng}&t=k&z=${currentStop.zoom || 17}&output=embed`;
+    if (mapType === 'satellite') {
+      return `https://maps.google.com/maps?q=${lat},${lng}&t=k&z=${currentStop.zoom || 16}&ie=UTF8&iwloc=&output=embed`;
     }
 
-    return `https://maps.google.com/maps?q=${lat},${lng}&z=${currentStop.zoom || 17}&output=embed`;
+    return `https://maps.google.com/maps?q=${lat},${lng}&t=m&z=${currentStop.zoom || 16}&ie=UTF8&iwloc=&output=embed`;
   };
 
   // QR Code URL for sharing/scanning this field trip
@@ -2309,6 +2627,118 @@ DIFFERENTIATION STRATEGIES:
 
         </div>
       </header>
+
+      {/* ================= AI IMMERSIVE JOURNEY ECOSYSTEM FEATURE BAR ================= */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border-b border-indigo-500/30 text-white shadow-lg py-2 px-3 sm:px-6">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 overflow-x-auto scrollbar-none">
+          <div className="flex items-center gap-1.5 shrink-0 pr-2 border-r border-indigo-800">
+            <Sparkles className="w-4 h-4 text-amber-400 animate-spin-slow" />
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-300 hidden md:inline">
+              AI Immersive Journey
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 overflow-x-auto py-0.5 scrollbar-thin">
+            {/* 1. Destination Discovery */}
+            <button
+              type="button"
+              onClick={() => setIsDiscoveryModalOpen(true)}
+              className="px-3 py-1.5 bg-indigo-900/80 hover:bg-indigo-800 text-indigo-100 border border-indigo-700/60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
+              title="Explore 11 Educational Destination Categories (Parks, Space, Labs, Volcanoes...)"
+            >
+              <span>🌍 Discovery Hub</span>
+            </button>
+
+            {/* 2. Camera Intelligence */}
+            <button
+              type="button"
+              onClick={() => setIsCameraIntelModalOpen(true)}
+              className="px-3 py-1.5 bg-indigo-900/80 hover:bg-indigo-800 text-indigo-100 border border-indigo-700/60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
+              title="AI Camera & Object Recognition (Identify plants, fossils, machines, animals...)"
+            >
+              <Camera className="w-3.5 h-3.5 text-amber-400" />
+              <span>Camera Intel</span>
+            </button>
+
+            {/* 3. Interactive Missions */}
+            <button
+              type="button"
+              onClick={() => setIsMissionsModalOpen(true)}
+              className="px-3 py-1.5 bg-indigo-900/80 hover:bg-indigo-800 text-indigo-100 border border-indigo-700/60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
+              title="Complete Scavenger Challenges & Missions (+XP & Badges)"
+            >
+              <Flag className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Missions ({activeMissions.filter(m => m.completed).length}/{activeMissions.length})</span>
+            </button>
+
+            {/* 4. AI Field Notebook */}
+            <button
+              type="button"
+              onClick={() => setIsNotebookModalOpen(true)}
+              className="px-3 py-1.5 bg-indigo-900/80 hover:bg-indigo-800 text-indigo-100 border border-indigo-700/60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
+              title="Auto-compiled AI Trip Notebook, Flashcards, Mind Maps, and Quiz"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-teal-300" />
+              <span>AI Field Notebook</span>
+            </button>
+
+            {/* 5. Learning Analytics */}
+            <button
+              type="button"
+              onClick={() => setIsAnalyticsModalOpen(true)}
+              className="px-3 py-1.5 bg-indigo-900/80 hover:bg-indigo-800 text-indigo-100 border border-indigo-700/60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
+              title="Student Participation & Competency Radar Analytics"
+            >
+              <Trophy className="w-3.5 h-3.5 text-amber-400" />
+              <span>Analytics</span>
+            </button>
+
+            {/* 6. Parent Portal */}
+            <button
+              type="button"
+              onClick={() => setIsParentPortalModalOpen(true)}
+              className="px-3 py-1.5 bg-indigo-900/80 hover:bg-indigo-800 text-indigo-100 border border-indigo-700/60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
+              title="Parent Digital Consent Slips & Live Photo Stream"
+            >
+              <GraduationCap className="w-3.5 h-3.5 text-rose-300" />
+              <span>Parent Portal</span>
+            </button>
+
+            {/* 7. AI Story Generator */}
+            <button
+              type="button"
+              onClick={() => setIsStoryModalOpen(true)}
+              className="px-3 py-1.5 bg-indigo-900/80 hover:bg-indigo-800 text-indigo-100 border border-indigo-700/60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
+              title="Generate Travel Journal, Photobook, Presentation, and Narrated Video Summary"
+            >
+              <FileText className="w-3.5 h-3.5 text-sky-300" />
+              <span>AI Story Engine</span>
+            </button>
+
+            {/* 8. Eco & Sustainability */}
+            <button
+              type="button"
+              onClick={() => setIsEcoModalOpen(true)}
+              className="px-3 py-1.5 bg-indigo-900/80 hover:bg-indigo-800 text-indigo-100 border border-indigo-700/60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
+              title="Log Biodiversity Index, Litter Collected, and Carbon Savings"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-emerald-300" />
+              <span>Eco & Carbon</span>
+            </button>
+
+            {/* 9. Emergency & Logistics */}
+            <button
+              type="button"
+              onClick={() => setIsLogisticsModalOpen(true)}
+              className="px-3 py-1.5 bg-indigo-900/80 hover:bg-indigo-800 text-indigo-100 border border-indigo-700/60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
+              title="Attendance Roster, Medical Alerts, Emergency Contacts, Route Maps"
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+              <span>Logistics & Safety</span>
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Floating Offline / Cache Notification Banner */}
       {cacheNotification && (
@@ -2755,6 +3185,17 @@ DIFFERENTIATION STRATEGIES:
                   >
                     <Eye className="w-3.5 h-3.5" />
                     <span>Street View</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveViewerTab('video')}
+                    className={`min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 focus:ring-2 focus:ring-amber-400 ${
+                      activeViewerTab === 'video' ? 'bg-amber-400 text-slate-950 font-extrabold shadow-sm' : 'text-white/80 hover:text-white'
+                    }`}
+                    title="Watch 4K NatGeo Documentary and Virtual Video Tours for this location"
+                  >
+                    <Video className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Video / NatGeo</span>
                   </button>
 
                   {/* Real-World AR Camera View Launch Button */}
@@ -3654,7 +4095,10 @@ DIFFERENTIATION STRATEGIES:
                 </div>
               )}
 
-              {GOOGLE_MAPS_API_KEY && activeViewerTab === 'map' ? (
+              {activeViewerTab === 'video' ? (
+                /* NatGeo 4K Video Tour & Science Expedition Player Stage */
+                <MainStageVideoPlayer currentStop={currentStop} />
+              ) : GOOGLE_MAPS_API_KEY && activeViewerTab === 'map' ? (
                 <APIProvider apiKey={GOOGLE_MAPS_API_KEY} version="weekly">
                   <Map
                     center={{ lat: currentStop.lat, lng: currentStop.lng }}
@@ -6888,7 +7332,7 @@ DIFFERENTIATION STRATEGIES:
                         const updatedTrip = { ...activeTrip, stops: updatedStops };
                         setActiveTrip(updatedTrip);
                         setActiveViewerTab('map');
-                        setMapType('panorama');
+                        setMapType('hybrid');
                         setSelectedLightboxMedia(null);
                       } else {
                         setSelectedLightboxMedia(null);
@@ -7428,6 +7872,68 @@ DIFFERENTIATION STRATEGIES:
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Render All 9 Ecosystem Modals */}
+      <VirtualFieldTripEcosystemModals
+        activeTrip={activeTrip}
+        currentStop={currentStop}
+        isDiscoveryModalOpen={isDiscoveryModalOpen}
+        setIsDiscoveryModalOpen={setIsDiscoveryModalOpen}
+        discoveryCategory={discoveryCategory}
+        setDiscoveryCategory={setDiscoveryCategory}
+        onSelectTrip={handleSelectTrip}
+        isCameraIntelModalOpen={isCameraIntelModalOpen}
+        setIsCameraIntelModalOpen={setIsCameraIntelModalOpen}
+        scanSampleType={scanSampleType}
+        setScanSampleType={setScanSampleType}
+        isAnalyzingScan={isAnalyzingScan}
+        setIsAnalyzingScan={setIsAnalyzingScan}
+        scanResult={scanResult}
+        setScanResult={setScanResult}
+        isMissionsModalOpen={isMissionsModalOpen}
+        setIsMissionsModalOpen={setIsMissionsModalOpen}
+        activeMissions={activeMissions}
+        setActiveMissions={setActiveMissions}
+        selectedMissionId={selectedMissionId}
+        setSelectedMissionId={setSelectedMissionId}
+        missionAnswerText={missionAnswerText}
+        setMissionAnswerText={setMissionAnswerText}
+        missionFeedback={missionFeedback}
+        setMissionFeedback={setMissionFeedback}
+        isNotebookModalOpen={isNotebookModalOpen}
+        setIsNotebookModalOpen={setIsNotebookModalOpen}
+        isGeneratingNotebook={isGeneratingNotebook}
+        setIsGeneratingNotebook={setIsGeneratingNotebook}
+        notebookOutput={notebookOutput}
+        setNotebookOutput={setNotebookOutput}
+        isAnalyticsModalOpen={isAnalyticsModalOpen}
+        setIsAnalyticsModalOpen={setIsAnalyticsModalOpen}
+        isParentPortalModalOpen={isParentPortalModalOpen}
+        setIsParentPortalModalOpen={setIsParentPortalModalOpen}
+        parentSignedName={parentSignedName}
+        setParentSignedName={setParentSignedName}
+        isParentConsentSigned={isParentConsentSigned}
+        setIsParentConsentSigned={setIsParentConsentSigned}
+        isStoryModalOpen={isStoryModalOpen}
+        setIsStoryModalOpen={setIsStoryModalOpen}
+        storyFormat={storyFormat}
+        setStoryFormat={setStoryFormat}
+        isGeneratingStory={isGeneratingStory}
+        setIsGeneratingStory={setIsGeneratingStory}
+        generatedStoryText={generatedStoryText}
+        setGeneratedStoryText={setGeneratedStoryText}
+        isEcoModalOpen={isEcoModalOpen}
+        setIsEcoModalOpen={setIsEcoModalOpen}
+        ecoLitterKg={ecoLitterKg}
+        setEcoLitterKg={setEcoLitterKg}
+        ecoSpeciesCount={ecoSpeciesCount}
+        setEcoSpeciesCount={setEcoSpeciesCount}
+        ecoCarbonSaved={ecoCarbonSaved}
+        isLogisticsModalOpen={isLogisticsModalOpen}
+        setIsLogisticsModalOpen={setIsLogisticsModalOpen}
+        attendanceRoster={attendanceRoster}
+        setAttendanceRoster={setAttendanceRoster}
+      />
 
     </div>
   );

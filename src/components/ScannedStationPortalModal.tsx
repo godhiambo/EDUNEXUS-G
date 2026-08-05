@@ -28,6 +28,7 @@ import { QRMappingService } from '../services/qrMappingService';
 import { QRCodeMapping } from '../types/qrMapping';
 import { useAccessibility } from '../context/AccessibilityContext';
 import { useLanguage } from '../context/LanguageContext';
+import { HowToScanModal } from './HowToScanModal';
 
 interface ScannedStationPortalModalProps {
   isOpen: boolean;
@@ -69,6 +70,7 @@ export const ScannedStationPortalModal: React.FC<ScannedStationPortalModalProps>
   const [studentAnswer, setStudentAnswer] = useState<string>('');
   const [isVerified, setIsVerified] = useState<boolean>(false);
   const [verificationFeedback, setVerificationFeedback] = useState<string | null>(null);
+  const [isHowToScanOpen, setIsHowToScanOpen] = useState<boolean>(false);
 
   // Auto-resolve dynamic shortId mapping if provided
   useEffect(() => {
@@ -230,6 +232,15 @@ export const ScannedStationPortalModal: React.FC<ScannedStationPortalModalProps>
             >
               {isSpeaking ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-[#5f6f52]" />}
               <span>{isSpeaking ? 'Stop Audio' : 'Read Aloud'}</span>
+            </button>
+
+            <button
+              onClick={() => setIsHowToScanOpen(true)}
+              className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold transition cursor-pointer flex items-center gap-1.5 text-xs"
+              title="How to scan QR code stations instructions"
+            >
+              <HelpCircle className="w-3.5 h-3.5 text-amber-600" />
+              <span>How to Scan Guide</span>
             </button>
           </div>
 
@@ -451,6 +462,11 @@ export const ScannedStationPortalModal: React.FC<ScannedStationPortalModalProps>
         </div>
 
       </div>
+
+      <HowToScanModal
+        isOpen={isHowToScanOpen}
+        onClose={() => setIsHowToScanOpen(false)}
+      />
     </div>
   );
 };

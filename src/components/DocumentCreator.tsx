@@ -11,10 +11,11 @@ import {
   PromptTemplate,
   getCbcLessonDetails
 } from '../types';
-import { BookOpen, Sparkles, FileText, Settings, ArrowLeft, Lightbulb, Clock, Trash2, Save, X, FolderOpen, Bookmark, BookMarked, Tag, Home, Users, Mic, MicOff, Plus, RefreshCw, GitFork, Eye, Database, Grab, HelpCircle, RotateCcw, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { BookOpen, Sparkles, FileText, Settings, ArrowLeft, Lightbulb, Clock, Calendar, CalendarDays, Trash2, Save, X, FolderOpen, Bookmark, BookMarked, Tag, Home, Users, Mic, MicOff, Plus, RefreshCw, GitFork, Eye, Database, Grab, HelpCircle, RotateCcw, CheckCircle2, ShieldAlert, Undo2, Redo2, AlignLeft, Globe, Loader2, Info } from 'lucide-react';
 import { EditableSelect } from './EditableSelect';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { quickFormatEducationalText } from '../utils/quickFormat';
 import { useAccessibility } from '../context/AccessibilityContext';
 import { handleResponseJson } from '../utils/api';
 import { calculateReadability } from '../utils/readability';
@@ -23,6 +24,7 @@ import { collection, query, where, onSnapshot, setDoc, doc, deleteDoc } from 'fi
 import QuestionBank from './QuestionBank';
 import { QuestionBankItem } from '../types';
 import { useAutoRecovery } from '../hooks/useAutoRecovery';
+import RealtimeSpellcheckEditor from './RealtimeSpellcheckEditor';
 
 interface MicButtonWithIndicatorProps {
   field: 'topic' | 'subTopic' | 'customSubject' | 'extraPrompt' | 'hub';
@@ -88,6 +90,104 @@ function MicButtonWithIndicator({
           {isActive ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
         </button>
       </div>
+    </div>
+  );
+}
+
+interface LastSavedTimestampIndicatorProps {
+  lastSavedTime: Date | null;
+  onSaveNow: () => void;
+  isGenerating: boolean;
+}
+
+function LastSavedTimestampIndicator({
+  lastSavedTime,
+  onSaveNow,
+  isGenerating
+}: LastSavedTimestampIndicatorProps) {
+  const [now, setNow] = useState<Date>(new Date());
+  const [isJustSaved, setIsJustSaved] = useState<boolean>(false);
+
+  // Update current time ticker every 3 seconds for dynamic relative time display
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(new Date());
+    }, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Trigger brief visual pulse effect whenever lastSavedTime updates
+  useEffect(() => {
+    if (lastSavedTime) {
+      setIsJustSaved(true);
+      const timeout = setTimeout(() => setIsJustSaved(false), 2200);
+      return () => clearTimeout(timeout);
+    }
+  }, [lastSavedTime]);
+
+  // Calculate human-friendly relative time string
+  const getRelativeTimeString = () => {
+    if (!lastSavedTime) return 'Auto-save active';
+    const diffSec = Math.max(0, Math.floor((now.getTime() - lastSavedTime.getTime()) / 1000));
+    if (diffSec < 5) return 'Just now';
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    return lastSavedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const exactTimeString = lastSavedTime
+    ? lastSavedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : null;
+
+  return (
+    <div
+      className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-medium transition-all duration-300 shadow-2xs ${
+        isJustSaved
+          ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-800 dark:text-emerald-200 ring-2 ring-emerald-500/20'
+          : 'bg-white/90 dark:bg-slate-800/90 border-slate-200/90 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 hover:border-slate-300 dark:hover:border-slate-600'
+      }`}
+      title={
+        exactTimeString
+          ? `Last saved to offline cache & Firestore at ${exactTimeString}. Progress is automatically preserved every 30 seconds.`
+          : 'Progress is automatically preserved every 30 seconds to browser cache & Firestore.'
+      }
+    >
+      <div className="relative flex items-center justify-center shrink-0">
+        {isJustSaved ? (
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 animate-bounce" />
+        ) : (
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+          </span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-1.5 min-w-0">
+        <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium hidden sm:inline">Last saved:</span>
+        <span className="font-bold text-slate-800 dark:text-slate-100 font-mono text-[11px] sm:text-xs tracking-tight">
+          {exactTimeString ? exactTimeString : 'Initializing...'}
+        </span>
+        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-100/80 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/60 flex items-center gap-1">
+          <Clock className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
+          {getRelativeTimeString()}
+        </span>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => {
+          onSaveNow();
+          setIsJustSaved(true);
+        }}
+        disabled={isGenerating}
+        className="ml-1 pl-2 border-l border-slate-200 dark:border-slate-700 text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition text-[11px] font-bold flex items-center gap-1 cursor-pointer disabled:opacity-40"
+        title="Force save form progress now"
+      >
+        <Save className="w-3 h-3" />
+        <span className="hidden md:inline">Save Now</span>
+      </button>
     </div>
   );
 }
@@ -649,11 +749,14 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
   const [extraPrompt, setExtraPrompt] = useState('');
   const [explainLikeMasterTeacher, setExplainLikeMasterTeacher] = useState(true);
   const [askMentor, setAskMentor] = useState(false);
+  const [mentorScaffoldingContext, setMentorScaffoldingContext] = useState<string>('');
+  const [showMentorInfoTooltip, setShowMentorInfoTooltip] = useState(false);
   const [generateVocabulary, setGenerateVocabulary] = useState(false);
   const [generateDifferentiated, setGenerateDifferentiated] = useState(false);
   const [generateParental, setGenerateParental] = useState(false);
   const [generateDiagram, setGenerateDiagram] = useState(false);
   const [diagramType, setDiagramType] = useState<'flowchart' | 'concept-map'>('flowchart');
+  const [enableSearchGrounding, setEnableSearchGrounding] = useState<boolean>(true);
   const [isGeneratingVocabulary, setIsGeneratingVocabulary] = useState(false);
   const [vocabularyError, setVocabularyError] = useState<string | null>(null);
   const [lessonsPerWeek, setLessonsPerWeek] = useState(5);
@@ -662,9 +765,45 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
   const [paperStyle, setPaperStyle] = useState<'ruled' | 'grid' | 'blank'>('ruled');
   const [penColor, setPenColor] = useState<'blue' | 'black'>('blue');
   const [handwritingIntensity, setHandwritingIntensity] = useState<number>(3);
-  const [classicNotesImageModel, setClassicNotesImageModel] = useState<'emgen' | 'nano banana'>('emgen');
+  const [classicNotesImageModel, setClassicNotesImageModel] = useState<'emgen_fallback_nanobanana' | 'emgen' | 'nano banana'>('emgen_fallback_nanobanana');
   const [documentPageSize, setDocumentPageSize] = useState<'A4' | 'A5' | 'Letter' | 'Legal' | 'A3'>('A4');
   const [documentLength, setDocumentLength] = useState<'concise' | 'standard' | 'detailed' | 'comprehensive'>('standard');
+
+  // Document Generation Progress State & Phases
+  const [docGenerationProgress, setDocGenerationProgress] = useState<number>(0);
+  const [docGenerationStep, setDocGenerationStep] = useState<number>(0);
+
+  const documentGenerationPhases = [
+    {
+      title: 'Initializing Curriculum Framework',
+      description: 'Analyzing curriculum guidelines, subject scope & targeted grade competencies...',
+      detail: 'Configuring CBC / 8-4-4 pedagogical alignment'
+    },
+    {
+      title: 'Structuring Instructional Architecture',
+      description: 'Designing 5E lesson phases, core concepts & key inquiries...',
+      detail: 'Organizing engaging entry hooks & learner activities'
+    },
+    {
+      title: 'Synthesizing Exemplar Content & Notes',
+      description: 'Writing rich master-teacher notes, examples & interactive prompts...',
+      detail: 'Generating clear student explanations and step-by-step illustrations'
+    },
+    {
+      title: 'Finalizing Assessments & Scaffolding',
+      description: 'Integrating diagnostic questions, rubric criteria & mentor guidance...',
+      detail: 'Conducting final pedagogical quality check & formatting document'
+    }
+  ];
+
+  // Lesson Schedule Date & Time for Dashboard Calendar Integration
+  const [scheduledDate, setScheduledDate] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('pedagogical_scheduled_date_hint') || '';
+    }
+    return '';
+  });
+  const [scheduledTime, setScheduledTime] = useState<string>('08:00');
 
   // Question Bank Integration
   const [selectedQuestions, setSelectedQuestions] = useState<QuestionBankItem[]>([]);
@@ -706,6 +845,7 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
   } | null>(null);
 
   // AI Citation Tool state
+  const [readingComplexity, setReadingComplexity] = useState<'simple' | 'standard' | 'professional'>('standard');
   const [citationResourceType, setCitationResourceType] = useState<'book' | 'article' | 'website'>('book');
   const [citationStyle, setCitationStyle] = useState<'apa' | 'mla' | 'harvard'>('apa');
   const [citationAuthor, setCitationAuthor] = useState('');
@@ -878,6 +1018,7 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
     showBanner: showRecoveryBanner,
     lastSavedTime,
     clearRecoveryData,
+    saveNow,
     dismissBanner: dismissRecoveryBanner,
   } = useAutoRecovery(
     'edunexus_document_creator_autorecovery',
@@ -927,6 +1068,159 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
       setRestoredToastMessage(null);
     }, 4500);
   };
+
+  // Undo / Redo Document Creator History Stack Engine
+  const [formHistory, setFormHistory] = useState<Array<typeof currentFormState>>([]);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
+  const isRestoringHistoryRef = React.useRef<boolean>(false);
+  const historyDebounceTimerRef = React.useRef<any>(null);
+
+  // Apply a snapshot to state
+  const applyFormSnapshot = React.useCallback((st: typeof currentFormState) => {
+    if (!st) return;
+    isRestoringHistoryRef.current = true;
+    if (st.curriculum !== undefined) setCurriculum(st.curriculum);
+    if (st.docType !== undefined) setDocType(st.docType);
+    if (st.lessonLayout !== undefined) setLessonLayout(st.lessonLayout);
+    if (st.subject !== undefined) setSubject(st.subject);
+    if (st.customSubject !== undefined) setCustomSubject(st.customSubject);
+    if (st.classLevel !== undefined) setClassLevel(st.classLevel);
+    if (st.topic !== undefined) setTopic(st.topic);
+    if (st.subTopic !== undefined) setSubTopic(st.subTopic);
+    if (st.duration !== undefined) setDuration(st.duration);
+    if (st.extraPrompt !== undefined) setExtraPrompt(st.extraPrompt);
+    if (st.explainLikeMasterTeacher !== undefined) setExplainLikeMasterTeacher(st.explainLikeMasterTeacher);
+    if (st.askMentor !== undefined) setAskMentor(st.askMentor);
+    if (st.generateVocabulary !== undefined) setGenerateVocabulary(st.generateVocabulary);
+    if (st.generateDifferentiated !== undefined) setGenerateDifferentiated(st.generateDifferentiated);
+    if (st.generateParental !== undefined) setGenerateParental(st.generateParental);
+    if (st.generateDiagram !== undefined) setGenerateDiagram(st.generateDiagram);
+    if (st.diagramType !== undefined) setDiagramType(st.diagramType);
+    if (st.lessonsPerWeek !== undefined) setLessonsPerWeek(st.lessonsPerWeek);
+    if (st.weeksPerTerm !== undefined) setWeeksPerTerm(st.weeksPerTerm);
+    if (st.difficultyLevel !== undefined) setDifficultyLevel(st.difficultyLevel);
+    if (st.paperStyle !== undefined) setPaperStyle(st.paperStyle);
+    if (st.penColor !== undefined) setPenColor(st.penColor);
+    if (st.handwritingIntensity !== undefined) setHandwritingIntensity(st.handwritingIntensity);
+    if (st.classicNotesImageModel !== undefined) setClassicNotesImageModel(st.classicNotesImageModel);
+    if (st.documentPageSize !== undefined) setDocumentPageSize(st.documentPageSize);
+    if (st.documentLength !== undefined) setDocumentLength(st.documentLength);
+    if (st.selectedTags !== undefined) setSelectedTags(st.selectedTags);
+    if (st.selectedQuestions !== undefined) setSelectedQuestions(st.selectedQuestions);
+  }, []);
+
+  // Monitor form state updates and push to history stack
+  useEffect(() => {
+    if (isRestoringHistoryRef.current) {
+      isRestoringHistoryRef.current = false;
+      return;
+    }
+
+    if (historyDebounceTimerRef.current) {
+      clearTimeout(historyDebounceTimerRef.current);
+    }
+
+    historyDebounceTimerRef.current = setTimeout(() => {
+      setFormHistory((prevHistory) => {
+        if (prevHistory.length === 0) {
+          setHistoryIndex(0);
+          return [currentFormState];
+        }
+
+        const activeState = prevHistory[historyIndex];
+        if (activeState && JSON.stringify(activeState) === JSON.stringify(currentFormState)) {
+          return prevHistory;
+        }
+
+        const updatedHistory = [...prevHistory.slice(0, historyIndex + 1), currentFormState];
+        if (updatedHistory.length > 50) {
+          updatedHistory.shift();
+        }
+        setHistoryIndex(updatedHistory.length - 1);
+        return updatedHistory;
+      });
+    }, 400);
+
+    return () => {
+      if (historyDebounceTimerRef.current) clearTimeout(historyDebounceTimerRef.current);
+    };
+  }, [currentFormState, historyIndex]);
+
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex >= 0 && historyIndex < formHistory.length - 1;
+
+  const handleUndo = () => {
+    if (!canUndo) return;
+    const prevIndex = historyIndex - 1;
+    const snapshot = formHistory[prevIndex];
+    if (snapshot) {
+      applyFormSnapshot(snapshot);
+      setHistoryIndex(prevIndex);
+    }
+  };
+
+  const handleRedo = () => {
+    if (!canRedo) return;
+    const nextIndex = historyIndex + 1;
+    const snapshot = formHistory[nextIndex];
+    if (snapshot) {
+      applyFormSnapshot(snapshot);
+      setHistoryIndex(nextIndex);
+    }
+  };
+
+  const [globalQuickFormatToast, setGlobalQuickFormatToast] = useState<boolean>(false);
+
+  const handleGlobalQuickFormat = () => {
+    let modified = false;
+    if (hubTranscription && hubTranscription.trim()) {
+      setHubTranscription(quickFormatEducationalText(hubTranscription));
+      modified = true;
+    }
+    if (extraPrompt && extraPrompt.trim()) {
+      setExtraPrompt(quickFormatEducationalText(extraPrompt));
+      modified = true;
+    }
+    if (rubricObjectives && rubricObjectives.trim()) {
+      setRubricObjectives(quickFormatEducationalText(rubricObjectives));
+      modified = true;
+    }
+    if (citationRawInput && citationRawInput.trim()) {
+      setCitationRawInput(quickFormatEducationalText(citationRawInput));
+      modified = true;
+    }
+
+    if (modified) {
+      setGlobalQuickFormatToast(true);
+      setTimeout(() => setGlobalQuickFormatToast(false), 3000);
+    }
+  };
+
+  // Listen for Ctrl+Z and Ctrl+Y keyboard shortcuts
+  useEffect(() => {
+    const handleUndoRedoShortcuts = (e: KeyboardEvent) => {
+      const activeElementTag = (document.activeElement?.tagName || '').toUpperCase();
+      const isInputFocused = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeElementTag);
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        if (e.shiftKey) {
+          e.preventDefault();
+          handleRedo();
+        } else if (!isInputFocused) {
+          e.preventDefault();
+          handleUndo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        if (!isInputFocused) {
+          e.preventDefault();
+          handleRedo();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleUndoRedoShortcuts);
+    return () => window.removeEventListener('keydown', handleUndoRedoShortcuts);
+  }, [canUndo, canRedo, historyIndex, formHistory, applyFormSnapshot]);
   
   const [tipIndex, setTipIndex] = useState(0);
 
@@ -1044,6 +1338,11 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
     setExtraPrompt(draft.extraPrompt || '');
     setExplainLikeMasterTeacher(draft.explainLikeMasterTeacher ?? true);
     setAskMentor(draft.askMentor ?? false);
+    if ((draft as any).mentorScaffoldingContext) {
+      setMentorScaffoldingContext((draft as any).mentorScaffoldingContext);
+    } else {
+      setMentorScaffoldingContext('');
+    }
     setGenerateVocabulary(draft.generateVocabulary ?? false);
     setGenerateDifferentiated(draft.generateDifferentiated ?? false);
     setGenerateParental(draft.generateParental ?? false);
@@ -1060,6 +1359,8 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
     if (draft.classicNotesImageModel) setClassicNotesImageModel(draft.classicNotesImageModel);
     if (draft.documentPageSize) setDocumentPageSize(draft.documentPageSize);
     if (draft.documentLength) setDocumentLength(draft.documentLength);
+    if (draft.scheduledDate) setScheduledDate(draft.scheduledDate);
+    if (draft.scheduledTime) setScheduledTime(draft.scheduledTime);
 
     setSelectedDraftId(draft.id);
     setDraftNameInput(draft.draftName);
@@ -1095,6 +1396,7 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
         extraPrompt,
         explainLikeMasterTeacher,
         askMentor: askMentor || false,
+        mentorScaffoldingContext: askMentor ? mentorScaffoldingContext : undefined,
         generateVocabulary: generateVocabulary || false,
         generateDifferentiated: generateDifferentiated || false,
         generateParental: generateParental || false,
@@ -1110,15 +1412,18 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
         paperStyle: docType === 'lesson-notes-classic' ? paperStyle : undefined,
         penColor: docType === 'lesson-notes-classic' ? penColor : undefined,
         handwritingIntensity: docType === 'lesson-notes-classic' ? handwritingIntensity : undefined,
-        classicNotesImageModel: docType === 'lesson-notes-classic' ? classicNotesImageModel : undefined,
+        classicNotesImageModel: (docType === 'lesson-notes-classic' ? classicNotesImageModel : undefined) as any,
         documentPageSize,
-        documentLength
+        documentLength,
+        scheduledDate: scheduledDate || undefined,
+        scheduledTime: scheduledDate ? (scheduledTime || '08:00') : undefined
       };
 
       await setDoc(doc(db, 'drafts', draftId), cleanUndefined(draftData));
       setSelectedDraftId(draftId);
       setSaveStatus('success');
       clearRecoveryData();
+      saveNow();
       setTimeout(() => {
         setIsSaveDraftModalOpen(false);
         setSaveStatus('idle');
@@ -1260,6 +1565,7 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
     setExtraPrompt('');
     setExplainLikeMasterTeacher(true);
     setAskMentor(false);
+    setMentorScaffoldingContext('');
     setGenerateVocabulary(false);
     setGenerateDifferentiated(false);
     setGenerateParental(false);
@@ -1270,6 +1576,9 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
     setSelectedTags([]);
     setPacingData(null);
     setPacingError(null);
+    setScheduledDate('');
+    setScheduledTime('08:00');
+    localStorage.removeItem('pedagogical_scheduled_date_hint');
     clearRecoveryData();
   };
 
@@ -1513,17 +1822,37 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
     alert("Citation copied to clipboard!");
   };
 
-  // Cycle through loading tips
+  // Cycle through loading tips and increment progress
   useEffect(() => {
     let intervalId: any;
+    let progressTimer: any;
     if (isGenerating) {
+      setDocGenerationProgress(6);
+      setDocGenerationStep(0);
       intervalId = setInterval(() => {
         setTipIndex((prev) => (prev + 1) % LOADING_TIPS.length);
-      }, 4000);
+      }, 3500);
+      progressTimer = setInterval(() => {
+        setDocGenerationProgress(prev => {
+          if (prev >= 96) return 96;
+          const next = prev + Math.floor(Math.random() * 5) + 3;
+          const bounded = Math.min(next, 96);
+          if (bounded >= 75) setDocGenerationStep(3);
+          else if (bounded >= 50) setDocGenerationStep(2);
+          else if (bounded >= 25) setDocGenerationStep(1);
+          else setDocGenerationStep(0);
+          return bounded;
+        });
+      }, 350);
     } else {
       setTipIndex(0);
+      setDocGenerationProgress(0);
+      setDocGenerationStep(0);
     }
-    return () => clearInterval(intervalId);
+    return () => {
+      clearInterval(intervalId);
+      clearInterval(progressTimer);
+    };
   }, [isGenerating]);
 
   // Handle grade defaults on curriculum switch
@@ -1564,6 +1893,9 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
     }
 
     let finalExtraPrompt = extraPrompt;
+    if (askMentor && mentorScaffoldingContext.trim()) {
+      finalExtraPrompt += `\n\nPEDAGOGICAL SCAFFOLDING & CLASS NEEDS (ASK MENTOR):\n${mentorScaffoldingContext.trim()}\n(Note to AI: Apply this pedagogical scaffolding prompt to tailor the document generation specifically for the class needs described above.)`;
+    }
     if (selectedQuestions.length > 0) {
       finalExtraPrompt += "\n\nCRITICAL ASSESSMENT REPOSITORY INTEGRATION: You MUST include the following specific questions from the Question Bank into the generated document's assessment/quiz/exercises section, formatting them beautifully for classroom use:\n" + 
         selectedQuestions.map((q, idx) => {
@@ -1605,12 +1937,16 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
       lessonLayout: (docType === 'lesson-plan' || docType === 'lesson-notes' || docType === 'lesson-notes-classic') ? lessonLayout : undefined,
       learnerProfile: activeLearnerProfile,
       difficultyLevel,
+      readingComplexity,
       paperStyle: docType === 'lesson-notes-classic' ? paperStyle : undefined,
       penColor: docType === 'lesson-notes-classic' ? penColor : undefined,
       handwritingIntensity: docType === 'lesson-notes-classic' ? handwritingIntensity : undefined,
-      classicNotesImageModel: docType === 'lesson-notes-classic' ? classicNotesImageModel : undefined,
+      classicNotesImageModel: (docType === 'lesson-notes-classic' ? classicNotesImageModel : undefined) as any,
       documentPageSize,
-      documentLength
+      documentLength,
+      enableSearchGrounding,
+      scheduledDate: scheduledDate || undefined,
+      scheduledTime: scheduledDate ? (scheduledTime || '08:00') : undefined
     });
   };
 
@@ -1671,7 +2007,7 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
   };
 
   return (
-    <div className="max-w-7xl mx-auto py-4 px-4">
+    <div className="max-w-7xl mx-auto py-4 px-4 document-creator-workspace module-workspace">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <button
@@ -1680,7 +2016,67 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
         >
           <ArrowLeft className="w-4 h-4" /> Back to Dashboard
         </button>
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {!isGenerating && (
+            <div className="flex items-center gap-1 bg-white border border-slate-200/90 rounded-xl p-1 shadow-2xs">
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={!canUndo}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  canUndo
+                    ? 'text-slate-700 hover:bg-slate-100 hover:text-emerald-700 active:scale-95'
+                    : 'text-slate-300 cursor-not-allowed opacity-40'
+                }`}
+                title="Undo last edit (Ctrl+Z)"
+              >
+                <Undo2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Undo</span>
+              </button>
+
+              <div className="h-4 w-[1px] bg-slate-200 my-auto" />
+
+              <button
+                type="button"
+                onClick={handleRedo}
+                disabled={!canRedo}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  canRedo
+                    ? 'text-slate-700 hover:bg-slate-100 hover:text-emerald-700 active:scale-95'
+                    : 'text-slate-300 cursor-not-allowed opacity-40'
+                }`}
+                title="Redo edit (Ctrl+Y or Ctrl+Shift+Z)"
+              >
+                <Redo2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Redo</span>
+              </button>
+
+              {formHistory.length > 1 && (
+                <span className="text-[10px] text-slate-500 font-mono font-medium px-1.5 py-0.5 bg-slate-50 rounded-md border border-slate-150">
+                  {historyIndex + 1}/{formHistory.length}
+                </span>
+              )}
+
+              <div className="h-4 w-[1px] bg-slate-200 my-auto ml-0.5" />
+
+              <button
+                type="button"
+                onClick={handleGlobalQuickFormat}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-800 text-xs font-bold transition cursor-pointer active:scale-95"
+                title="Automatically format dictated or pasted text across all prompt fields with educational headings & lists"
+              >
+                <AlignLeft className="w-3.5 h-3.5 text-sky-600" />
+                <span>Quick Format</span>
+              </button>
+
+              {globalQuickFormatToast && (
+                <span className="text-[10px] font-bold text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-md animate-fadeIn">
+                  ✓ Formatted!
+                </span>
+              )}
+            </div>
+          )}
+
           {!isGenerating && (
             <button
               type="button"
@@ -1696,17 +2092,11 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
             </button>
           )}
           {!isGenerating && (
-            <div className="flex items-center gap-1.5 bg-slate-100 text-slate-700 border border-slate-200 px-3 py-1 rounded-full text-xs font-medium" title="Saves your form progress every 30 seconds automatically to localStorage">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span>
-                {lastSavedTime
-                  ? `Auto-saved at ${lastSavedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
-                  : 'Auto-save active (30s)'}
-              </span>
-            </div>
+            <LastSavedTimestampIndicator
+              lastSavedTime={lastSavedTime}
+              onSaveNow={saveNow}
+              isGenerating={isGenerating}
+            />
           )}
           <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-xs font-semibold">
             <Sparkles className="w-3.5 h-3.5 animate-pulse" />
@@ -1716,26 +2106,120 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
       </div>
 
       {isGenerating ? (
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-xl p-12 flex flex-col items-center justify-center min-h-[450px] max-w-3xl mx-auto">
-          <div className="relative flex items-center justify-center w-20 h-20 mb-8">
-            <div className="absolute inset-0 rounded-full border-4 border-emerald-100 animate-pulse"></div>
-            <div className="absolute inset-0 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin"></div>
-            <Sparkles className="w-8 h-8 text-emerald-500" />
+        <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xl p-8 sm:p-12 flex flex-col items-center justify-center min-h-[480px] max-w-3xl mx-auto my-6 relative overflow-hidden animate-fadeIn">
+          {/* Subtle background glow */}
+          <div className="absolute -top-16 -right-16 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-16 -left-16 w-48 h-48 bg-[#5f6f52]/10 rounded-full blur-3xl pointer-events-none" />
+
+          {/* Top Badge */}
+          <div className="flex items-center gap-2 bg-emerald-50 text-emerald-800 border border-emerald-200/80 px-3.5 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wider mb-6 shadow-2xs">
+            <Sparkles className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+            <span>EduNexus Pedagogical AI Engine</span>
           </div>
 
-          <h3 className="text-xl font-bold text-slate-800 mb-2">Generating Educational Material</h3>
-          <p className="text-sm text-slate-500 text-center max-w-md h-12">
-            {LOADING_TIPS[tipIndex]}
-          </p>
-
-          <div className="w-full max-w-sm bg-slate-100 h-1.5 rounded-full overflow-hidden mt-6">
-            <div className="bg-emerald-500 h-full animate-infinite-loading rounded-full w-1/3"></div>
+          {/* SVG Circular Progress Ring */}
+          <div className="relative w-36 h-36 flex items-center justify-center mb-6">
+            <svg className="w-full h-full transform -rotate-90">
+              {/* Outer Track */}
+              <circle
+                cx="72"
+                cy="72"
+                r="60"
+                className="text-slate-150 stroke-current"
+                strokeWidth="8"
+                fill="transparent"
+              />
+              {/* Animated Progress Circle */}
+              <circle
+                cx="72"
+                cy="72"
+                r="60"
+                className="text-emerald-600 stroke-current transition-all duration-300 ease-out"
+                strokeWidth="8"
+                strokeDasharray={376.99}
+                strokeDashoffset={376.99 - (376.99 * docGenerationProgress) / 100}
+                strokeLinecap="round"
+                fill="transparent"
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+              <span className="text-3xl font-black text-slate-800 font-mono tracking-tight">
+                {Math.round(docGenerationProgress)}%
+              </span>
+              <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-widest mt-0.5">
+                Generating
+              </span>
+            </div>
           </div>
 
-          <div className="mt-12 bg-amber-50 rounded-xl p-4 border border-amber-100 text-amber-900 max-w-md text-xs flex gap-3">
-            <Lightbulb className="w-5 h-5 shrink-0 text-amber-600" />
-            <div>
-              <span className="font-semibold">Curriculum Alignment:</span> Gemini is generating structured, fully detailed lessons, notes, and rubrics aligned to your curriculum choice. This takes about 15-30 seconds.
+          {/* Dynamic Active Stage Title & Subtitle */}
+          <div className="text-center space-y-1 mb-6 max-w-lg">
+            <h3 className="text-lg font-bold text-slate-850">
+              {documentGenerationPhases[docGenerationStep]?.title || 'Generating Educational Material'}
+            </h3>
+            <p className="text-xs text-slate-600 font-medium leading-relaxed">
+              {documentGenerationPhases[docGenerationStep]?.description || 'Processing curriculum guidelines and generating structured material...'}
+            </p>
+          </div>
+
+          {/* Linear Percentage Progress Bar */}
+          <div className="w-full max-w-md space-y-2 mb-6">
+            <div className="flex justify-between items-center text-xs font-bold text-slate-600">
+              <span>Overall Completion Status</span>
+              <span className="font-mono text-emerald-700">{Math.round(docGenerationProgress)}%</span>
+            </div>
+            <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200 shadow-inner">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-600 via-[#5f6f52] to-amber-500 rounded-full transition-all duration-300 shadow-xs"
+                style={{ width: `${docGenerationProgress}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Pipeline Stage Checklist */}
+          <div className="w-full max-w-md bg-slate-50 rounded-2xl p-4 border border-slate-200/80 space-y-2 mb-6">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1.5">
+              Generation Pipeline Stages:
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {documentGenerationPhases.map((phase, pIdx) => {
+                const isDone = docGenerationStep > pIdx;
+                const isCurrent = docGenerationStep === pIdx;
+                return (
+                  <div
+                    key={pIdx}
+                    className={`flex items-center gap-2 p-2 rounded-xl text-xs border transition-all ${
+                      isDone
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900 font-semibold'
+                        : isCurrent
+                        ? 'bg-white border-emerald-400 text-slate-800 font-bold shadow-xs ring-1 ring-emerald-400/40'
+                        : 'bg-white/60 border-slate-150 text-slate-400'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 text-[9px] font-black ${
+                      isDone
+                        ? 'bg-emerald-600 text-white'
+                        : isCurrent
+                        ? 'bg-emerald-100 text-emerald-700 border border-emerald-400 animate-pulse'
+                        : 'bg-slate-200 text-slate-500'
+                    }`}>
+                      {isDone ? '✓' : pIdx + 1}
+                    </div>
+                    <span className="truncate text-[11px]">{phase.title}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Educational Tip Card */}
+          <div className="bg-amber-50/90 rounded-2xl p-4 border border-amber-200/80 text-amber-950 max-w-md text-xs flex gap-3 shadow-2xs">
+            <Lightbulb className="w-5 h-5 shrink-0 text-amber-600 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold block text-amber-900">Did you know? (Pedagogical Tip):</span>
+              <p className="text-slate-700 leading-relaxed text-[11px]">
+                {LOADING_TIPS[tipIndex]}
+              </p>
             </div>
           </div>
         </div>
@@ -2206,6 +2690,51 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Reading Complexity Level Toggle */}
+            <div className="bg-[#fcf8ff] border border-purple-200/80 rounded-xl p-4.5 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <span className="text-[10px] font-black uppercase text-purple-700 tracking-wider block">Linguistic Complexity Scaffolding</span>
+                  <label className="text-sm font-bold text-slate-850 flex items-center gap-1.5" id="reading-complexity-label">
+                    <span>Reading Complexity Level</span>
+                    <span className="bg-purple-100 text-purple-900 text-[9px] px-1.5 py-0.5 rounded-full font-black uppercase tracking-wider">
+                      AI TUNER
+                    </span>
+                  </label>
+                  <p className="text-[11px] text-slate-500 leading-snug">
+                    Control sentence complexity, vocabulary depth, and linguistic phrasing for generated documents.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 bg-white p-1 rounded-xl border border-purple-200/80 shadow-2xs">
+                  {[
+                    { id: 'simple', label: 'Simple', badge: '🟢 Accessible', desc: 'Elementary, accessible words & short clear sentences' },
+                    { id: 'standard', label: 'Standard', badge: '🔵 Balanced', desc: 'Grade-appropriate standard academic level' },
+                    { id: 'professional', label: 'Professional', badge: '🟣 Advanced', desc: 'Advanced academic rigor & formal terminology' },
+                  ].map((level) => (
+                    <button
+                      key={level.id}
+                      type="button"
+                      onClick={() => setReadingComplexity(level.id as 'simple' | 'standard' | 'professional')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                        readingComplexity === level.id
+                          ? 'bg-purple-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                      title={level.desc}
+                    >
+                      <span>{level.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-[11px] text-purple-800/80 bg-purple-50/60 border border-purple-100 p-2 rounded-lg font-medium">
+                {readingComplexity === 'simple' && '⚡ Simple: Uses short, direct sentences, high-frequency vocabulary, and clear explanations tailored for early readers or ESL/EAL learners.'}
+                {readingComplexity === 'standard' && '⚡ Standard: Balanced academic tone aligned standardly to target grade curriculum benchmarks.'}
+                {readingComplexity === 'professional' && '⚡ Professional: Sophisticated domain vocabulary, complex syntax, and detailed academic definitions.'}
+              </p>
             </div>
 
             {/* Document Page Size & Detail Length Customization */}
@@ -2793,52 +3322,77 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
                   </div>
                 </div>
 
-                {/* Image Generation Model Selector */}
-                <div className="border-t border-amber-200/40 pt-4 mt-2 space-y-3">
-                  <span className="text-[10px] font-black uppercase text-amber-800 tracking-wider block">4. Select AI Image Model for Notes-Only Production</span>
-                  <div className="grid grid-cols-2 gap-3">
-                    {/* Emgen Model */}
-                    <button
-                      type="button"
-                      onClick={() => setClassicNotesImageModel('emgen')}
-                      className={`flex items-center gap-2.5 p-3 rounded-xl border text-left transition-all duration-300 cursor-pointer ${
-                        classicNotesImageModel === 'emgen'
-                          ? 'border-amber-500 bg-amber-50/50 ring-2 ring-amber-500/20 shadow-xs'
-                          : 'border-slate-200 hover:border-slate-300 bg-white'
-                      }`}
-                    >
-                      <div className="w-6 h-6 rounded-full bg-amber-600 flex items-center justify-center text-white text-[10px] shadow-xs">
-                        {classicNotesImageModel === 'emgen' && '✓'}
-                      </div>
-                      <div>
-                        <span className="text-xs font-bold text-slate-800 block leading-tight">🎨 Emgen</span>
-                        <span className="text-[10px] text-slate-400 font-semibold block">High Resolution / Premium</span>
-                      </div>
-                    </button>
+                {/* Image Generation Model Selector (Admin Only) */}
+                {profile?.role === 'Administrator' ? (
+                  <div className="border-t border-amber-200/40 pt-4 mt-2 space-y-3">
+                    <span className="text-[10px] font-black uppercase text-amber-800 tracking-wider block">4. Select AI Image Strategy for Classic Notes (Admin)</span>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                      {/* Option 1: Nano Banana as Fallback for Emgen */}
+                      <button
+                        type="button"
+                        onClick={() => setClassicNotesImageModel('emgen_fallback_nanobanana')}
+                        className={`flex items-center gap-2 p-2.5 rounded-xl border text-left transition-all duration-300 cursor-pointer ${
+                          classicNotesImageModel === 'emgen_fallback_nanobanana'
+                            ? 'border-amber-500 bg-amber-50/70 ring-2 ring-amber-500/20 shadow-xs'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="w-5 h-5 rounded-full bg-amber-600 flex items-center justify-center text-white text-[10px] shrink-0 font-bold">
+                          {classicNotesImageModel === 'emgen_fallback_nanobanana' && '✓'}
+                        </div>
+                        <div>
+                          <span className="text-xs font-black text-slate-800 block leading-tight">🍌 Nano Banana Fallback</span>
+                          <span className="text-[9.5px] text-slate-500 font-semibold block leading-tight">Emgen primary + Auto Nano Banana fallback</span>
+                        </div>
+                      </button>
 
-                    {/* Nano Banana Model */}
-                    <button
-                      type="button"
-                      onClick={() => setClassicNotesImageModel('nano banana')}
-                      className={`flex items-center gap-2.5 p-3 rounded-xl border text-left transition-all duration-300 cursor-pointer ${
-                        classicNotesImageModel === 'nano banana'
-                          ? 'border-amber-500 bg-amber-50/50 ring-2 ring-amber-500/20 shadow-xs'
-                          : 'border-slate-200 hover:border-slate-300 bg-white'
-                      }`}
-                    >
-                      <div className="w-6 h-6 rounded-full bg-yellow-500 flex items-center justify-center text-white text-[10px] shadow-xs">
-                        {classicNotesImageModel === 'nano banana' && '✓'}
-                      </div>
-                      <div>
-                        <span className="text-xs font-bold text-slate-800 block leading-tight">🍌 Nano Banana</span>
-                        <span className="text-[10px] text-slate-400 font-semibold block">Rapid Generation</span>
-                      </div>
-                    </button>
+                      {/* Option 2: Emgen Only */}
+                      <button
+                        type="button"
+                        onClick={() => setClassicNotesImageModel('emgen')}
+                        className={`flex items-center gap-2 p-2.5 rounded-xl border text-left transition-all duration-300 cursor-pointer ${
+                          classicNotesImageModel === 'emgen'
+                            ? 'border-amber-500 bg-amber-50/70 ring-2 ring-amber-500/20 shadow-xs'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="w-5 h-5 rounded-full bg-amber-600 flex items-center justify-center text-white text-[10px] shrink-0 font-bold">
+                          {classicNotesImageModel === 'emgen' && '✓'}
+                        </div>
+                        <div>
+                          <span className="text-xs font-black text-slate-800 block leading-tight">🎨 Emgen Only</span>
+                          <span className="text-[9.5px] text-slate-500 font-semibold block leading-tight">High resolution / Ultra-detailed</span>
+                        </div>
+                      </button>
+
+                      {/* Option 3: Nano Banana Only */}
+                      <button
+                        type="button"
+                        onClick={() => setClassicNotesImageModel('nano banana')}
+                        className={`flex items-center gap-2 p-2.5 rounded-xl border text-left transition-all duration-300 cursor-pointer ${
+                          classicNotesImageModel === 'nano banana'
+                            ? 'border-amber-500 bg-amber-50/70 ring-2 ring-amber-500/20 shadow-xs'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="w-5 h-5 rounded-full bg-yellow-500 flex items-center justify-center text-white text-[10px] shrink-0 font-bold">
+                          {classicNotesImageModel === 'nano banana' && '✓'}
+                        </div>
+                        <div>
+                          <span className="text-xs font-black text-slate-800 block leading-tight">🍌 Nano Banana Only</span>
+                          <span className="text-[9.5px] text-slate-500 font-semibold block leading-tight">Rapid generation</span>
+                        </div>
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-[10.5px] text-slate-500 leading-normal font-medium">
-                    This option automatically produces the Lesson Notes (Classic) as a highly authentic handwritten study note <strong>PNG document formatted on a 1 page A4 layout</strong>.
-                  </p>
-                </div>
+                ) : (
+                  <div className="border-t border-slate-100 pt-3 mt-2 flex items-center gap-2 text-[11px] text-slate-500 font-medium">
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
+                      ⚡ Dual Engine
+                    </span>
+                    <span>Note images generated using Emgen with automatic Nano Banana fallback</span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -3009,45 +3563,46 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
 
               <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                 <div className="md:col-span-8 space-y-2">
-                  <div className="relative">
-                    <textarea
+                  <div>
+                    <RealtimeSpellcheckEditor
                       value={hubTranscription}
-                      onChange={(e) => setHubTranscription(e.target.value)}
+                      onChange={setHubTranscription}
                       placeholder={
                         dictationLang === 'en-US'
                           ? "Press 'Start Dictation' to speak, or type directly here. Let the AI convert your voice into structured lesson plans..."
                           : "Bonyeza 'Anza Kuongea' ili uweze kutamka maneno, au andika moja kwa moja hapa..."
                       }
                       rows={4}
-                      className="w-full border border-slate-200 rounded-xl px-3.5 py-3 text-sm text-slate-800 focus:outline-none focus:border-emerald-500 transition resize-y bg-white/80"
+                      id="hubTranscription"
+                      micButton={
+                        activeMicField === 'hub' ? (
+                          <div className="flex items-center gap-1.5 bg-red-50 border border-red-200 text-red-600 px-2 py-1 rounded-lg text-[10px] font-bold shadow-xs select-none">
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                            </span>
+                            <span>Listening</span>
+                            <div className="flex items-end gap-0.5 h-2.5 w-3 shrink-0">
+                              <motion.span
+                                animate={{ height: ['20%', '100%', '20%'] }}
+                                transition={{ duration: 0.5, repeat: Infinity, ease: "easeInOut" }}
+                                className="w-[2px] bg-red-500 rounded-xs"
+                              />
+                              <motion.span
+                                animate={{ height: ['40%', '100%', '40%'] }}
+                                transition={{ duration: 0.4, repeat: Infinity, ease: "easeInOut", delay: 0.1 }}
+                                className="w-[2px] bg-red-500 rounded-xs"
+                              />
+                              <motion.span
+                                animate={{ height: ['15%', '100%', '15%'] }}
+                                transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut", delay: 0.2 }}
+                                className="w-[2px] bg-red-500 rounded-xs"
+                              />
+                            </div>
+                          </div>
+                        ) : null
+                      }
                     />
-                    
-                    {activeMicField === 'hub' && (
-                      <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 bg-red-50 border border-red-200 text-red-600 px-2 py-1 rounded-lg text-[10px] font-bold shadow-xs select-none">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                        </span>
-                        <span>Listening</span>
-                        <div className="flex items-end gap-0.5 h-2.5 w-3 shrink-0">
-                          <motion.span
-                            animate={{ height: ['20%', '100%', '20%'] }}
-                            transition={{ duration: 0.5, repeat: Infinity, ease: "easeInOut" }}
-                            className="w-[2px] bg-red-500 rounded-xs"
-                          />
-                          <motion.span
-                            animate={{ height: ['40%', '100%', '40%'] }}
-                            transition={{ duration: 0.4, repeat: Infinity, ease: "easeInOut", delay: 0.1 }}
-                            className="w-[2px] bg-red-500 rounded-xs"
-                          />
-                          <motion.span
-                            animate={{ height: ['15%', '100%', '15%'] }}
-                            transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut", delay: 0.2 }}
-                            className="w-[2px] bg-red-500 rounded-xs"
-                          />
-                        </div>
-                      </div>
-                    )}
                   </div>
 
                   <div className="flex flex-wrap items-center justify-between gap-2.5">
@@ -3319,26 +3874,164 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
                     </button>
                   </div>
                 </div>
-                <div className="relative">
-                  <textarea
+                <div>
+                  <RealtimeSpellcheckEditor
                     value={extraPrompt}
-                    onChange={(e) => setExtraPrompt(e.target.value)}
+                    onChange={setExtraPrompt}
                     placeholder="e.g., Use locally improvised items, include kinesthetic group activities, specify a hands-on lab layout, emphasize local Kenyan values, etc."
                     rows={3}
-                    className={`w-full border border-slate-250 rounded-xl pl-3.5 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-emerald-500 transition resize-y ${
-                      activeMicField === 'extraPrompt' ? 'pr-28' : 'pr-11'
-                    }`}
+                    id="extraPrompt"
+                    micButton={
+                      micSupported ? (
+                        <MicButtonWithIndicator
+                          field="extraPrompt"
+                          activeMicField={activeMicField}
+                          toggleMic={toggleMic}
+                          isTextArea={true}
+                        />
+                      ) : null
+                    }
                   />
-                  {micSupported && (
-                    <MicButtonWithIndicator
-                      field="extraPrompt"
-                      activeMicField={activeMicField}
-                      toggleMic={toggleMic}
-                      isTextArea={true}
-                    />
+                </div>
+              </div>
+            </div>
+
+            {/* Schedule Lesson Plan in EduNexus Dashboard Calendar */}
+            <div className="bg-emerald-50/40 dark:bg-emerald-950/20 border border-emerald-200/80 dark:border-emerald-800/60 rounded-2xl p-5 shadow-xs space-y-4 animate-fadeIn">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-200/60 dark:border-emerald-800/40 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-600/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 flex items-center justify-center font-bold">
+                    <Calendar className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                      <span>Schedule Lesson Plan</span>
+                      {scheduledDate && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-900/80 dark:text-emerald-300 dark:border-emerald-700 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                          Calendar Synced
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold">
+                      Schedule this lesson plan directly into your EduNexus Dashboard calendar & upcoming timetable
+                    </p>
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="flex items-center gap-1.5 self-start sm:self-center flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const today = new Date().toISOString().split('T')[0];
+                      setScheduledDate(today);
+                      localStorage.setItem('pedagogical_scheduled_date_hint', today);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                      scheduledDate === new Date().toISOString().split('T')[0]
+                        ? 'bg-emerald-600 text-white border-emerald-600'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    Today
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const tomorrow = new Date();
+                      tomorrow.setDate(tomorrow.getDate() + 1);
+                      const tomorrowStr = tomorrow.toISOString().split('T')[0];
+                      setScheduledDate(tomorrowStr);
+                      localStorage.setItem('pedagogical_scheduled_date_hint', tomorrowStr);
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition cursor-pointer"
+                  >
+                    Tomorrow
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const today = new Date();
+                      const dayOfWeek = today.getDay();
+                      const daysUntilNextMon = ((8 - dayOfWeek) % 7) || 7;
+                      const nextMon = new Date(today);
+                      nextMon.setDate(today.getDate() + daysUntilNextMon);
+                      const nextMonStr = nextMon.toISOString().split('T')[0];
+                      setScheduledDate(nextMonStr);
+                      localStorage.setItem('pedagogical_scheduled_date_hint', nextMonStr);
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition cursor-pointer"
+                  >
+                    Next Monday
+                  </button>
+
+                  {scheduledDate && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScheduledDate('');
+                        localStorage.removeItem('pedagogical_scheduled_date_hint');
+                      }}
+                      className="p-1 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40 transition cursor-pointer"
+                      title="Clear schedule date"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   )}
                 </div>
               </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <span>Lesson Schedule Date</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={scheduledDate}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setScheduledDate(val);
+                      if (val) {
+                        localStorage.setItem('pedagogical_scheduled_date_hint', val);
+                      } else {
+                        localStorage.removeItem('pedagogical_scheduled_date_hint');
+                      }
+                    }}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition cursor-pointer"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <span>Lesson Start Time</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={scheduledTime}
+                    onChange={(e) => setScheduledTime(e.target.value)}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              {scheduledDate && (
+                <div className="text-xs bg-white/80 dark:bg-slate-900/80 p-3 rounded-xl border border-emerald-200/80 dark:border-emerald-800/80 flex items-center gap-2 text-slate-700 dark:text-slate-200 animate-fadeIn">
+                  <CalendarDays className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span>
+                    Scheduled for{' '}
+                    <strong className="text-emerald-700 dark:text-emerald-400 font-bold">
+                      {new Date(scheduledDate + 'T' + (scheduledTime || '08:00')).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                    </strong>
+                    {scheduledTime && ` at ${scheduledTime}`}. Will appear directly in your Dashboard Calendar & Timetable.
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Pacing Suggestion Render Block */}
@@ -3439,14 +4132,14 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-slate-700">Learning Objectives / Criteria Focus</label>
-                <textarea
+              <div>
+                <RealtimeSpellcheckEditor
                   value={rubricObjectives}
-                  onChange={(e) => setRubricObjectives(e.target.value)}
+                  onChange={setRubricObjectives}
                   placeholder="Enter specific learning objectives or skills you wish to evaluate (e.g., 'Learners should be able to write an introduction, use past-tense verbs, and write a summary conclusion...')"
                   rows={3}
-                  className="w-full bg-white border border-slate-250 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-sky-500 transition resize-y"
+                  label="Learning Objectives / Criteria Focus"
+                  id="rubricObjectives"
                 />
               </div>
 
@@ -3687,14 +4380,14 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
                   </div>
                 </div>
               ) : (
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-slate-600">Smart Citation Input Details</label>
-                  <textarea
+                <div>
+                  <RealtimeSpellcheckEditor
                     value={citationRawInput}
-                    onChange={(e) => setCitationRawInput(e.target.value)}
+                    onChange={setCitationRawInput}
                     placeholder="Paste some messy, unformatted details here (e.g. 'book written by Omondi Peter, published in 2021 called CBC Implementation in Kenya by Longhorn Publishers') and our AI will parse and format it."
                     rows={2}
-                    className="w-full bg-white border border-slate-250 rounded-xl px-3.5 py-2 text-xs text-slate-800 focus:outline-none focus:border-teal-500 transition resize-y"
+                    label="Smart Citation Input Details"
+                    id="citationRawInput"
                   />
                 </div>
               )}
@@ -3879,8 +4572,12 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
               </div>
             </div>
 
-            {/* Standout feature: Ask Mentor Mode */}
-            <div className="p-5 rounded-2xl bg-gradient-to-br from-[#d4a373]/10 to-[#5f6f52]/10 border border-[#d4a373]/25 shadow-sm space-y-3.5">
+            {/* Standout feature: Ask Mentor Mode with Pedagogical Scaffolding */}
+            <div className={`p-5 rounded-2xl transition-all duration-300 border shadow-sm space-y-4 ${
+              askMentor
+                ? 'bg-gradient-to-br from-[#d4a373]/15 via-amber-50/50 to-[#5f6f52]/10 border-[#d4a373]/40 ring-1 ring-[#d4a373]/20'
+                : 'bg-gradient-to-br from-[#d4a373]/10 to-[#5f6f52]/10 border-[#d4a373]/25'
+            }`}>
               <div className="flex items-start gap-3">
                 <input
                   id="askMentor"
@@ -3890,15 +4587,171 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
                   className="w-5 h-5 mt-1 text-[#5f6f52] border-[#5f6f52]/30 rounded focus:ring-[#5f6f52] cursor-pointer accent-[#5f6f52]"
                 />
                 <div className="flex-1">
-                  <label htmlFor="askMentor" className="block text-sm font-bold text-slate-800 cursor-pointer flex items-center gap-1.5">
-                    <span className="text-base">🧠</span>
-                    Enable Optional "Ask Mentor" Mode
-                  </label>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <label htmlFor="askMentor" className="block text-sm font-bold text-slate-800 cursor-pointer flex items-center gap-1.5">
+                        <span className="text-base">🧠</span>
+                        <span>Enable "Ask Mentor" Pedagogical Scaffolding Mode</span>
+                      </label>
+                      <span className="text-[10px] uppercase font-extrabold tracking-wider bg-[#5f6f52]/15 text-[#5f6f52] px-2 py-0.5 rounded-full">
+                        Teacher Companion
+                      </span>
+
+                      {/* Pedagogical Scaffolding Benefits Info Icon & Popover Tooltip */}
+                      <div className="relative inline-block">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setShowMentorInfoTooltip(!showMentorInfoTooltip);
+                          }}
+                          onMouseEnter={() => setShowMentorInfoTooltip(true)}
+                          className="p-1 rounded-full text-[#5f6f52] hover:text-[#2c3e1e] hover:bg-[#5f6f52]/15 transition focus:outline-none cursor-pointer flex items-center justify-center"
+                          aria-label="Pedagogical benefits of AI scaffolding"
+                          title="Click or hover to learn about the pedagogical benefits of AI scaffolding"
+                        >
+                          <Info className="w-4 h-4" />
+                        </button>
+
+                        {/* Floating Tooltip Card */}
+                        {showMentorInfoTooltip && (
+                          <div
+                            className="absolute left-0 sm:left-auto sm:-right-2 top-full mt-2 w-72 sm:w-80 bg-slate-900 text-slate-100 p-4 rounded-2xl shadow-xl border border-slate-700/80 z-40 animate-fadeIn text-xs leading-relaxed space-y-2 pointer-events-auto"
+                            onMouseLeave={() => setShowMentorInfoTooltip(false)}
+                          >
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-1">
+                              <span className="font-extrabold text-amber-300 flex items-center gap-1.5 text-xs">
+                                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                                Pedagogical Benefits of AI Scaffolding
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowMentorInfoTooltip(false);
+                                }}
+                                className="text-slate-400 hover:text-white p-0.5 rounded-md hover:bg-slate-800 transition cursor-pointer"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            <p className="text-[11px] text-slate-300 leading-normal">
+                              AI Scaffolding acts as an experienced instructional coach, embedding proven learning structures into your classroom resources:
+                            </p>
+                            <ul className="space-y-1.5 text-[11px] text-slate-200">
+                              <li className="flex items-start gap-1.5">
+                                <span className="text-amber-400 shrink-0 mt-0.5">🎯</span>
+                                <span><strong>Differentiated Pathways:</strong> Breaks complex concepts into progressive learning steps adapted for mixed-ability learners.</span>
+                              </li>
+                              <li className="flex items-start gap-1.5">
+                                <span className="text-amber-400 shrink-0 mt-0.5">🧠</span>
+                                <span><strong>Anticipates Misconceptions:</strong> Identifies common cognitive traps, supplying pre-seeded Socratic diagnostic questions.</span>
+                              </li>
+                              <li className="flex items-start gap-1.5">
+                                <span className="text-amber-400 shrink-0 mt-0.5">📈</span>
+                                <span><strong>Active Knowledge Retention:</strong> Integrates real-world contextual anchors, formative check-ins, and actionable mentor tips.</span>
+                              </li>
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                   <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                    Appends specialized pedagogical guidance from a senior school mentor at the end of the notes. Includes strategic educational insights, anticipated student misconceptions with remedies, and key diagnostic questions.
+                    Appends specialized pedagogical guidance from a senior school mentor. When enabled, use the scaffolding prompt panel below to guide AI in tailoring generation for your class's specific learning needs and challenges.
                   </p>
                 </div>
               </div>
+
+              {/* Interactive Pedagogical Scaffolding Panel */}
+              {askMentor && (
+                <div className="mt-3 pt-3 border-t border-[#d4a373]/30 space-y-4 animate-fadeIn">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-700" />
+                      Class Needs & Pedagogical Scaffolding Prompt
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetSub = subject === 'Other' ? customSubject : subject;
+                        const defaultPrompt = `Class Needs & Scaffolding Focus for ${targetSub || 'this subject'} (${classLevel || 'Grade level'}, ${curriculum.toUpperCase()}):
+• Group Profile: Mixed-ability classroom with diverse learning speeds.
+• Pedagogical Goal: Provide step-by-step tiered scaffolding for core concepts, anticipate common misconceptions on "${topic || 'the topic'}", and include 3 diagnostic check questions.
+• Support: Include visual step-by-step breakdowns for struggling readers and extension challenges for fast-finishers.`;
+                        setMentorScaffoldingContext(defaultPrompt);
+                      }}
+                      className="text-[11px] font-bold text-[#5f6f52] bg-white/80 hover:bg-white px-2.5 py-1 rounded-lg border border-[#5f6f52]/30 transition shadow-2xs cursor-pointer flex items-center gap-1"
+                    >
+                      <Sparkles className="w-3 h-3 text-[#5f6f52]" />
+                      Auto-Fill Class Scaffolding Template
+                    </button>
+                  </div>
+
+                  {/* Scaffolding Preset Quick Chips */}
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
+                      Quick Scaffolding Scenarios (Click to append):
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        {
+                          label: '🧩 Mixed-Ability Tiered Scaffolding',
+                          text: 'Provide tiered step-by-step scaffolding for core concepts, with hints for struggling learners and extension challenges for advanced students.'
+                        },
+                        {
+                          label: '🎯 Misconceptions & Diagnostic Focus',
+                          text: 'Focus heavily on anticipating common student misconceptions in this topic, providing explicit diagnostic check questions and remedies.'
+                        },
+                        {
+                          label: '🗣️ Language & ELL Support',
+                          text: 'Include sentence frames, key vocabulary callouts, and bilingual English/Swahili conceptual bridges for language learners.'
+                        },
+                        {
+                          label: '🔬 Hands-On Practical & Inquiry',
+                          text: 'Structure the lesson with low-cost hands-on practical tasks, inquiry questions, and active group collaboration.'
+                        }
+                      ].map((preset, pIdx) => (
+                        <button
+                          key={pIdx}
+                          type="button"
+                          onClick={() => {
+                            setMentorScaffoldingContext((prev) => {
+                              const trimmed = prev.trim();
+                              if (!trimmed) return preset.text;
+                              if (trimmed.includes(preset.text)) return prev;
+                              return `${trimmed}\n• ${preset.text}`;
+                            });
+                          }}
+                          className="text-[11px] font-semibold bg-white/90 hover:bg-amber-100/60 text-amber-950 border border-amber-200/80 px-2.5 py-1 rounded-lg transition cursor-pointer shadow-3xs"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="relative">
+                    <textarea
+                      value={mentorScaffoldingContext}
+                      onChange={(e) => setMentorScaffoldingContext(e.target.value)}
+                      rows={3}
+                      placeholder="Describe your class's specific needs, group dynamics, or pedagogical goals (e.g. 'Class has 35 students, 5 fast-finishers, and needs visual step-by-step breakdowns for struggling readers')..."
+                      className="w-full border border-amber-300/70 rounded-xl p-3 text-xs text-slate-800 bg-white/95 focus:outline-none focus:border-[#5f6f52] focus:ring-1 focus:ring-[#5f6f52]/30 transition shadow-inner leading-relaxed"
+                    />
+                    {mentorScaffoldingContext && (
+                      <button
+                        type="button"
+                        onClick={() => setMentorScaffoldingContext('')}
+                        className="absolute right-2.5 bottom-2.5 text-[10px] font-bold text-slate-400 hover:text-slate-600 bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded-md transition"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Standout feature: Generate Vocabulary & Definitions */}
@@ -3962,6 +4815,28 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
                   </label>
                   <p className="text-xs text-slate-600 mt-1 leading-relaxed">
                     Designed for modern co-educational support (such as Kenyan CBC homework routines). Appends high-value suggestions for parents to facilitate low-resource, hands-on activities at home and engaging review questions to reinforce concepts.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Standout feature: Real-Time Web Search Grounding */}
+            <div className="p-5 rounded-2xl bg-gradient-to-br from-cyan-50/80 to-sky-50/40 border border-cyan-200/60 shadow-sm space-y-3.5">
+              <div className="flex items-start gap-3">
+                <input
+                  id="enableSearchGrounding"
+                  type="checkbox"
+                  checked={enableSearchGrounding}
+                  onChange={(e) => setEnableSearchGrounding(e.target.checked)}
+                  className="w-5 h-5 mt-1 text-cyan-600 border-cyan-300 rounded focus:ring-cyan-500 cursor-pointer accent-cyan-600"
+                />
+                <div className="flex-1">
+                  <label htmlFor="enableSearchGrounding" className="block text-sm font-bold text-slate-800 cursor-pointer flex items-center gap-1.5">
+                    <Globe className="w-4.5 h-4.5 text-cyan-600" />
+                    Real-Time Search Grounding (Live Fact & Standards Verification)
+                  </label>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    Connects Gemini directly to Google Search during document generation to pull current educational standards (such as Kenyan KICD CBC strands, NGSS, Cambridge, Common Core, IB), real-world statistics, and verifiable facts, appending verified web references directly to your document.
                   </p>
                 </div>
               </div>
@@ -4120,9 +4995,16 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
                   </button>
                 </div>
               ) : (
-                <span className="text-xs text-slate-400">
-                  Drafts are securely synced to your cloud database.
-                </span>
+                <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>
+                    {lastSavedTime
+                      ? `Last saved at ${lastSavedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                      : 'Auto-save active'}
+                  </span>
+                  <span className="text-slate-300">•</span>
+                  <span className="text-slate-400">Synced to browser cache & Firestore</span>
+                </div>
               )}
             </div>
 
@@ -4155,11 +5037,26 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
               <button
                 type="submit"
                 disabled={isGenerating}
-                className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold text-sm shadow-sm hover:shadow transition disabled:opacity-50"
+                className="flex items-center justify-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold text-sm shadow-sm hover:shadow transition disabled:opacity-90 disabled:cursor-not-allowed relative overflow-hidden min-w-[250px]"
               >
-                <Sparkles className="w-4 h-4" />
-                <span>Generate Curriculum Material</span>
-                <kbd className="hidden sm:inline-block ml-1 px-1.5 py-0.5 text-[10px] font-mono text-emerald-200 bg-emerald-700/50 rounded-md border border-emerald-500/30">Ctrl+Enter</kbd>
+                {isGenerating ? (
+                  <>
+                    <div
+                      className="absolute left-0 top-0 bottom-0 bg-emerald-800/80 transition-all duration-300 ease-out"
+                      style={{ width: `${docGenerationProgress}%` }}
+                    />
+                    <div className="relative z-10 flex items-center justify-center gap-2 w-full">
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                      <span>Generating ({Math.round(docGenerationProgress)}%)...</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Generate Curriculum Material</span>
+                    <kbd className="hidden sm:inline-block ml-1 px-1.5 py-0.5 text-[10px] font-mono text-emerald-200 bg-emerald-700/50 rounded-md border border-emerald-500/30">Ctrl+Enter</kbd>
+                  </>
+                )}
               </button>
             </div>
           </div>

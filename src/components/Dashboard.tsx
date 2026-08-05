@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'motion/react';
 import StudentXpWidget from './StudentXpWidget';
 import { SavedDocument, DocumentType, DocumentDraft, AppNotification } from '../types';
+import { DemoVideoModal } from './public/DemoVideoModal';
+import { WhatsAppDashboardWidget } from './WhatsAppDashboardWidget';
 import {
   Plus,
   Search,
@@ -33,6 +35,7 @@ import {
   CheckCircle2,
   XCircle,
   Activity,
+  Shield,
   FileCheck,
   Folder,
   FolderPlus,
@@ -45,8 +48,25 @@ import {
   LayoutGrid,
   List,
   Pin,
+  Settings as SettingsIcon,
+  Image as ImageIcon,
+  Video,
+  Users,
+  Play,
+  Camera,
+  QrCode,
+  Scan,
+  Zap,
+  Upload,
+  Info,
+  HelpCircle,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { db } from '../firebase';
+import { QRMappingService } from '../services/qrMappingService';
+import { ScannedStationPortalModal } from './ScannedStationPortalModal';
+import { HowToScanModal } from './HowToScanModal';
 import { findRequirements } from '../data/kenyanCurriculumStandards';
 import { collection, query, where, onSnapshot, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { useAuth, resolveDisplayName } from '../context/AuthContext';
@@ -277,9 +297,18 @@ interface DashboardProps {
   onOpenDoc: (doc: SavedDocument) => void;
   onLoadDraft?: (draft: DocumentDraft) => void;
   onOpenFlashcards?: () => void;
+  onOpenAssessmentGenerator?: () => void;
+  onOpenAITutor?: () => void;
+  onOpenImageStudio?: () => void;
+  onOpenVideoStudio?: () => void;
+  onOpenQRMapping?: () => void;
+  onOpenAdminPlaybook?: () => void;
   userRole?: string;
   notifications?: AppNotification[];
   setNotifications?: React.Dispatch<React.SetStateAction<AppNotification[]>>;
+  darkMode?: boolean;
+  onToggleDarkMode?: () => void;
+  youtubeUrl?: string;
 }
 
 export default function Dashboard({
@@ -289,13 +318,261 @@ export default function Dashboard({
   onOpenDoc,
   onLoadDraft,
   onOpenFlashcards,
+  onOpenAssessmentGenerator,
+  onOpenAITutor,
+  onOpenImageStudio,
+  onOpenVideoStudio,
+  onOpenQRMapping,
+  onOpenAdminPlaybook,
   userRole,
   notifications = [],
-  setNotifications
+  setNotifications,
+  darkMode,
+  onToggleDarkMode,
+  youtubeUrl = 'https://www.youtube.com/embed/D7cpYYgr-6E'
 }: DashboardProps) {
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+  const [isMounted, setIsMounted] = useState<boolean>(false);
+  
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    if (typeof darkMode === 'boolean') return darkMode;
+    return localStorage.getItem('pedagogical_dark_mode') === 'true';
+  });
+
+  useEffect(() => {
+    if (typeof darkMode === 'boolean') {
+      setIsDark(darkMode);
+    }
+  }, [darkMode]);
+
+  useEffect(() => {
+    const handleDarkChange = () => {
+      setIsDark(localStorage.getItem('pedagogical_dark_mode') === 'true');
+    };
+    window.addEventListener('dark_mode_changed', handleDarkChange);
+    return () => window.removeEventListener('dark_mode_changed', handleDarkChange);
+  }, []);
+
+  const handleToggleDark = () => {
+    if (onToggleDarkMode) {
+      onToggleDarkMode();
+    } else {
+      const next = !isDark;
+      setIsDark(next);
+      localStorage.setItem('pedagogical_dark_mode', String(next));
+      if (next) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+      window.dispatchEvent(new Event('dark_mode_changed'));
+    }
+  };
+  
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+  const [showDemoModal, setShowDemoModal] = useState<boolean>(false);
+  const [demoVideoType, setDemoVideoType] = useState<'overview' | 'howto'>('overview');
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [search, setSearch] = useState('');
+
+  // Quick-Access Camera QR Scanner State
+  const [isQuickScannerOpen, setIsQuickScannerOpen] = useState<boolean>(false);
+  const [scannerInputText, setScannerInputText] = useState<string>('');
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [cameraPermissionError, setCameraPermissionError] = useState<string | null>(null);
+  const [isResolvingScan, setIsResolvingScan] = useState<boolean>(false);
+  const [scanResult, setScanResult] = useState<{
+    type: 'doc' | 'station' | 'socratic' | 'adaptive' | 'custom' | 'none';
+    title?: string;
+    doc?: SavedDocument;
+    stationShortId?: string;
+    message?: string;
+  } | null>(null);
+  
+  // Scanned Station Portal Modal State
+  const [isStationPortalOpen, setIsStationPortalOpen] = useState<boolean>(false);
+  const [scannedPortalShortId, setScannedPortalShortId] = useState<string>('station-1');
+  const [isHowToScanOpen, setIsHowToScanOpen] = useState<boolean>(false);
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+
+  // Camera stream initializer
+  useEffect(() => {
+    if (!isQuickScannerOpen) {
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
+      }
+      setIsCameraActive(false);
+      setIsTorchOn(false);
+      setCameraPermissionError(null);
+      return;
+    }
+
+    let isSubscribed = true;
+
+    async function startCamera() {
+      try {
+        setCameraPermissionError(null);
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: facingMode }
+          });
+          if (isSubscribed) {
+            mediaStreamRef.current = stream;
+            if (videoRef.current) {
+              videoRef.current.srcObject = stream;
+              await videoRef.current.play().catch(() => {});
+            }
+            setIsCameraActive(true);
+          } else {
+            stream.getTracks().forEach(t => t.stop());
+          }
+        } else {
+          setCameraPermissionError('Camera API is unavailable in this environment.');
+        }
+      } catch (err: any) {
+        console.warn('Camera access denied or unequipped, defaulting to optical scanner simulation:', err);
+        if (isSubscribed) {
+          setCameraPermissionError(err.message || 'Camera permission pending or unequipped.');
+          setIsCameraActive(false);
+        }
+      }
+    }
+
+    startCamera();
+
+    return () => {
+      isSubscribed = false;
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
+      }
+    };
+  }, [isQuickScannerOpen, facingMode]);
+
+  const handleToggleTorch = async () => {
+    if (!mediaStreamRef.current) return;
+    const videoTrack = mediaStreamRef.current.getVideoTracks()[0];
+    if (videoTrack && 'applyConstraints' in videoTrack) {
+      try {
+        await (videoTrack as any).applyConstraints({
+          advanced: [{ torch: !isTorchOn }]
+        });
+        setIsTorchOn(!isTorchOn);
+      } catch (e) {
+        console.warn('Torch constraint not supported on device:', e);
+      }
+    }
+  };
+
+  const handleResolveScannedCode = async (rawCode: string) => {
+    const code = rawCode.trim();
+    if (!code) return;
+
+    setIsResolvingScan(true);
+    setScanResult(null);
+
+    try {
+      const lowerCode = code.toLowerCase();
+
+      // 1. Direct match in local documents state
+      const matchedDoc = documents.find(d => 
+        d.id.toLowerCase() === lowerCode ||
+        (d.shortId && d.shortId.toLowerCase() === lowerCode) ||
+        d.title.toLowerCase().includes(lowerCode) ||
+        d.topic.toLowerCase().includes(lowerCode)
+      );
+
+      if (matchedDoc) {
+        setScanResult({
+          type: 'doc',
+          title: matchedDoc.title,
+          doc: matchedDoc,
+          message: `Document Found: "${matchedDoc.title}" (${matchedDoc.subject} • ${matchedDoc.classLevel})`
+        });
+        setIsResolvingScan(false);
+        return;
+      }
+
+      // 2. Try QRMappingService for Scavenger Hunt & Touchpoint resolution
+      const resolvedMapping = await QRMappingService.resolveAndIncrementScan(code, 'Dashboard Quick Camera Scanner');
+      if (resolvedMapping) {
+        setScanResult({
+          type: 'station',
+          stationShortId: resolvedMapping.shortId,
+          title: resolvedMapping.title || 'Scavenger Hunt Station',
+          message: `Touchpoint Recognized: "${resolvedMapping.title}" (${resolvedMapping.targetType})`
+        });
+        setIsResolvingScan(false);
+        return;
+      }
+
+      // 3. Fallback check for scavenger hunt station patterns
+      if (lowerCode.startsWith('station-') || lowerCode.includes('scavenger') || lowerCode.startsWith('hunt-') || lowerCode.startsWith('qr-scav')) {
+        setScanResult({
+          type: 'station',
+          stationShortId: code,
+          title: `Scavenger Hunt Station (${code})`,
+          message: `Classroom Scavenger Hunt Station Recognized!`
+        });
+        setIsResolvingScan(false);
+        return;
+      }
+
+      // 4. Check for Socratic / Adaptive touchpoints
+      if (lowerCode.startsWith('soc-')) {
+        setScanResult({
+          type: 'socratic',
+          title: `Socratic AI Tutor Touchpoint (${code})`,
+          message: `Scanned Socratic AI Tutor QR Code`
+        });
+        setIsResolvingScan(false);
+        return;
+      }
+
+      // Default result fallback
+      setScanResult({
+        type: 'custom',
+        title: code,
+        message: `Scanned Code: "${code}". Launch scavenger hunt or open workspace.`
+      });
+    } catch (err: any) {
+      console.error('Error resolving QR code:', err);
+    } finally {
+      setIsResolvingScan(false);
+    }
+  };
+
+  const handleExecuteResultAction = () => {
+    if (!scanResult) return;
+
+    if (scanResult.type === 'doc' && scanResult.doc) {
+      onOpenDoc(scanResult.doc);
+      setIsQuickScannerOpen(false);
+    } else if (scanResult.type === 'station') {
+      setScannedPortalShortId(scanResult.stationShortId || 'station-1');
+      setIsStationPortalOpen(true);
+      setIsQuickScannerOpen(false);
+    } else if (scanResult.type === 'socratic') {
+      if (onOpenAITutor) {
+        onOpenAITutor();
+      } else if (onOpenQRMapping) {
+        onOpenQRMapping();
+      }
+      setIsQuickScannerOpen(false);
+    } else {
+      if (onOpenQRMapping) {
+        onOpenQRMapping();
+      }
+      setIsQuickScannerOpen(false);
+    }
+  };
   const [docTypeFilter, setDocTypeFilter] = useState<string>('all');
   const [curriculumFilter, setCurriculumFilter] = useState<string>('all');
   const [archiveFilter, setArchiveFilter] = useState<string>('active');
@@ -1290,103 +1567,564 @@ export default function Dashboard({
   const greeting = getGreeting();
 
   return (
-    <div className="space-y-8 animate-fadeIn">
-      {/* Premium Educator Welcome Banner */}
-      <div className="bg-gradient-to-r from-[#5f6f52]/10 via-[#a9b388]/5 to-transparent border border-[#e5e1da] rounded-2xl p-4 md:py-4 md:px-6 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">{greeting.icon}</span>
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#5f6f52] bg-[#5f6f52]/10 px-2 py-0.5 rounded-full">
-              {profile?.role || 'Educator Workspace'}
-            </span>
-          </div>
-          <h2 className="text-xl md:text-2xl font-extrabold text-slate-800 tracking-tight">
-            {greeting.text}, {resolveDisplayName(profile?.displayName, profile?.email || user?.email, user?.displayName)}
-          </h2>
-          <p className="text-xs text-slate-500 max-w-2xl leading-relaxed font-medium">
-            Empower your students with structured academic tools. You have generated <strong className="text-slate-700 font-bold">{totalDocs}</strong> professional resource materials. Select an unfinished draft or create a brand-new syllabus plan.
+    <div className="space-y-8 animate-fadeIn text-slate-800 dark:text-slate-100">
+      {/* Top Header & Greeting Row matching Right Side Image */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-200/80 dark:border-slate-800 pb-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+            <span>{greeting.text}, {resolveDisplayName(profile?.displayName, profile?.email || user?.email, user?.displayName || 'Godfrey')}!</span>
+            <span className="text-2xl">👋</span>
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 font-medium mt-1">
+            Here's what's happening in your teaching workspace today.
           </p>
         </div>
-        
-        {userRole !== 'Student' && (
+
+        <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+          {/* Home Screen Dark / Light Mode Toggle Button */}
           <button
-            onClick={onCreateNew}
-            className="group relative flex items-center gap-2 bg-[#5f6f52] hover:bg-[#4d5c41] text-white px-5 py-2.5 rounded-xl text-xs font-extrabold shadow-sm hover:shadow transition-all duration-300 transform active:scale-95 shrink-0 cursor-pointer overflow-hidden"
+            onClick={handleToggleDark}
+            className="px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer flex items-center gap-2 active:scale-95"
+            title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            aria-label="Toggle Dark Mode"
           >
-            <Plus className="w-4 h-4 text-emerald-400 transition-transform group-hover:rotate-90 duration-300" />
-            <span>Generate New Material</span>
+            {isDark ? (
+              <>
+                <Sun className="w-4 h-4 text-amber-400" />
+                <span>Light Mode</span>
+              </>
+            ) : (
+              <>
+                <Moon className="w-4 h-4 text-indigo-600 dark:text-cyan-400" />
+                <span>Dark Mode</span>
+              </>
+            )}
           </button>
-        )}
-      </div>
 
-      {/* Student XP & Leveling Mastery Profile Dashboard Widget */}
-      <StudentXpWidget onOpenFlashcards={onOpenFlashcards} />
-
-      {/* Modernized Stats Dashboard Grid */}
-      {isLoading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="bg-white p-5 rounded-2xl border border-[#e5e1da] shadow-xs flex items-center justify-between animate-pulse">
-              <div className="space-y-2.5 w-2/3">
-                <div className="h-3 w-20 bg-slate-200 rounded-md"></div>
-                <div className="h-8 w-14 bg-slate-200 rounded-lg"></div>
-                <div className="h-2.5 w-28 bg-slate-100 rounded-md"></div>
-              </div>
-              <div className="w-12 h-12 rounded-xl bg-slate-200 shrink-0"></div>
+          <button
+            onClick={() => setIsQuickScannerOpen(true)}
+            className="px-4 py-2.5 rounded-xl text-xs font-extrabold text-amber-900 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/80 hover:bg-amber-100 dark:hover:bg-amber-900/80 border border-amber-300/80 dark:border-amber-700/80 shadow-xs transition cursor-pointer flex items-center gap-2 group active:scale-95"
+            title="Scan QR tag from camera feed"
+          >
+            <div className="relative">
+              <Camera className="w-4 h-4 text-amber-700 dark:text-amber-400 group-hover:scale-110 transition" />
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full animate-ping" />
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full" />
             </div>
-          ))}
+            <span>Quick Scan QR</span>
+          </button>
+
+          {onOpenAdminPlaybook && (
+            <button
+              onClick={onOpenAdminPlaybook}
+              className="px-4 py-2.5 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 shadow-sm transition cursor-pointer flex items-center gap-2 active:scale-95"
+              title="Open Admin Playbook & System Directory"
+            >
+              <Shield className="w-4 h-4 text-white" />
+              <span>Admin Playbook</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => alert("Customize Dashboard Home layout options.")}
+            className="px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer flex items-center gap-1.5"
+          >
+            <SettingsIcon className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+            <span>Customize Home</span>
+          </button>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {/* Stat Card 1 */}
-        <div className="bg-white p-5 rounded-2xl border border-[#e5e1da] shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-between group">
-          <div className="space-y-2">
-            <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Total Materials</span>
-            <span className="text-3xl font-extrabold text-slate-800 block tracking-tight group-hover:text-[#5f6f52] transition-colors">{totalDocs}</span>
-            <span className="text-[10px] text-slate-400 font-semibold block">All subjects & grades</span>
+      </div>
+
+      {/* EDU NEXUS DEMO & HOW-TO VIDEO HUB BANNER */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-emerald-950/90 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl relative overflow-hidden text-white flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+        
+        <div className="space-y-2 z-10 max-w-xl text-center md:text-left">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-extrabold uppercase tracking-wider">
+            <Play className="w-3.5 h-3.5 fill-emerald-400" />
+            <span>Interactive Video Walkthroughs</span>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-emerald-50/60 border border-emerald-100 flex items-center justify-center shrink-0 group-hover:scale-110 group-hover:bg-emerald-100/60 transition-all duration-300">
-            <BookMarked className="w-6 h-6 text-emerald-600 animate-pulse" />
+          
+          <h2 className="text-xl sm:text-2xl font-serif font-black text-white">
+            See EduNexus Platform & Pedagogical Features in Action
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+            Watch our platform demo to explore automated lesson planning and assessments, or click 'How-To' to dive deep into CBC alignment, 5E inquiry models, Socratic tutoring, and UDL accommodations.
+          </p>
+
+          <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 pt-1 text-[11px] text-slate-300 font-medium">
+            <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> CBC Mapping</span>
+            <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> 5E Inquiry Models</span>
+            <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> Socratic AI Tutors</span>
+            <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> UDL Accommodations</span>
           </div>
         </div>
 
-        {/* Stat Card 2 */}
-        <div className="bg-white p-5 rounded-2xl border border-[#e5e1da] shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-between group">
-          <div className="space-y-2">
-            <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Lesson Plans</span>
-            <span className="text-3xl font-extrabold text-slate-800 block tracking-tight group-hover:text-blue-600 transition-colors">{plansCount}</span>
-            <span className="text-[10px] text-slate-400 font-semibold block">Structured pedagogies</span>
+        <div className="flex flex-col sm:flex-row items-center gap-3 z-10 w-full md:w-auto shrink-0">
+          {/* Watch Main Demo Video Button */}
+          <button
+            onClick={() => {
+              setDemoVideoType('overview');
+              setShowDemoModal(true);
+            }}
+            className="w-full sm:w-auto px-5 py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs sm:text-sm rounded-2xl shadow-[0_0_20px_rgba(16,185,129,0.3)] transition cursor-pointer flex items-center justify-center gap-2 group"
+          >
+            <Play className="w-4 h-4 fill-slate-950 group-hover:scale-110 transition" />
+            <span>Watch Demo Video</span>
+          </button>
+
+          {/* Watch Additional How-To Video Button */}
+          <button
+            onClick={() => {
+              setDemoVideoType('howto');
+              setShowDemoModal(true);
+            }}
+            className="w-full sm:w-auto px-5 py-3.5 bg-slate-800/90 hover:bg-slate-700/90 text-white font-bold text-xs sm:text-sm rounded-2xl border border-emerald-500/40 shadow-md transition cursor-pointer flex items-center justify-center gap-2 group"
+          >
+            <BookOpen className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition" />
+            <span>Watch How-To Pedagogical Video</span>
+          </button>
+        </div>
+      </div>
+
+      {/* QUICK ACTION CARDS (7 Cards Grid) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-4">
+        
+        {/* Card 1: Create Lesson Plan */}
+        <div 
+          onClick={onCreateNew}
+          className="bg-emerald-50/60 hover:bg-emerald-50 border border-emerald-100/80 hover:border-emerald-300 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-sm flex flex-col justify-between group space-y-3"
+        >
+          <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
+            <BookOpen className="w-5 h-5" />
           </div>
-          <div className="w-12 h-12 rounded-xl bg-blue-50/60 border border-blue-100 flex items-center justify-center shrink-0 group-hover:scale-110 group-hover:bg-blue-100/60 transition-all duration-300">
-            <FileText className="w-6 h-6 text-blue-600" />
+          <div>
+            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-emerald-700 transition">Create Lesson Plan</h3>
+            <p className="text-[11px] text-slate-500 leading-tight mt-1">Use AI to create lesson in seconds</p>
           </div>
         </div>
 
-        {/* Stat Card 3 */}
-        <div className="bg-white p-5 rounded-2xl border border-[#e5e1da] shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-between group">
-          <div className="space-y-2">
-            <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Kenyan CBC Docs</span>
-            <span className="text-3xl font-extrabold text-slate-800 block tracking-tight group-hover:text-purple-600 transition-colors">{cbcCount}</span>
-            <span className="text-[10px] text-slate-400 font-semibold block">Competency-Based</span>
+        {/* Card 2: Quick QR Scanner */}
+        <div 
+          onClick={() => setIsQuickScannerOpen(true)}
+          className="bg-amber-50/80 hover:bg-amber-100/80 border border-amber-200 hover:border-amber-400 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-sm flex flex-col justify-between group space-y-3 relative overflow-hidden"
+        >
+          <div className="flex items-center justify-between">
+            <div className="w-10 h-10 rounded-xl bg-amber-600 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
+              <Camera className="w-5 h-5" />
+            </div>
+            <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider bg-emerald-500 text-slate-950 rounded-full">
+              Live
+            </span>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-purple-50/60 border border-purple-100 flex items-center justify-center shrink-0 group-hover:scale-110 group-hover:bg-purple-100/60 transition-all duration-300">
-            <GraduationCap className="w-6 h-6 text-purple-600" />
+          <div>
+            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-amber-800 transition">Quick QR Scanner</h3>
+            <p className="text-[11px] text-slate-500 leading-tight mt-1">Scan code to launch doc or hunt</p>
           </div>
         </div>
 
-        {/* Stat Card 4 */}
-        <div className="bg-white p-5 rounded-2xl border border-[#e5e1da] shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-between group">
-          <div className="space-y-2">
-            <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Standard Syllabus</span>
-            <span className="text-3xl font-extrabold text-slate-800 block tracking-tight group-hover:text-indigo-600 transition-colors">{standardCount}</span>
-            <span className="text-[10px] text-slate-400 font-semibold block">Global standards</span>
+        {/* Card 3: Generate Assessment */}
+        <div 
+          onClick={onOpenAssessmentGenerator}
+          className="bg-purple-50/60 hover:bg-purple-50 border border-purple-100/80 hover:border-purple-300 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-sm flex flex-col justify-between group space-y-3"
+        >
+          <div className="w-10 h-10 rounded-xl bg-purple-500 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
+            <ClipboardCheck className="w-5 h-5" />
           </div>
-          <div className="w-12 h-12 rounded-xl bg-indigo-50/60 border border-indigo-100 flex items-center justify-center shrink-0 group-hover:scale-110 group-hover:bg-indigo-100/60 transition-all duration-300">
-            <Sparkles className="w-6 h-6 text-indigo-600" />
+          <div>
+            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-purple-700 transition">Generate Assessment</h3>
+            <p className="text-[11px] text-slate-500 leading-tight mt-1">Create quizzes, exams & more</p>
+          </div>
+        </div>
+
+        {/* Card 3: Build AI Tutor */}
+        <div 
+          onClick={onOpenAITutor}
+          className="bg-blue-50/60 hover:bg-blue-50 border border-blue-100/80 hover:border-blue-300 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-sm flex flex-col justify-between group space-y-3"
+        >
+          <div className="w-10 h-10 rounded-xl bg-blue-500 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-blue-700 transition">Build AI Tutor</h3>
+            <p className="text-[11px] text-slate-500 leading-tight mt-1">Create your own tutoring assistant</p>
+          </div>
+        </div>
+
+        {/* Card 4: Image Studio */}
+        <div 
+          onClick={onOpenImageStudio}
+          className="bg-amber-50/60 hover:bg-amber-50 border border-amber-100/80 hover:border-amber-300 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-sm flex flex-col justify-between group space-y-3"
+        >
+          <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
+            <ImageIcon className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-amber-700 transition">Image Studio</h3>
+            <p className="text-[11px] text-slate-500 leading-tight mt-1">Generate educational images</p>
+          </div>
+        </div>
+
+        {/* Card 5: Video Studio */}
+        <div 
+          onClick={onOpenVideoStudio}
+          className="bg-rose-50/60 hover:bg-rose-50 border border-rose-100/80 hover:border-rose-300 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-sm flex flex-col justify-between group space-y-3"
+        >
+          <div className="w-10 h-10 rounded-xl bg-rose-500 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
+            <Video className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-rose-700 transition">Video Studio</h3>
+            <p className="text-[11px] text-slate-500 leading-tight mt-1">Create videos for your lessons</p>
+          </div>
+        </div>
+
+        {/* Card 6: Study Notes */}
+        <div 
+          onClick={onCreateNew}
+          className="bg-teal-50/60 hover:bg-teal-50 border border-teal-100/80 hover:border-teal-300 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-sm flex flex-col justify-between group space-y-3"
+        >
+          <div className="w-10 h-10 rounded-xl bg-teal-500 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
+            <FileText className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-teal-700 transition">Study Notes</h3>
+            <p className="text-[11px] text-slate-500 leading-tight mt-1">Generate notes & handwritten style</p>
+          </div>
+        </div>
+
+      </div>
+
+      {/* DEDICATED WHATSAPP AI ASSISTANT & SCANNABLE QR CODE SECTION */}
+      <WhatsAppDashboardWidget userRole={userRole} />
+
+      {/* MIDDLE ROW (Continue Working & AI Teaching Assistant) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        {/* Continue Working Progress List */}
+        <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200/80 p-5 shadow-xs space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h2 className="font-extrabold text-sm text-slate-900">Continue Working</h2>
+            <button onClick={() => setArchiveFilter('active')} className="text-xs font-bold text-[#5f6f52] hover:underline flex items-center gap-1 cursor-pointer">
+              <span>View all</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="space-y-3.5">
+            {[
+              { id: '1', title: 'Form 3 Physics – Motion', type: 'Lesson Plan', color: 'bg-emerald-500', progress: 66, icon: BookOpen },
+              { id: '2', title: 'Mathematics End-Term Assessment', type: 'Assessment', color: 'bg-purple-500', progress: 90, icon: ClipboardCheck },
+              { id: '3', title: 'Biology – Photosynthesis', type: 'Study Notes', color: 'bg-teal-500', progress: 40, icon: FileText },
+              { id: '4', title: 'Chemistry – Acids & Bases', type: 'Video Project', color: 'bg-rose-500', progress: 20, icon: Video }
+            ].map((item) => {
+              const ItemIcon = item.icon;
+              return (
+                <div key={item.id} className="p-3 bg-slate-50/60 hover:bg-slate-100/80 border border-slate-100 rounded-2xl transition flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-9 h-9 rounded-xl ${item.color} text-white flex items-center justify-center shrink-0 shadow-2xs`}>
+                      <ItemIcon className="w-4.5 h-4.5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-xs text-slate-800">{item.title}</h4>
+                      <p className="text-[10px] text-slate-400 font-medium">{item.type}</p>
+                    </div>
+                  </div>
+
+                  <div className="w-32 sm:w-40 space-y-1 shrink-0">
+                    <div className="flex justify-end text-[10px] font-bold text-slate-500">
+                      <span>{item.progress}%</span>
+                    </div>
+                    <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                      <div className={`${item.color} h-1.5 rounded-full`} style={{ width: `${item.progress}%` }} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* AI Teaching Assistant Box */}
+        <div className="lg:col-span-5 bg-gradient-to-b from-emerald-50/30 to-white dark:from-slate-800/80 dark:to-slate-800 rounded-3xl border border-emerald-100/80 dark:border-slate-700 p-5 shadow-xs flex flex-col justify-between space-y-4">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500 text-white flex items-center justify-center shadow-xs">
+                <Sparkles className="w-4 h-4 animate-pulse" />
+              </div>
+              <div>
+                <h2 className="font-extrabold text-sm text-slate-900 dark:text-slate-100">AI Teaching Assistant</h2>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">Ask anything about your lessons, students or resources.</p>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              {[
+                'Generate a lesson plan for Form 3 Physics',
+                'Create an assessment on Algebra',
+                'Explain photosynthesis in simple terms'
+              ].map((chip, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => onOpenAITutor && onOpenAITutor()}
+                  className="w-full text-left px-3 py-2 rounded-xl bg-white dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600 text-xs text-slate-700 dark:text-slate-200 hover:border-emerald-400 dark:hover:border-emerald-500 hover:text-emerald-800 dark:hover:text-emerald-300 transition cursor-pointer shadow-2xs"
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-2 flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Ask me anything..."
+              className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-hidden focus:border-emerald-500 shadow-2xs"
+            />
+            <button
+              onClick={() => onOpenAITutor && onOpenAITutor()}
+              className="w-10 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center transition cursor-pointer shrink-0 shadow-xs"
+            >
+              <Sparkles className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      {/* THIRD ROW (Today's Classes, Class Overview, Recent Resources) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        {/* Today's Classes */}
+        <div className="bg-white rounded-3xl border border-slate-200/80 p-5 shadow-xs space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h3 className="font-extrabold text-sm text-slate-900">Today's Classes</h3>
+            <span className="text-xs font-bold text-emerald-700 cursor-pointer hover:underline">View schedule →</span>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between p-2.5 rounded-2xl bg-emerald-50/50 border border-emerald-100">
+              <div>
+                <span className="text-[10px] font-bold text-slate-400">08:00 AM</span>
+                <h4 className="font-extrabold text-xs text-slate-800">Form 3 Physics</h4>
+                <p className="text-[10px] text-slate-500">Motion and Forces</p>
+              </div>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[9px] font-extrabold uppercase">Live</span>
+            </div>
+
+            <div className="flex items-center justify-between p-2.5 rounded-2xl bg-slate-50 border border-slate-100">
+              <div>
+                <span className="text-[10px] font-bold text-slate-400">10:00 AM</span>
+                <h4 className="font-extrabold text-xs text-slate-800">Form 2 Mathematics</h4>
+                <p className="text-[10px] text-slate-500">Linear Equations</p>
+              </div>
+              <span className="px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 text-[9px] font-extrabold uppercase">Upcoming</span>
+            </div>
+
+            <div className="flex items-center justify-between p-2.5 rounded-2xl bg-slate-50 border border-slate-100">
+              <div>
+                <span className="text-[10px] font-bold text-slate-400">12:00 PM</span>
+                <h4 className="font-extrabold text-xs text-slate-800">Form 4 Chemistry</h4>
+                <p className="text-[10px] text-slate-500">Organic Compounds</p>
+              </div>
+              <span className="px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 text-[9px] font-extrabold uppercase">Upcoming</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Class Overview Stats */}
+        <div className="bg-white rounded-3xl border border-slate-200/80 p-5 shadow-xs space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h3 className="font-extrabold text-sm text-slate-900">Class Overview</h3>
+            <span className="text-xs font-bold text-slate-500">This week →</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center shrink-0">
+                <Users className="w-4.5 h-4.5" />
+              </div>
+              <div>
+                <span className="text-lg font-black text-slate-900">42</span>
+                <p className="text-[10px] font-medium text-slate-500">Students</p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
+                <BookOpen className="w-4.5 h-4.5" />
+              </div>
+              <div>
+                <span className="text-lg font-black text-slate-900">8</span>
+                <p className="text-[10px] font-medium text-slate-500">Lessons</p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-teal-500/10 text-teal-600 flex items-center justify-center shrink-0">
+                <TrendingUp className="w-4.5 h-4.5" />
+              </div>
+              <div>
+                <span className="text-lg font-black text-slate-900">91%</span>
+                <p className="text-[10px] font-medium text-slate-500">Completion Rate</p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center shrink-0">
+                <ClipboardCheck className="w-4.5 h-4.5" />
+              </div>
+              <div>
+                <span className="text-lg font-black text-slate-900">15</span>
+                <p className="text-[10px] font-medium text-slate-500">Assignments</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Recent Resources */}
+        <div className="bg-white rounded-3xl border border-slate-200/80 p-5 shadow-xs space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h3 className="font-extrabold text-sm text-slate-900">Recent Resources</h3>
+            <span className="text-xs font-bold text-slate-500 cursor-pointer hover:underline">View all →</span>
+          </div>
+
+          <div className="space-y-2.5">
+            {[
+              { name: 'Motion Lesson Notes', meta: 'PDF • 2.4 MB • Today', color: 'text-red-500' },
+              { name: 'Algebra Assessment', meta: 'DOCX • 1.1 MB • Yesterday', color: 'text-blue-500' },
+              { name: 'Photosynthesis Slides', meta: 'PPTX • 5.2 MB • 2 days ago', color: 'text-emerald-500' },
+              { name: 'Acids & Bases Video', meta: 'MP4 • 12.4 MB • 3 days ago', color: 'text-purple-500' },
+            ].map((res, i) => (
+              <div key={i} className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 transition cursor-pointer">
+                <div className="flex items-center gap-2.5">
+                  <FileText className={`w-4 h-4 ${res.color}`} />
+                  <div>
+                    <h4 className="font-extrabold text-xs text-slate-800">{res.name}</h4>
+                    <p className="text-[10px] text-slate-400">{res.meta}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+      </div>
+
+      {/* FOURTH ROW (Learner Performance Overview Charts) */}
+      <div className="bg-white rounded-3xl border border-slate-200/80 p-6 shadow-xs space-y-6">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+          <div>
+            <h3 className="font-extrabold text-base text-slate-900">Learner Performance Overview</h3>
+            <p className="text-xs text-slate-500">Class average competency trajectory over time</p>
+          </div>
+          <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-xl">This week →</span>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+          
+          {/* Weekly Performance Line Chart */}
+          <div className="lg:col-span-8 h-56 w-full">
+            {isMounted ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={[
+                  { day: 'Mon', score: 62 },
+                  { day: 'Tue', score: 78 },
+                  { day: 'Wed', score: 71 },
+                  { day: 'Thu', score: 85 },
+                  { day: 'Fri', score: 82 },
+                  { day: 'Sat', score: 88 },
+                  { day: 'Sun', score: 87 },
+                ]}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="day" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <Tooltip />
+                  <Bar dataKey="score" fill="#10b981" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full w-full bg-slate-50 animate-pulse rounded-xl" />
+            )}
+          </div>
+
+          {/* Average Progress Donut & Legend */}
+          <div className="lg:col-span-4 border-l border-slate-100 pl-6 flex flex-col items-center space-y-4">
+            <div className="relative w-32 h-32 flex items-center justify-center rounded-full border-8 border-emerald-500/20 border-t-emerald-500">
+              <div className="text-center">
+                <span className="text-2xl font-black text-slate-900 block">87%</span>
+                <span className="text-[10px] text-slate-400 font-bold uppercase block">Avg Class Progress</span>
+              </div>
+            </div>
+
+            <div className="w-full space-y-1.5 text-xs font-medium">
+              <div className="flex justify-between items-center">
+                <span className="flex items-center gap-1.5 text-slate-600"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Excellent (80–100%)</span>
+                <span className="font-bold text-slate-800">22</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="flex items-center gap-1.5 text-slate-600"><span className="w-2 h-2 rounded-full bg-teal-500" /> Good (60–79%)</span>
+                <span className="font-bold text-slate-800">15</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="flex items-center gap-1.5 text-slate-600"><span className="w-2 h-2 rounded-full bg-amber-500" /> Average (40–59%)</span>
+                <span className="font-bold text-slate-800">4</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="flex items-center gap-1.5 text-slate-600"><span className="w-2 h-2 rounded-full bg-rose-500" /> Needs Improvement (0–39%)</span>
+                <span className="font-bold text-slate-800">1</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* FIFTH ROW (Smart Recommendations) */}
+      <div className="bg-white rounded-3xl border border-slate-200/80 p-6 shadow-xs space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div>
+            <h3 className="font-extrabold text-base text-slate-900">Smart Recommendations</h3>
+            <p className="text-xs text-slate-500">Based on your classes and students</p>
+          </div>
+          <span className="text-xs font-bold text-emerald-700 cursor-pointer hover:underline">View all recommendations →</span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="p-4 rounded-2xl bg-blue-50/50 border border-blue-100 space-y-2">
+            <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
+              <BookOpen className="w-4 h-4" />
+            </div>
+            <h4 className="font-extrabold text-xs text-slate-900">Revise Motion Lesson</h4>
+            <p className="text-[11px] text-slate-500 leading-relaxed">Students are struggling with Newton's Laws</p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-purple-50/50 border border-purple-100 space-y-2">
+            <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center">
+              <ClipboardCheck className="w-4 h-4" />
+            </div>
+            <h4 className="font-extrabold text-xs text-slate-900">Generate Quiz</h4>
+            <p className="text-[11px] text-slate-500 leading-relaxed">Create a quick quiz for Form 3 Physics</p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-amber-50/50 border border-amber-100 space-y-2">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <h4 className="font-extrabold text-xs text-slate-900">Send Reminder</h4>
+            <p className="text-[11px] text-slate-500 leading-relaxed">3 assignments are due within 3 days</p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-emerald-50/50 border border-emerald-100 space-y-2">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+              <FileText className="w-4 h-4" />
+            </div>
+            <h4 className="font-extrabold text-xs text-slate-900">New Resource</h4>
+            <p className="text-[11px] text-slate-500 leading-relaxed">AI generated notes on Electricity and Circuits</p>
           </div>
         </div>
       </div>
-      )}
+
 
       {/* Admin Document Usage Chart */}
       {isAdmin && (
@@ -1429,55 +2167,59 @@ export default function Dashboard({
             </div>
           ) : (
             <div className="h-80 w-full pt-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={adminChartData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis 
-                    dataKey="subject" 
-                    tick={{ fill: '#64748b', fontSize: 10, fontWeight: 500 }}
-                    axisLine={{ stroke: '#e2e8f0' }}
-                    tickLine={{ stroke: '#e2e8f0' }}
-                    interval={0}
-                    angle={-15}
-                    textAnchor="end"
-                  />
-                  <YAxis 
-                    tick={{ fill: '#64748b', fontSize: 10, fontWeight: 500 }}
-                    axisLine={{ stroke: '#e2e8f0' }}
-                    tickLine={{ stroke: '#e2e8f0' }}
-                    allowDecimals={false}
-                  />
-                  <Tooltip
-                    contentStyle={{ 
-                      backgroundColor: '#1e293b', 
-                      borderRadius: '12px', 
-                      border: 'none', 
-                      boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-                      color: '#f8fafc'
-                    }}
-                    itemStyle={{ color: '#f8fafc', fontSize: '11px', fontWeight: 'bold' }}
-                    labelStyle={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', marginBottom: '4px' }}
-                    cursor={{ fill: '#f8fafc', opacity: 0.05 }}
-                  />
-                  <Bar dataKey="count" radius={[6, 6, 0, 0]}>
-                    {adminChartData.map((entry, index) => {
-                      const colors = [
-                        '#5f6f52', // primary theme color
-                        '#3b82f6', // blue
-                        '#8b5cf6', // purple
-                        '#ec4899', // pink
-                        '#f59e0b', // amber
-                        '#10b981', // emerald
-                        '#6366f1', // indigo
-                        '#14b8a6', // teal
-                        '#f97316', // orange
-                        '#a9b388'  // secondary theme color
-                      ];
-                      return <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />;
-                    })}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              {isMounted ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={adminChartData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis 
+                      dataKey="subject" 
+                      tick={{ fill: '#64748b', fontSize: 10, fontWeight: 500 }}
+                      axisLine={{ stroke: '#e2e8f0' }}
+                      tickLine={{ stroke: '#e2e8f0' }}
+                      interval={0}
+                      angle={-15}
+                      textAnchor="end"
+                    />
+                    <YAxis 
+                      tick={{ fill: '#64748b', fontSize: 10, fontWeight: 500 }}
+                      axisLine={{ stroke: '#e2e8f0' }}
+                      tickLine={{ stroke: '#e2e8f0' }}
+                      allowDecimals={false}
+                    />
+                    <Tooltip
+                      contentStyle={{ 
+                        backgroundColor: '#1e293b', 
+                        borderRadius: '12px', 
+                        border: 'none', 
+                        boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+                        color: '#f8fafc'
+                      }}
+                      itemStyle={{ color: '#f8fafc', fontSize: '11px', fontWeight: 'bold' }}
+                      labelStyle={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', marginBottom: '4px' }}
+                      cursor={{ fill: '#f8fafc', opacity: 0.05 }}
+                    />
+                    <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                      {adminChartData.map((entry, index) => {
+                        const colors = [
+                          '#5f6f52', // primary theme color
+                          '#3b82f6', // blue
+                          '#8b5cf6', // purple
+                          '#ec4899', // pink
+                          '#f59e0b', // amber
+                          '#10b981', // emerald
+                          '#6366f1', // indigo
+                          '#14b8a6', // teal
+                          '#f97316', // orange
+                          '#a9b388'  // secondary theme color
+                        ];
+                        return <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />;
+                      })}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full w-full bg-slate-50 animate-pulse rounded-xl" />
+              )}
             </div>
           )}
         </div>
@@ -1567,18 +2309,18 @@ export default function Dashboard({
         
         {/* Left Columns (col-span 2) - Documents Explorer Workspace */}
         <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-3xl border border-[#e5e1da] shadow-sm overflow-hidden">
+          <div className="bg-white dark:bg-slate-800 rounded-3xl border border-[#e5e1da] dark:border-slate-700 shadow-sm overflow-hidden">
             {/* Modern Filter Shelf */}
-            <div className="p-6 border-b border-[#e5e1da] bg-slate-50/30 flex flex-col gap-5">
+            <div className="p-6 border-b border-[#e5e1da] dark:border-slate-700 bg-slate-50/30 dark:bg-slate-800/50 flex flex-col gap-5">
               {/* Top Row: Search & View Mode Toggle */}
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 {/* Search Input Box */}
                 <div className="relative flex-1 max-w-lg z-30">
-                  <div className="flex items-center gap-2.5 bg-white border border-[#e5e1da] px-4 py-2.5 rounded-2xl focus-within:border-[#5f6f52] focus-within:ring-2 focus-within:ring-[#5f6f52]/10 transition-all duration-300 shadow-sm">
+                  <div className="flex items-center gap-2.5 bg-white dark:bg-slate-900 border border-[#e5e1da] dark:border-slate-700 px-4 py-2.5 rounded-2xl focus-within:border-[#5f6f52] focus-within:ring-2 focus-within:ring-[#5f6f52]/10 transition-all duration-300 shadow-sm">
                     <button
                       type="button"
                       onClick={() => saveSearchTerm(search)}
-                      className="text-slate-400 hover:text-[#5f6f52] transition cursor-pointer shrink-0"
+                      className="text-slate-400 hover:text-[#5f6f52] dark:hover:text-emerald-400 transition cursor-pointer shrink-0"
                       title="Search and save to history"
                     >
                       <Search className="w-5 h-5" />
@@ -1597,7 +2339,7 @@ export default function Dashboard({
                       }}
                       onChange={(e) => setSearch(e.target.value)}
                       placeholder="Search topic, subject, grade..."
-                      className="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400 font-medium animate-fadeIn"
+                      className="w-full bg-transparent text-sm text-slate-800 dark:text-slate-100 outline-none placeholder:text-slate-400 dark:placeholder:text-slate-400 font-medium animate-fadeIn"
                     />
                     {search && (
                       <button
@@ -1869,13 +2611,13 @@ export default function Dashboard({
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pb-3 border-b border-[#e5e1da]/40">
                 {/* Subject Dropdown */}
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-1.5">
-                    <BookOpen className="w-3.5 h-3.5 text-[#5f6f52]" /> Subject
+                  <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider pl-1 flex items-center gap-1.5">
+                    <BookOpen className="w-3.5 h-3.5 text-[#5f6f52] dark:text-emerald-400" /> Subject
                   </label>
                   <select
                     value={subjectFilter}
                     onChange={(e) => setSubjectFilter(e.target.value)}
-                    className="bg-white border border-[#e5e1da] text-slate-700 px-3.5 py-2 rounded-xl text-xs font-semibold focus:outline-none focus:border-[#5f6f52] focus:ring-1 focus:ring-[#5f6f52]/20 transition-all duration-300 cursor-pointer shadow-sm"
+                    className="theme-input px-3.5 py-2 rounded-xl text-xs font-semibold focus:outline-none focus:border-[#5f6f52] focus:ring-1 focus:ring-[#5f6f52]/20 transition-all duration-300 cursor-pointer shadow-sm"
                   >
                     <option value="all">📚 All Subjects</option>
                     {allSubjects.map((sub) => (
@@ -1886,13 +2628,13 @@ export default function Dashboard({
 
                 {/* Topic Dropdown */}
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-1.5">
-                    <Compass className="w-3.5 h-3.5 text-[#5f6f52]" /> Topic
+                  <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider pl-1 flex items-center gap-1.5">
+                    <Compass className="w-3.5 h-3.5 text-[#5f6f52] dark:text-emerald-400" /> Topic
                   </label>
                   <select
                     value={topicFilter}
                     onChange={(e) => setTopicFilter(e.target.value)}
-                    className="bg-white border border-[#e5e1da] text-slate-700 px-3.5 py-2 rounded-xl text-xs font-semibold focus:outline-none focus:border-[#5f6f52] focus:ring-1 focus:ring-[#5f6f52]/20 transition-all duration-300 cursor-pointer shadow-sm"
+                    className="theme-input px-3.5 py-2 rounded-xl text-xs font-semibold focus:outline-none focus:border-[#5f6f52] focus:ring-1 focus:ring-[#5f6f52]/20 transition-all duration-300 cursor-pointer shadow-sm"
                   >
                     <option value="all">🗺️ All Topics</option>
                     {allTopics.map((topic) => (
@@ -1903,13 +2645,13 @@ export default function Dashboard({
 
                 {/* Class Level Dropdown */}
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-1.5">
-                    <GraduationCap className="w-3.5 h-3.5 text-[#5f6f52]" /> Class Level / Grade
+                  <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider pl-1 flex items-center gap-1.5">
+                    <GraduationCap className="w-3.5 h-3.5 text-[#5f6f52] dark:text-emerald-400" /> Class Level / Grade
                   </label>
                   <select
                     value={classLevelFilter}
                     onChange={(e) => setClassLevelFilter(e.target.value)}
-                    className="bg-white border border-[#e5e1da] text-slate-700 px-3.5 py-2 rounded-xl text-xs font-semibold focus:outline-none focus:border-[#5f6f52] focus:ring-1 focus:ring-[#5f6f52]/20 transition-all duration-300 cursor-pointer shadow-sm"
+                    className="theme-input px-3.5 py-2 rounded-xl text-xs font-semibold focus:outline-none focus:border-[#5f6f52] focus:ring-1 focus:ring-[#5f6f52]/20 transition-all duration-300 cursor-pointer shadow-sm"
                   >
                     <option value="all">🎓 All Class Levels</option>
                     {allClassLevels.map((lvl) => (
@@ -3138,13 +3880,13 @@ export default function Dashboard({
           )}
 
           {/* Upcoming Lesson Notifications Card */}
-          <div className="bg-white rounded-3xl border border-[#e5e1da] shadow-sm p-6 space-y-4">
+          <div className="bg-white dark:bg-slate-800 rounded-3xl border border-[#e5e1da] dark:border-slate-700 shadow-sm p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-extrabold text-[#5f6f52] uppercase tracking-wider flex items-center gap-2">
-                <Bell className="w-4 h-4 text-[#5f6f52]" /> Scheduled Lessons & Alerts
+              <h3 className="text-sm font-extrabold text-[#5f6f52] dark:text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                <Bell className="w-4 h-4 text-[#5f6f52] dark:text-emerald-400" /> Scheduled Lessons & Alerts
               </h3>
               {activeAlerts.length > 0 && (
-                <span className="px-2 py-0.5 text-[9px] bg-rose-100 text-rose-700 font-extrabold rounded-full animate-pulse">
+                <span className="px-2 py-0.5 text-[9px] bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 font-extrabold rounded-full animate-pulse">
                   {activeAlerts.length} Alerts
                 </span>
               )}
@@ -3154,13 +3896,13 @@ export default function Dashboard({
               {/* Active real-time unread alerts list */}
               {activeAlerts.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest pl-1">Recent Real-time Alerts</p>
+                  <p className="text-[9px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-widest pl-1">Recent Real-time Alerts</p>
                   {activeAlerts.map((notif) => (
-                    <div key={notif.id} className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl relative flex items-start gap-2.5 animate-fadeIn">
+                    <div key={notif.id} className="p-3 bg-indigo-50/50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-800/60 rounded-xl relative flex items-start gap-2.5 animate-fadeIn">
                       <div className="w-2 h-2 rounded-full bg-indigo-500 shrink-0 mt-1.5 animate-pulse" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-bold text-slate-800 leading-normal">{notif.message}</p>
-                        <p className="text-[10px] text-indigo-600 font-semibold mt-1">📚 Topic: {notif.docTopic}</p>
+                        <p className="text-xs font-bold text-slate-800 dark:text-slate-100 leading-normal">{notif.message}</p>
+                        <p className="text-[10px] text-indigo-600 dark:text-indigo-300 font-semibold mt-1">📚 Topic: {notif.docTopic}</p>
                       </div>
                       {setNotifications && (
                         <button
@@ -3170,7 +3912,7 @@ export default function Dashboard({
                             setNotifications(updated);
                             localStorage.setItem('pedagogical_app_notifications', JSON.stringify(updated));
                           }}
-                          className="text-slate-400 hover:text-[#5f6f52] p-1 rounded hover:bg-slate-100 transition cursor-pointer shrink-0"
+                          className="text-slate-400 hover:text-[#5f6f52] dark:hover:text-emerald-400 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer shrink-0"
                           title="Mark read"
                         >
                           <Check className="w-3.5 h-3.5" />
@@ -3183,12 +3925,12 @@ export default function Dashboard({
 
               {/* Upcoming scheduled calendar sessions list */}
               <div>
-                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest pl-1 mb-2">Upcoming Calendar Lessons</p>
+                <p className="text-[9px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-widest pl-1 mb-2">Upcoming Calendar Lessons</p>
                 {upcomingScheduledLessons.length === 0 ? (
-                  <div className="p-4 bg-[#fdfbf7] border border-dashed border-[#e5e1da] rounded-2xl text-center text-slate-400 space-y-2">
-                    <Calendar className="w-6 h-6 mx-auto text-slate-300 stroke-1" />
-                    <p className="text-xs font-bold text-slate-700">No scheduled sessions</p>
-                    <p className="text-[10px] text-slate-400 leading-relaxed max-w-[190px] mx-auto">
+                  <div className="p-4 bg-[#fdfbf7] dark:bg-slate-900/60 border border-dashed border-[#e5e1da] dark:border-slate-700 rounded-2xl text-center text-slate-400 space-y-2">
+                    <Calendar className="w-6 h-6 mx-auto text-slate-300 dark:text-slate-600 stroke-1" />
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">No scheduled sessions</p>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-400 leading-relaxed max-w-[190px] mx-auto">
                       Schedule generated materials by selecting a date in the Calendar Planner grid.
                     </p>
                   </div>
@@ -3198,21 +3940,21 @@ export default function Dashboard({
                       <div
                         key={lesson.id}
                         onClick={() => onOpenDoc(lesson)}
-                        className="p-3 bg-[#fdfbf7]/50 border border-[#e5e1da] rounded-2xl hover:border-[#5f6f52] hover:shadow-2xs transition duration-200 cursor-pointer flex justify-between items-center group"
+                        className="p-3 bg-[#fdfbf7]/50 dark:bg-slate-900/40 border border-[#e5e1da] dark:border-slate-700 rounded-2xl hover:border-[#5f6f52] dark:hover:border-emerald-500 hover:shadow-2xs transition duration-200 cursor-pointer flex justify-between items-center group"
                       >
                         <div className="space-y-1 min-w-0 pr-2">
-                          <p className="text-xs font-extrabold text-slate-800 truncate group-hover:text-[#5f6f52] transition-colors">
+                          <p className="text-xs font-extrabold text-slate-800 dark:text-slate-100 truncate group-hover:text-[#5f6f52] dark:group-hover:text-emerald-400 transition-colors">
                             {lesson.title}
                           </p>
-                          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-medium">
-                            <Calendar className="w-3 h-3 text-[#5f6f52]" />
+                          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-slate-400 font-medium">
+                            <Calendar className="w-3 h-3 text-[#5f6f52] dark:text-emerald-400" />
                             <span>{new Date(lesson.scheduledDate!).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
-                            <span className="text-slate-300">|</span>
-                            <Clock className="w-3 h-3 text-[#5f6f52]" />
+                            <span className="text-slate-300 dark:text-slate-600">|</span>
+                            <Clock className="w-3 h-3 text-[#5f6f52] dark:text-emerald-400" />
                             <span>{lesson.scheduledTime || '00:00'}</span>
                           </div>
                         </div>
-                        <span className="px-2 py-0.5 bg-emerald-50 border border-emerald-100 text-emerald-800 text-[9px] font-extrabold rounded uppercase tracking-wider shrink-0">
+                        <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-100 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-200 text-[9px] font-extrabold rounded uppercase tracking-wider shrink-0">
                           {lesson.classLevel.replace('Junior School: ', '')}
                         </span>
                       </div>
@@ -3224,28 +3966,28 @@ export default function Dashboard({
           </div>
 
           {/* Active Tasks Checklist Card */}
-          <div className="bg-white rounded-3xl border border-[#e5e1da] shadow-sm p-6 space-y-4">
+          <div className="bg-white dark:bg-slate-800 rounded-3xl border border-[#e5e1da] dark:border-slate-700 shadow-sm p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-extrabold text-[#5f6f52] uppercase tracking-wider flex items-center gap-2">
-                <ClipboardCheck className="w-4 h-4 text-[#5f6f52]" /> Active Teaching Tasks
+              <h3 className="text-sm font-extrabold text-[#5f6f52] dark:text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                <ClipboardCheck className="w-4 h-4 text-[#5f6f52] dark:text-emerald-400" /> Active Teaching Tasks
               </h3>
-              <span className="px-2.5 py-0.5 text-[9px] bg-[#5f6f52]/10 text-[#5f6f52] font-extrabold rounded-full">
+              <span className="px-2.5 py-0.5 text-[9px] bg-[#5f6f52]/10 dark:bg-emerald-950/60 text-[#5f6f52] dark:text-emerald-300 font-extrabold rounded-full">
                 {tasks.filter(t => !t.completed).length} Pending
               </span>
             </div>
 
             {/* Inline Add Task Form */}
-            <form onSubmit={handleAddTask} className="flex gap-2 bg-[#fdfbf7] border border-[#e5e1da] p-1.5 rounded-xl">
+            <form onSubmit={handleAddTask} className="flex gap-2 bg-[#fdfbf7] dark:bg-slate-900 border border-[#e5e1da] dark:border-slate-700 p-1.5 rounded-xl">
               <input
                 type="text"
                 value={newTaskText}
                 onChange={(e) => setNewTaskText(e.target.value)}
                 placeholder="Add quick lesson chore..."
-                className="flex-1 bg-transparent border-none outline-none text-xs text-slate-700 px-2 font-semibold"
+                className="flex-1 bg-transparent border-none outline-none text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 px-2 font-semibold"
               />
               <button
                 type="submit"
-                className="p-1.5 bg-[#5f6f52] hover:bg-[#4d5c41] text-white rounded-lg transition duration-150 cursor-pointer flex items-center justify-center shadow-xs"
+                className="p-1.5 bg-[#5f6f52] hover:bg-[#4d5c41] dark:bg-emerald-600 dark:hover:bg-emerald-700 text-white rounded-lg transition duration-150 cursor-pointer flex items-center justify-center shadow-xs"
                 title="Add Task"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -3255,14 +3997,14 @@ export default function Dashboard({
             {/* Task list container */}
             <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1 scrollbar-thin">
               {tasks.length === 0 ? (
-                <div className="p-4 text-center text-[11px] text-slate-400 font-medium">
+                <div className="p-4 text-center text-[11px] text-slate-400 dark:text-slate-400 font-medium">
                   🎉 All tasks completed! Ready for class!
                 </div>
               ) : (
                 tasks.map((task) => (
                   <div
                     key={task.id}
-                    className="flex items-center justify-between p-2.5 rounded-xl border border-slate-100 hover:border-slate-200/80 hover:bg-[#fdfbf7]/50 transition group"
+                    className="flex items-center justify-between p-2.5 rounded-xl border border-slate-100 dark:border-slate-700/80 hover:border-slate-200 dark:hover:border-slate-600 bg-white dark:bg-slate-800/80 hover:bg-[#fdfbf7]/50 dark:hover:bg-slate-700/50 transition group"
                   >
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <button
@@ -3270,14 +4012,14 @@ export default function Dashboard({
                         onClick={() => handleToggleTask(task.id)}
                         className={`w-4.5 h-4.5 rounded border flex items-center justify-center shrink-0 cursor-pointer transition ${
                           task.completed
-                            ? 'bg-[#5f6f52] border-[#5f6f52] text-white'
-                            : 'border-slate-300 hover:border-[#5f6f52] bg-white'
+                            ? 'bg-[#5f6f52] dark:bg-emerald-600 border-[#5f6f52] dark:border-emerald-600 text-white'
+                            : 'border-slate-300 dark:border-slate-600 hover:border-[#5f6f52] dark:hover:border-emerald-400 bg-white dark:bg-slate-900'
                         }`}
                       >
                         {task.completed && <Check className="w-3.5 h-3.5 stroke-[3]" />}
                       </button>
                       <span className={`text-xs font-semibold leading-snug truncate ${
-                        task.completed ? 'line-through text-slate-400' : 'text-slate-700 font-medium'
+                        task.completed ? 'line-through text-slate-400 dark:text-slate-500' : 'text-slate-700 dark:text-slate-200 font-medium'
                       }`}>
                         {task.text}
                       </span>
@@ -3286,7 +4028,7 @@ export default function Dashboard({
                     <button
                       type="button"
                       onClick={() => handleDeleteTask(task.id)}
-                      className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 p-1 rounded hover:bg-red-50 transition cursor-pointer shrink-0"
+                      className="opacity-0 group-hover:opacity-100 text-slate-300 dark:text-slate-500 hover:text-red-500 dark:hover:text-rose-400 p-1 rounded hover:bg-red-50 dark:hover:bg-rose-950/40 transition cursor-pointer shrink-0"
                       title="Delete Task"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -3699,6 +4441,308 @@ export default function Dashboard({
           </motion.div>
         </div>
       )}
+
+      {/* DEMO & HOW-TO VIDEO MODAL */}
+      <DemoVideoModal
+        isOpen={showDemoModal}
+        onClose={() => setShowDemoModal(false)}
+        onOpenSandbox={() => {
+          setShowDemoModal(false);
+          onCreateNew();
+        }}
+        initialVideoType={demoVideoType}
+        youtubeUrl={youtubeUrl}
+      />
+
+      {/* QUICK ACCESS QR CODE SCANNER MODAL */}
+      {isQuickScannerOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            className="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-200 flex flex-col max-h-[90vh]"
+          >
+            {/* Modal Header */}
+            <div className="px-6 py-4 bg-gradient-to-r from-slate-900 to-amber-950 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-3">
+                <span className="p-2.5 bg-amber-500/20 text-amber-400 rounded-2xl border border-amber-500/30">
+                  <Camera className="w-5 h-5 animate-pulse" />
+                </span>
+                <div>
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2 font-serif">
+                    <span>Quick QR Code Scanner</span>
+                    <span className="px-2 py-0.5 text-[10px] bg-emerald-500 text-slate-950 font-black rounded-full uppercase tracking-wider">
+                      Camera Live
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-300">
+                    Scan physical documents, station codes, or scavenger hunt tags
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setIsHowToScanOpen(true)}
+                  className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                  title="How to scan help"
+                >
+                  <Info className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={() => setIsQuickScannerOpen(false)}
+                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-5 flex-1 scrollbar-thin">
+              
+              {/* CAMERA VIEWFINDER & OPTICAL SCANNER */}
+              <div className="bg-slate-950 rounded-2xl p-4 text-white text-center relative overflow-hidden border border-slate-800 shadow-inner">
+                
+                {/* Real Video Element or Viewfinder Box */}
+                <div className="w-full h-56 mx-auto bg-slate-900 rounded-xl overflow-hidden relative flex flex-col items-center justify-center border border-slate-800">
+                  {/* Real Camera Stream if Active */}
+                  <video
+                    ref={videoRef}
+                    playsInline
+                    muted
+                    className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
+                      isCameraActive ? 'opacity-100' : 'opacity-0'
+                    }`}
+                  />
+
+                  {/* Framing Overlay box */}
+                  <div className="w-44 h-44 border-2 border-dashed border-amber-400 rounded-2xl flex flex-col items-center justify-center space-y-2 relative bg-amber-950/20 z-10 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
+                    {/* Viewfinder Corners */}
+                    <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-amber-400" />
+                    <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-amber-400" />
+                    <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-amber-400" />
+                    <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-amber-400" />
+                    
+                    {/* Animated Scanning Beam */}
+                    <div className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-amber-400 to-transparent shadow-[0_0_8px_#f59e0b] animate-bounce" />
+
+                    <QrCode className="w-10 h-10 text-amber-400 animate-pulse" />
+                    <span className="text-[10px] font-mono text-amber-300 font-bold uppercase tracking-widest bg-slate-900/80 px-2 py-0.5 rounded-md">
+                      {isCameraActive ? 'Align QR in Box' : 'Optical Scanner Ready'}
+                    </span>
+                  </div>
+
+                  {/* Fallback info when camera permissions aren't active */}
+                  {cameraPermissionError && !isCameraActive && (
+                    <div className="absolute inset-x-4 bottom-3 z-20 bg-slate-900/90 border border-slate-700/80 rounded-xl p-2.5 text-slate-300 text-[11px]">
+                      <span className="text-amber-400 font-bold">Camera Simulator Mode: </span>
+                      {cameraPermissionError} Use test buttons or type tag below.
+                    </div>
+                  )}
+
+                  {/* Camera Controls Bar */}
+                  <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 bg-slate-900/80 backdrop-blur-md p-1 rounded-xl border border-slate-700/60">
+                    <button
+                      type="button"
+                      onClick={handleToggleTorch}
+                      className={`p-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        isTorchOn ? 'bg-amber-500 text-slate-950' : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                      }`}
+                      title="Toggle Torch / Flashlight"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFacingMode(prev => prev === 'environment' ? 'user' : 'environment')}
+                      className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg text-xs font-bold transition cursor-pointer"
+                      title="Switch Camera (Front/Rear)"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-slate-400 mt-2.5">
+                  Position printed worksheet, station tag, or textbook QR code inside the viewfinder.
+                </p>
+              </div>
+
+              {/* RESOLVED RESULT CARD (If matched) */}
+              {scanResult && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-3 animate-fadeIn">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-emerald-500 text-white rounded-xl shrink-0">
+                      <CheckCircle2 className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-xs font-black text-emerald-900 uppercase tracking-wider">
+                        {scanResult.type === 'doc' ? 'Document Located' : 'Touchpoint / Scavenger Station Recognized'}
+                      </h4>
+                      <p className="text-sm font-bold text-slate-900 truncate mt-0.5">
+                        {scanResult.title || scanResult.message}
+                      </p>
+                      {scanResult.message && (
+                        <p className="text-xs text-slate-600 mt-0.5">
+                          {scanResult.message}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleExecuteResultAction}
+                    className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold rounded-xl shadow-md transition cursor-pointer flex items-center justify-center gap-2 active:scale-95"
+                  >
+                    <span>
+                      {scanResult.type === 'doc' ? 'Open Document Now' : 'Launch Scavenger Hunt / Station Portal'}
+                    </span>
+                    <ExternalLink className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* MANUAL QR / SHORT CODE INPUT */}
+              <div className="space-y-2">
+                <label className="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center justify-between">
+                  <span>Enter Code, URL, or Station ID</span>
+                  <span className="text-[10px] text-slate-400 font-normal">e.g. doc-1, station-1, soc-bio72</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={scannerInputText}
+                    onChange={(e) => setScannerInputText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleResolveScannedCode(scannerInputText);
+                      }
+                    }}
+                    placeholder="Enter short ID or document name..."
+                    className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-amber-500 min-h-[44px]"
+                  />
+                  <button
+                    onClick={() => handleResolveScannedCode(scannerInputText)}
+                    disabled={!scannerInputText.trim() || isResolvingScan}
+                    className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-extrabold rounded-xl min-h-[44px] flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+                  >
+                    <Scan className="w-4 h-4" />
+                    <span>Scan</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* INSTANT DEMO SCAN BUTTONS */}
+              <div className="space-y-2 pt-1 border-t border-slate-100">
+                <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider block">
+                  1-Click Instant Camera Scan Testing:
+                </span>
+                
+                <div className="grid grid-cols-2 gap-2">
+                  {/* Test 1: Workspace Document */}
+                  {documents.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => handleResolveScannedCode(documents[0].id)}
+                      className="p-2.5 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-xl text-left transition text-xs group cursor-pointer"
+                    >
+                      <div className="flex items-center gap-1.5 font-bold text-slate-800 group-hover:text-emerald-700">
+                        <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                        <span className="truncate">Latest Lesson Doc</span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                        {documents[0].title}
+                      </p>
+                    </button>
+                  )}
+
+                  {/* Test 2: Scavenger Hunt Station */}
+                  <button
+                    type="button"
+                    onClick={() => handleResolveScannedCode('station-1')}
+                    className="p-2.5 bg-slate-50 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-xl text-left transition text-xs group cursor-pointer"
+                  >
+                    <div className="flex items-center gap-1.5 font-bold text-slate-800 group-hover:text-amber-700">
+                      <Compass className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Scavenger Station #1</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                      Classroom Station Hunt Tag
+                    </p>
+                  </button>
+
+                  {/* Test 3: Socratic AI Tutor */}
+                  <button
+                    type="button"
+                    onClick={() => handleResolveScannedCode('soc-bio72')}
+                    className="p-2.5 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-xl text-left transition text-xs group cursor-pointer"
+                  >
+                    <div className="flex items-center gap-1.5 font-bold text-slate-800 group-hover:text-blue-700">
+                      <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Socratic AI Tutor</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                      Socratic Guided Touchpoint
+                    </p>
+                  </button>
+
+                  {/* Test 4: Open Scavenger Hunt Studio */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onOpenQRMapping) onOpenQRMapping();
+                      setIsQuickScannerOpen(false);
+                    }}
+                    className="p-2.5 bg-slate-50 hover:bg-purple-50 border border-slate-200 hover:border-purple-300 rounded-xl text-left transition text-xs group cursor-pointer"
+                  >
+                    <div className="flex items-center gap-1.5 font-bold text-slate-800 group-hover:text-purple-700">
+                      <QrCode className="w-3.5 h-3.5 text-purple-600" />
+                      <span>Scavenger Hunt Studio</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                      Create & Map QR Code Station
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* SCANNED STATION PORTAL MODAL */}
+      <ScannedStationPortalModal
+        isOpen={isStationPortalOpen}
+        onClose={() => setIsStationPortalOpen(false)}
+        shortId={scannedPortalShortId}
+        onLaunchTutor={(docTitle, prompt) => {
+          setIsStationPortalOpen(false);
+          if (onOpenAITutor) onOpenAITutor();
+        }}
+        onLaunchAdaptive={() => {
+          setIsStationPortalOpen(false);
+          if (onOpenQRMapping) onOpenQRMapping();
+        }}
+      />
+
+      {/* HOW TO SCAN INSTRUCTIONS MODAL */}
+      <HowToScanModal
+        isOpen={isHowToScanOpen}
+        onClose={() => setIsHowToScanOpen(false)}
+        onOpenScanner={() => {
+          setIsHowToScanOpen(false);
+          setIsQuickScannerOpen(true);
+        }}
+        onOpenSamplePortal={() => {
+          setIsHowToScanOpen(false);
+          setScannedPortalShortId('station-1');
+          setIsStationPortalOpen(true);
+        }}
+      />
 
     </div>
   );

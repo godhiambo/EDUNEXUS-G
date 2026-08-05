@@ -38,6 +38,7 @@ import {
   Compass
 } from 'lucide-react';
 import { QRCodeCanvas, QRCodeSVG } from 'qrcode.react';
+import { HowToScanModal } from './HowToScanModal';
 import { QRCodeMapping, QRTargetType, QRTargetPayload, QRTemplate } from '../types/qrMapping';
 import { QRMappingService, INITIAL_QR_MAPPINGS } from '../services/qrMappingService';
 import { QRTemplateService } from '../services/qrTemplateService';
@@ -136,6 +137,7 @@ export const QRMappingDashboard: React.FC<QRMappingDashboardProps> = ({
   const [activeMainTab, setActiveMainTab] = useState<'mappings' | 'templates' | 'analytics' | 'utilization'>('mappings');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [isBulkUploadModalOpen, setIsBulkUploadModalOpen] = useState(false);
+  const [isHowToScanOpen, setIsHowToScanOpen] = useState(false);
 
   // Load initial mappings & templates
   useEffect(() => {
@@ -573,6 +575,15 @@ export const QRMappingDashboard: React.FC<QRMappingDashboardProps> = ({
               >
                 <Camera className="w-4 h-4 text-amber-300" />
                 <span>Scan / Test Code</span>
+              </button>
+
+              <button
+                onClick={() => setIsHowToScanOpen(true)}
+                className="min-h-[44px] px-4 py-2.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-bold text-xs rounded-xl border border-amber-300/30 flex items-center gap-2 transition cursor-pointer focus:ring-2 focus:ring-amber-300 focus:outline-none"
+                title="View step-by-step camera scanning instructions for students and teachers"
+              >
+                <Info className="w-4 h-4 text-amber-300" />
+                <span>How to Scan Guide</span>
               </button>
 
               <button
@@ -1726,6 +1737,15 @@ export const QRMappingDashboard: React.FC<QRMappingDashboardProps> = ({
               <p className="text-xs text-slate-400">
                 Position the physical textbook or worksheet QR code inside the viewfinder.
               </p>
+              
+              <button
+                type="button"
+                onClick={() => setIsHowToScanOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-bold border border-emerald-500/30 transition cursor-pointer"
+              >
+                <Info className="w-3.5 h-3.5 text-emerald-400" />
+                <span>How to Scan Helper Instructions</span>
+              </button>
             </div>
 
             {/* Manual Short Link Tester */}
@@ -1977,6 +1997,13 @@ CREATE INDEX idx_qr_target_type ON qr_code_mappings(target_type);`}
           setMappings(updatedList);
           triggerToast(`Successfully bulk mapped ${updatedList.length} dynamic QR touchpoints!`);
         }}
+      />
+
+      {/* MODAL: How to Scan Helper Instructions */}
+      <HowToScanModal
+        isOpen={isHowToScanOpen}
+        onClose={() => setIsHowToScanOpen(false)}
+        onOpenScanner={() => setIsScannerModalOpen(true)}
       />
 
       {/* MODAL: Classroom Scavenger Hunt Studio */}

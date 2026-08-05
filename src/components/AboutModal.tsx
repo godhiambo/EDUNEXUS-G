@@ -289,12 +289,12 @@ export default function AboutModal({ isOpen, onClose }: AboutModalProps) {
                               <Mail className="w-4 h-4" />
                             </div>
                             <div className="min-w-0 flex-1">
-                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none mb-0.5">Contact Email</p>
+                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none mb-0.5">Support & Contact</p>
                               <a 
-                                href="mailto:godfrey@stemscholar.space" 
+                                href="mailto:support@joinedunexus.app" 
                                 className="font-bold text-[#5f6f52] hover:underline truncate block"
                               >
-                                godfrey@stemscholar.space
+                                support@joinedunexus.app
                               </a>
                             </div>
                           </div>

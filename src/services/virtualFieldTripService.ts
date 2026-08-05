@@ -812,6 +812,590 @@ export const PRESET_FIELD_TRIPS: VirtualFieldTripRoute[] = [
         ]
       }
     ]
+  },
+  {
+    id: 'serengeti-maasai-safari',
+    title: 'Serengeti & Maasai Mara Great Migration Wildlife Excursion',
+    destination: 'Serengeti National Park & Mara River Crossing',
+    country: 'Tanzania & Kenya',
+    subject: 'Ecology, Animal Behavior & Kiswahili Safari Cues',
+    gradeLevel: 'Grade 5 - 12',
+    coverImage: 'https://images.unsplash.com/photo-1516426122078-c23e76319801?auto=format&fit=crop&w=1200&q=80',
+    description: 'Experience Africa’s Great Migration across the Serengeti plains and Mara River in 4K NatGeo video format. Observe wildebeest, lions, cheetahs, and Nile crocodiles in their natural habitat.',
+    primaryLanguage: 'Kiswahili, Maasai Cues & English',
+    isPreset: true,
+    createdBy: 'East African Wildlife Conservation Trust',
+    createdAt: '2026-03-01',
+    stops: [
+      {
+        stopNumber: 1,
+        title: 'Stop 1: Serengeti Savanna & Great Wildebeest Migration Corridor',
+        locationName: 'Serengeti National Park Savanna, Tanzania',
+        lat: -2.3333,
+        lng: 34.8333,
+        zoom: 14,
+        mapType: 'satellite',
+        videoUrl: 'https://www.youtube-nocookie.com/embed/S_8qM7W_Jm4',
+        readingPassage: 'Jambo na Karibu Serengeti! Over 1.5 million wildebeest, 200,000 zebras, and 500,000 gazelles trek 800 kilometers across the endless plains following seasonal rains and fresh grazing grass.',
+        foreignLanguageCues: [
+          {
+            phrase: 'Tazama kundi kubwa la Nyumbu na Pundamilia',
+            language: 'Kiswahili',
+            translation: 'Look at the giant herd of Wildebeests and Zebras',
+            phoneticSpelling: 'tah-zah-mah koo-ndee koo-bwah lah nyoo-mboo',
+            usageContext: 'Observing the Great Migration across the acacia grassland'
+          },
+          {
+            phrase: 'Simba na Chui wanawinda',
+            language: 'Kiswahili',
+            translation: 'Lions and Leopards are hunting',
+            phoneticSpelling: 'seem-bah nah choo-ee wah-nah-wee-ndah',
+            usageContext: 'Identifying apex predators stalking grazing herds'
+          }
+        ],
+        navigationInstruction: 'Switch to the NatGeo Video tab to watch 4K documentary footage of wildebeest herds crossing the open savanna.',
+        socraticGuidePrompts: [
+          'How do seasonal rain patterns dictate the circular migration path of ungulates across East Africa?',
+          'Why are zebras and wildebeests mutualistic grazing partners on the Serengeti grassland?'
+        ],
+        checkpoints: [
+          {
+            id: 'ser-chk-1',
+            label: 'Locate the Serengeti savanna migratory corridor on the satellite map',
+            hint: 'Center the viewer on the golden acacia plains north of Seronera.',
+            isCompleted: false,
+            rewardPoints: 30
+          },
+          {
+            id: 'ser-chk-2',
+            label: 'Watch the NatGeo 4K Safari video documentary excerpt',
+            hint: 'Click the "Video / NatGeo" tab in the viewer toolbar.',
+            isCompleted: false,
+            rewardPoints: 35
+          }
+        ],
+        mediaGallery: [
+          {
+            id: 'gal-ser-1',
+            type: 'video',
+            url: 'https://www.youtube-nocookie.com/embed/S_8qM7W_Jm4',
+            caption: 'NatGeo Documentary: The Great Serengeti Migration in 4K',
+            credit: 'National Geographic Wild'
+          },
+          {
+            id: 'gal-ser-2',
+            type: 'video',
+            url: 'https://www.youtube-nocookie.com/embed/5a3dJpM9o0A',
+            caption: 'Serengeti Lion Pride & Apex Predator Dynamics',
+            credit: 'African Wildlife Foundation'
+          }
+        ]
+      },
+      {
+        stopNumber: 2,
+        title: 'Stop 2: Mara River Crossing & Crocodile Watering Hole',
+        locationName: 'Mara River, Maasai Mara Game Reserve, Kenya',
+        lat: -1.5000,
+        lng: 35.1500,
+        zoom: 15,
+        mapType: 'satellite',
+        videoUrl: 'https://www.youtube-nocookie.com/embed/x8A4q-X7Nbc',
+        readingPassage: 'The Mara River crossing is the most dramatic milestone of the migration. Thousands of wildebeest leap into turbulent waters inhabited by massive Nile crocodiles up to 5 meters long.',
+        foreignLanguageCues: [
+          {
+            phrase: 'Vuka Mto Mara kwa umakini',
+            language: 'Kiswahili',
+            translation: 'Cross the Mara River with care',
+            phoneticSpelling: 'voo-kah mtoh mah-rah kwah oo-mah-kee-nee',
+            usageContext: 'River crossing warning cue'
+          }
+        ],
+        navigationInstruction: 'Trace the winding course of the Mara River where herds funnel into steep riverbanks.',
+        socraticGuidePrompts: [
+          'What physical adaptations make Nile crocodiles stealthy aquatic ambush predators during river crossings?'
+        ],
+        checkpoints: [
+          {
+            id: 'ser-chk-3',
+            label: 'Identify the Mara River crossing loop on the satellite map',
+            hint: 'Locate the dark ribbon of river cutting through the grassland.',
+            isCompleted: false,
+            rewardPoints: 30
+          }
+        ],
+        mediaGallery: [
+          {
+            id: 'gal-ser-3',
+            type: 'video',
+            url: 'https://www.youtube-nocookie.com/embed/x8A4q-X7Nbc',
+            caption: 'NatGeo 4K River Crossing & Nile Crocodile Ambush',
+            credit: 'National Geographic Expedition'
+          }
+        ]
+      },
+      {
+        stopNumber: 3,
+        title: 'Stop 3: Ngorongoro Volcanic Caldera & Elephant Sanctuary',
+        locationName: 'Ngorongoro Conservation Area, Tanzania',
+        lat: -3.1600,
+        lng: 35.5870,
+        zoom: 14,
+        mapType: 'satellite',
+        videoUrl: 'https://www.youtube-nocookie.com/embed/7M_L_LwJ508',
+        readingPassage: 'Ngorongoro is the world’s largest intact, unfilled volcanic caldera. Formed 2 to 3 million years ago when a giant volcano exploded and collapsed, this 260 sq km natural bowl hosts over 25,000 large mammals including endangered Black Rhinos.',
+        foreignLanguageCues: [
+          {
+            phrase: 'Tazama bonde la volkano la Ngorongoro',
+            language: 'Kiswahili',
+            translation: 'Look at the Ngorongoro volcanic crater bowl',
+            phoneticSpelling: 'tah-zah-mah boh-ndeh lah voh-l-kah-noh',
+            usageContext: 'Observing crater geography from the rim'
+          }
+        ],
+        navigationInstruction: 'Inspect the circular volcanic crater rim enclosing Lake Magadi in the caldera floor.',
+        socraticGuidePrompts: [
+          'How does the steep 600-meter volcanic crater wall create an enclosed micro-ecosystem for resident wildlife?'
+        ],
+        checkpoints: [
+          {
+            id: 'ser-chk-4',
+            label: 'Zoom out to view the circular Ngorongoro crater ring on satellite view',
+            hint: 'Locate the crater bowl surrounded by lush forested highlands.',
+            isCompleted: false,
+            rewardPoints: 35
+          }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'yellowstone-geothermal-park',
+    title: 'Yellowstone National Park Geothermal & Grizzly Sanctuary',
+    destination: 'Yellowstone National Park, Wyoming, USA',
+    country: 'United States',
+    subject: 'Geology, Extremophile Biology & Volcanology',
+    gradeLevel: 'Grade 6 - 12',
+    coverImage: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?auto=format&fit=crop&w=1200&q=80',
+    description: 'Explore America’s first National Park. Investigate the Grand Prismatic Spring’s rainbow microbial rings, Old Faithful’s subterranean hydrothermal pressure, and free-roaming bison herds in NatGeo video format.',
+    primaryLanguage: 'English & Scientific Terms',
+    isPreset: true,
+    createdBy: 'National Park Service Educational Division',
+    createdAt: '2026-03-02',
+    stops: [
+      {
+        stopNumber: 1,
+        title: 'Stop 1: Grand Prismatic Spring & Microbial Extremophiles',
+        locationName: 'Midway Geyser Basin, Yellowstone NP',
+        lat: 44.5250,
+        lng: -110.8382,
+        zoom: 17,
+        mapType: 'satellite',
+        videoUrl: 'https://www.youtube-nocookie.com/embed/1vRzT_UvA9E',
+        readingPassage: 'Grand Prismatic Spring is the largest hot spring in the US, measuring 110 meters across. Its vivid orange, yellow, and red rings are produced by mats of thermophilic (heat-loving) bacteria that thrive in 70°C mineral-rich water.',
+        foreignLanguageCues: [
+          {
+            phrase: 'Bacterias termófilas extremófilas',
+            language: 'Spanish',
+            translation: 'Extremophile thermophilic bacteria',
+            phoneticSpelling: 'bahk-teh-ree-ahs ter-moh-fee-lahs',
+            usageContext: 'Microbiological classification of thermal mat organisms'
+          }
+        ],
+        navigationInstruction: 'Switch to satellite or NatGeo Video tab to inspect the rainbow bacterial rings radiating from the deep azure central spring.',
+        socraticGuidePrompts: [
+          'How do pigment variations in thermophilic bacteria correlate with water temperature gradients from the center to the edge of the spring?',
+          'Why do astrobiologists study Yellowstone extremophiles to search for potential microscopic life on icy moons like Europa and Enceladus?'
+        ],
+        checkpoints: [
+          {
+            id: 'yel-chk-1',
+            label: 'Center satellite map on the rainbow rings of Grand Prismatic Spring',
+            hint: 'Find the large vivid cyan and orange circular hot pool in Midway Geyser Basin.',
+            isCompleted: false,
+            rewardPoints: 30
+          }
+        ],
+        mediaGallery: [
+          {
+            id: 'gal-yel-1',
+            type: 'video',
+            url: 'https://www.youtube-nocookie.com/embed/1vRzT_UvA9E',
+            caption: 'NatGeo 4K: Yellowstone Geysers & Extremophile Biology',
+            credit: 'National Geographic Science'
+          }
+        ]
+      },
+      {
+        stopNumber: 2,
+        title: 'Stop 2: Old Faithful Geyser & Hydrothermal Plumbing System',
+        locationName: 'Upper Geyser Basin, Yellowstone NP',
+        lat: 44.4605,
+        lng: -110.8281,
+        zoom: 17,
+        mapType: 'satellite',
+        videoUrl: 'https://www.youtube-nocookie.com/embed/fW4oH2KqC9E',
+        readingPassage: 'Old Faithful erupts every 60 to 110 minutes, shooting up to 30,000 liters of boiling water and superheated steam 55 meters into the air. Water deep underground is heated by Yellowstone’s magma chamber under immense pressure.',
+        foreignLanguageCues: [
+          {
+            phrase: 'Gèiser hydrothermal en éruption',
+            language: 'French',
+            translation: 'Hydrothermal geyser erupting',
+            phoneticSpelling: 'zhay-zair ee-droh-tair-meek',
+            usageContext: 'Describing thermal volcanic eruptions'
+          }
+        ],
+        navigationInstruction: 'Locate the boardwalk ring surrounding Old Faithful cone in Upper Geyser Basin.',
+        socraticGuidePrompts: [
+          'What three geological components are required to produce an active geyser: heat source, water supply, and what subterranean feature?'
+        ],
+        checkpoints: [
+          {
+            id: 'yel-chk-2',
+            label: 'Locate Old Faithful eruption boardwalk loop on satellite view',
+            hint: 'Find the oval visitor boardwalk surrounding the silica sinter cone.',
+            isCompleted: false,
+            rewardPoints: 30
+          }
+        ]
+      },
+      {
+        stopNumber: 3,
+        title: 'Stop 3: Lamar Valley Bison Herds & Wolf Reintroduction Corridor',
+        locationName: 'Lamar Valley, Yellowstone NP',
+        lat: 44.8667,
+        lng: -110.2333,
+        zoom: 15,
+        mapType: 'satellite',
+        videoUrl: 'https://www.youtube-nocookie.com/embed/d2-69j7i24c',
+        readingPassage: 'Known as the Serengeti of North America, Lamar Valley is home to wild bison, grizzly bears, and gray wolf packs. The 1995 reintroduction of wolves triggered a famous trophic cascade that restored aspen forests and riverbanks.',
+        foreignLanguageCues: [
+          {
+            phrase: 'Trophic cascade in ecosystem restoration',
+            language: 'Scientific Cue',
+            translation: 'Ecological domino effect triggered by top predators',
+            phoneticSpelling: 'troh-feek kahs-kayd',
+            usageContext: 'Explaining predator-prey ecosystem balance'
+          }
+        ],
+        navigationInstruction: 'Trace the broad glacial floodplain of the Lamar River.',
+        socraticGuidePrompts: [
+          'How did reintroducing gray wolves alter elk browsing behavior and allow willow trees to regrow along riverbanks?'
+        ],
+        checkpoints: [
+          {
+            id: 'yel-chk-3',
+            label: 'Identify Lamar River valley floor on satellite view',
+            hint: 'Follow the river meandering through northern Yellowstone meadowlands.',
+            isCompleted: false,
+            rewardPoints: 35
+          }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'cern-particle-physics-lab',
+    title: 'CERN Subterranean Particle Physics & ALICE Lab Excursion',
+    destination: 'CERN Large Hadron Collider, Geneva, Switzerland',
+    country: 'Switzerland & France',
+    subject: 'Quantum Physics, Particle Accelerators & Supercomputing',
+    gradeLevel: 'Grade 9 - 12 (Advanced Science)',
+    coverImage: 'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?auto=format&fit=crop&w=1200&q=80',
+    description: 'Descend 100 meters beneath Geneva to explore CERN, the world’s largest particle physics lab. Inspect the 27km Large Hadron Collider (LHC), the ALICE detector, and the Higgs Boson discovery chamber in NatGeo video format.',
+    primaryLanguage: 'French, English & Scientific Terminology',
+    isPreset: true,
+    createdBy: 'European Organization for Nuclear Research (CERN)',
+    createdAt: '2026-03-03',
+    stops: [
+      {
+        stopNumber: 1,
+        title: 'Stop 1: CERN Globe of Science and Innovation & Surface Control Center',
+        locationName: 'Route de Meyrin, 1211 Genève, Switzerland',
+        lat: 46.2330,
+        lng: 6.0557,
+        zoom: 18,
+        mapType: 'satellite',
+        videoUrl: 'https://www.youtube-nocookie.com/embed/m8A8cK8XmSg',
+        readingPassage: 'Bienvenue au CERN! The Globe of Science and Innovation symbolizes human curiosity. On the surface, scientists from over 100 nations operate the Control Center that monitors proton beams accelerating near the speed of light (99.9999991% c).',
+        foreignLanguageCues: [
+          {
+            phrase: 'Accélérateur de particules souterrain',
+            language: 'French',
+            translation: 'Subterranean particle accelerator',
+            phoneticSpelling: 'ahk-say-lay-rah-tur duh par-tee-kool',
+            usageContext: 'Navigating CERN underground facilities'
+          },
+          {
+            phrase: 'Chambre de collision subatomique',
+            language: 'French',
+            translation: 'Subatomic collision chamber',
+            phoneticSpelling: 'shahm-bruh duh koh-lee-zyohn',
+            usageContext: 'Describing particle detector caverns'
+          }
+        ],
+        navigationInstruction: 'Inspect the wooden sphere of the Globe of Science on the satellite map, situated along the Franco-Swiss border.',
+        socraticGuidePrompts: [
+          'Why do particle physicists require a 27-kilometer circular ring of superconducting magnets to accelerate protons to high energy levels?',
+          'Tim Berners-Lee invented the World Wide Web at CERN in 1989 to solve what scientific data-sharing challenge?'
+        ],
+        checkpoints: [
+          {
+            id: 'crn-chk-1',
+            label: 'Center the viewer on the CERN Globe of Science near Geneva airport',
+            hint: 'Locate the large spherical wooden dome across from CERN main reception.',
+            isCompleted: false,
+            rewardPoints: 30
+          },
+          {
+            id: 'crn-chk-2',
+            label: 'Watch the CERN Subterranean Particle Accelerator video tour',
+            hint: 'Click the "Video / NatGeo" tab in the viewer toolbar.',
+            isCompleted: false,
+            rewardPoints: 35
+          }
+        ],
+        mediaGallery: [
+          {
+            id: 'gal-crn-1',
+            type: 'video',
+            url: 'https://www.youtube-nocookie.com/embed/m8A8cK8XmSg',
+            caption: 'CERN 360° Underground Virtual Tour: Large Hadron Collider',
+            credit: 'CERN Education Office'
+          }
+        ]
+      },
+      {
+        stopNumber: 2,
+        title: 'Stop 2: ALICE Experiment & Quark-Gluon Plasma Detector Cavern',
+        locationName: 'ALICE Experiment Cavern, St. Genis-Pouilly, France',
+        lat: 46.2520,
+        lng: 6.0210,
+        zoom: 18,
+        mapType: 'satellite',
+        videoUrl: 'https://www.youtube-nocookie.com/embed/pQhbhpU9Wrg',
+        readingPassage: 'Located 50 meters underground at Point 2, ALICE (A Large Ion Collider Experiment) collides heavy lead ions to recreate Quark-Gluon Plasma—the primordial soup of matter that existed microseconds after the Big Bang at temperatures exceeding 4 trillion °C!',
+        foreignLanguageCues: [
+          {
+            phrase: 'Plasma de quarks et de gluons',
+            language: 'French',
+            translation: 'Quark-gluon plasma',
+            phoneticSpelling: 'plahs-mah duh kwark ay duh gloo-ohn',
+            usageContext: 'State of matter recreated in ALICE collisions'
+          }
+        ],
+        navigationInstruction: 'Locate the surface access hall for Point 2 on the satellite map near St. Genis-Pouilly in France.',
+        socraticGuidePrompts: [
+          'What happens to protons and neutrons when matter is heated beyond 4 trillion degrees in heavy ion collisions?'
+        ],
+        checkpoints: [
+          {
+            id: 'crn-chk-3',
+            label: 'Identify ALICE Point 2 access hall on the satellite grid',
+            hint: 'Find the red cavern shaft building along the LHC underground ring path.',
+            isCompleted: false,
+            rewardPoints: 35
+          }
+        ]
+      },
+      {
+        stopNumber: 3,
+        title: 'Stop 3: ATLAS Detector Cavern & Higgs Boson Discovery Hall',
+        locationName: 'ATLAS Point 1, Meyrin, Switzerland',
+        lat: 46.2339,
+        lng: 6.0506,
+        zoom: 18,
+        mapType: 'satellite',
+        videoUrl: 'https://www.youtube-nocookie.com/embed/328pw5Taeg0',
+        readingPassage: 'ATLAS is a massive 7,000-ton detector as tall as a 5-story building! In 2012, ATLAS and CMS jointly discovered the Higgs Boson particle, confirming the Brout-Englert-Higgs mechanism that gives mass to fundamental particles.',
+        foreignLanguageCues: [
+          {
+            phrase: 'Boson de Higgs et champ de masse',
+            language: 'French',
+            translation: 'Higgs boson and mass field',
+            phoneticSpelling: 'boh-zohn duh eegs',
+            usageContext: 'Fundamental physics principle discovered at CERN'
+          }
+        ],
+        navigationInstruction: 'Observe the subterranean footprint of the ATLAS cavern opposite the CERN main campus.',
+        socraticGuidePrompts: [
+          'How does the Higgs field impart inertia and mass to elementary particles in the Standard Model?'
+        ],
+        checkpoints: [
+          {
+            id: 'crn-chk-4',
+            label: 'Complete the CERN Socratic Particle Reflection',
+            hint: 'Type your reflection into the Local Tour Guide AI panel.',
+            isCompleted: false,
+            rewardPoints: 40
+          }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'nasa-kennedy-space-center',
+    title: 'NASA Kennedy Space Center & Artemis Space Exploration Lab',
+    destination: 'Kennedy Space Center & Launch Complex 39A',
+    country: 'United States',
+    subject: 'Aerospace Engineering, Rocket Propulsion & Astronomy',
+    gradeLevel: 'Grade 6 - 12',
+    coverImage: 'https://images.unsplash.com/photo-1517976487492-5750f3195933?auto=format&fit=crop&w=1200&q=80',
+    description: 'Explore humanity’s gateway to space at Cape Canaveral. Inspect Artemis Launch Complex 39A, the Space Shuttle Atlantis, and the massive Vehicle Assembly Building in 4K NatGeo and NASA video format.',
+    primaryLanguage: 'English & Technical Aerospace Terms',
+    isPreset: true,
+    createdBy: 'NASA STEM Engagement & Exploration Council',
+    createdAt: '2026-03-04',
+    stops: [
+      {
+        stopNumber: 1,
+        title: 'Stop 1: Artemis Launch Complex 39A & Crawler-Transporter Way',
+        locationName: 'Launch Complex 39A, Merritt Island, Florida',
+        lat: 28.6083,
+        lng: -80.6042,
+        zoom: 17,
+        mapType: 'satellite',
+        videoUrl: 'https://www.youtube-nocookie.com/embed/21X5lGlDOfg',
+        readingPassage: 'Launch Complex 39A is the historic launchpad for Apollo 11 moon missions, Space Shuttle launches, and modern Artemis Moon-to-Mars missions. Heavy rockets are carried to the pad along a gravel Crawlerway on a 3,000-ton Crawler-Transporter.',
+        foreignLanguageCues: [
+          {
+            phrase: 'Rampa de lanzamiento aeroespacial',
+            language: 'Spanish',
+            translation: 'Aerospace launch pad',
+            phoneticSpelling: 'ram-pah deh lah-nsah-myeh-ntoh',
+            usageContext: 'Aerospace launch facility terminology'
+          }
+        ],
+        navigationInstruction: 'Switch to satellite or NatGeo Video tab to inspect the octagonal concrete pad structure abutting the Atlantic Ocean.',
+        socraticGuidePrompts: [
+          'Why are major space launch complexes constructed along eastern coastlines near the equator?',
+          'How does Earth’s rotational speed near the equator provide an initial kinetic boost for orbital rocket trajectories?'
+        ],
+        checkpoints: [
+          {
+            id: 'nas-chk-1',
+            label: 'Locate Pad 39A flame trench and trench water sound suppression system',
+            hint: 'Zoom into the concrete pad structure facing the ocean on satellite map.',
+            isCompleted: false,
+            rewardPoints: 30
+          },
+          {
+            id: 'nas-chk-2',
+            label: 'Watch the NASA Artemis Moon Mission video tour',
+            hint: 'Click the "Video / NatGeo" tab in the viewer toolbar.',
+            isCompleted: false,
+            rewardPoints: 35
+          }
+        ],
+        mediaGallery: [
+          {
+            id: 'gal-nas-1',
+            type: 'video',
+            url: 'https://www.youtube-nocookie.com/embed/21X5lGlDOfg',
+            caption: 'NASA 4K: Artemis Moon Mission & Launch Complex 39A',
+            credit: 'NASA Television'
+          }
+        ]
+      },
+      {
+        stopNumber: 2,
+        title: 'Stop 2: Vehicle Assembly Building (VAB) & Rocket Stacking Hall',
+        locationName: 'VAB Way, Kennedy Space Center, Florida',
+        lat: 28.5861,
+        lng: -80.6508,
+        zoom: 17,
+        mapType: 'satellite',
+        videoUrl: 'https://www.youtube-nocookie.com/embed/3R7KkK833aE',
+        readingPassage: 'Covering 8 acres and standing 160 meters tall, the Vehicle Assembly Building is one of the largest buildings by volume in the world. It is so immense that rain clouds can form inside its ceiling without massive air dehumidifiers!',
+        foreignLanguageCues: [
+          {
+            phrase: 'Ensamblaje de cohetes espaciales',
+            language: 'Spanish',
+            translation: 'Space rocket assembly building',
+            phoneticSpelling: 'en-sahm-blah-heh deh koh-cheh-tes',
+            usageContext: 'Describing rocket integration facilities'
+          }
+        ],
+        navigationInstruction: 'Observe the giant American flag painted on the side of the VAB on satellite view.',
+        socraticGuidePrompts: [
+          'Why are high-capacity crane systems and vertical assembly bays required to integrate multi-stage rockets before roll-out?'
+        ],
+        checkpoints: [
+          {
+            id: 'nas-chk-3',
+            label: 'Locate the VAB high bay footprint and crawlerway track',
+            hint: 'Find the giant box-shaped building with crawler tracks running east.',
+            isCompleted: false,
+            rewardPoints: 35
+          }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'iter-fusion-energy-lab',
+    title: 'ITER International Fusion Energy Laboratory & Tokamak Complex',
+    destination: 'ITER Facility, Cadarache, Provence, France',
+    country: 'France & International Consortium',
+    subject: 'Nuclear Physics, Plasma Physics & Clean Energy Innovation',
+    gradeLevel: 'Grade 9 - 12',
+    coverImage: 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=1200&q=80',
+    description: 'Visit ITER, the world’s largest magnetic confinement plasma physics experiment. 35 nations are building a 23,000-ton Tokamak reactor to harness nuclear fusion—the energy that powers the Sun.',
+    primaryLanguage: 'French, English & Plasma Physics Cues',
+    isPreset: true,
+    createdBy: 'ITER International Fusion Energy Organization',
+    createdAt: '2026-03-05',
+    stops: [
+      {
+        stopNumber: 1,
+        title: 'Stop 1: ITER Tokamak Reactor Complex & Cryostat Hall',
+        locationName: 'Route de Vinon-sur-Verdon, 13115 Saint-Paul-lez-Durance, France',
+        lat: 43.6872,
+        lng: 5.7667,
+        zoom: 18,
+        mapType: 'satellite',
+        videoUrl: 'https://www.youtube-nocookie.com/embed/Yp_MSpqPnoI',
+        readingPassage: 'Bienvenue à l’ITER! Inside the doughnut-shaped Tokamak vacuum vessel, hydrogen isotopes (deuterium and tritium) are heated to 150 million °C—ten times hotter than the core of the Sun! Powerful superconducting magnets confine the burning plasma.',
+        foreignLanguageCues: [
+          {
+            phrase: 'Réacteur de fusion nucléaire Tokamak',
+            language: 'French',
+            translation: 'Tokamak nuclear fusion reactor',
+            phoneticSpelling: 'ray-ahk-tur duh foo-zyohn noo-klay-air',
+            usageContext: 'Describing magnetic confinement fusion energy'
+          }
+        ],
+        navigationInstruction: 'Switch to satellite or NatGeo Video tab to inspect the massive concrete Tokamak building and cryoplant complex.',
+        socraticGuidePrompts: [
+          'Why does nuclear fusion produce zero greenhouse gases and zero long-lived radioactive waste compared to traditional nuclear fission?',
+          'How do magnetic field lines generated by D-shaped niobium-tin superconducting coils prevent 150-million-degree plasma from touching vessel walls?'
+        ],
+        checkpoints: [
+          {
+            id: 'itr-chk-1',
+            label: 'Locate the circular Tokamak building pit on the satellite grid',
+            hint: 'Center the viewer on the main Cadarache construction platform in Provence.',
+            isCompleted: false,
+            rewardPoints: 35
+          },
+          {
+            id: 'itr-chk-2',
+            label: 'Watch the ITER Fusion Energy video documentary tour',
+            hint: 'Click the "Video / NatGeo" tab in the viewer toolbar.',
+            isCompleted: false,
+            rewardPoints: 40
+          }
+        ],
+        mediaGallery: [
+          {
+            id: 'gal-itr-1',
+            type: 'video',
+            url: 'https://www.youtube-nocookie.com/embed/Yp_MSpqPnoI',
+            caption: 'ITER 360° Video Tour: Harnessing the Power of the Sun',
+            credit: 'ITER Organization Communications'
+          }
+        ]
+      }
+    ]
   }
 ];
 

@@ -51,6 +51,10 @@ export interface UserAccount {
   createdAt: string;
   suspended?: boolean;
   violationsCount?: number;
+  hasSubmittedPilotFeedback?: boolean;
+  subject?: string;
+  lastActiveAt?: string;
+  isOnline?: boolean;
 }
 
 export interface AdminNotification {
@@ -89,16 +93,21 @@ export interface GenerationParams {
   lessonLayout?: 'default' | '5e-model' | 'direct-instruction' | 'inquiry-based' | 'communicative' | 'audio-lingual' | 'task-based' | 'clil' | 'flipped-classroom' | 'project-based' | 'game-based' | 'phenomenon-based';
   learnerProfile?: string;
   difficultyLevel?: 'beginner' | 'intermediate' | 'advanced';
+  readingComplexity?: 'simple' | 'standard' | 'professional';
   paperStyle?: 'ruled' | 'grid' | 'blank';
   penColor?: 'blue' | 'black';
   handwritingIntensity?: number;
-  classicNotesImageModel?: 'emgen' | 'nano banana';
+  classicNotesImageModel?: 'emgen' | 'nano banana' | 'emgen_fallback_nanobanana';
   documentPageSize?: 'A4' | 'A5' | 'Letter' | 'Legal' | 'A3';
   documentLength?: 'concise' | 'standard' | 'detailed' | 'comprehensive';
+  enableSearchGrounding?: boolean;
+  scheduledDate?: string;
+  scheduledTime?: string;
 }
 
 export interface SavedDocument {
   id: string;
+  shortId?: string;
   title: string;
   docType: DocumentType;
   curriculum: CurriculumType;
@@ -120,6 +129,9 @@ export interface SavedDocument {
   generateParental?: boolean;
   generateDiagram?: boolean;
   diagramType?: 'flowchart' | 'concept-map';
+  enableSearchGrounding?: boolean;
+  groundingSources?: Array<{ title: string; url: string }>;
+  webSearchQueries?: string[];
   lessonsPerWeek?: number;
   weeksPerTerm?: number;
   isArchived?: boolean;
@@ -149,10 +161,10 @@ export interface SavedDocument {
   paperStyle?: 'ruled' | 'grid' | 'blank';
   penColor?: 'blue' | 'black';
   handwritingIntensity?: number;
-  classicNotesImageModel?: 'emgen' | 'nano banana';
   documentPageSize?: 'A4' | 'A5' | 'Letter' | 'Legal' | 'A3';
   pageOrientation?: 'portrait' | 'landscape';
   documentLength?: 'concise' | 'standard' | 'detailed' | 'comprehensive';
+  classicNotesImageModel?: 'emgen' | 'nano banana' | 'emgen_fallback_nanobanana';
   aiReview?: DocumentAIReview;
   flashcardDeck?: FlashcardDeck;
   commentsCount?: number;
@@ -263,6 +275,7 @@ export interface DocumentDraft {
   extraPrompt: string;
   explainLikeMasterTeacher: boolean;
   askMentor: boolean;
+  mentorScaffoldingContext?: string;
   generateVocabulary?: boolean;
   generateDifferentiated?: boolean;
   generateParental?: boolean;
@@ -282,6 +295,8 @@ export interface DocumentDraft {
   classicNotesImageModel?: 'emgen' | 'nano banana';
   documentPageSize?: 'A4' | 'A5' | 'Letter' | 'Legal' | 'A3';
   documentLength?: 'concise' | 'standard' | 'detailed' | 'comprehensive';
+  scheduledDate?: string;
+  scheduledTime?: string;
 }
 
 export interface PromptTemplate {
@@ -294,6 +309,7 @@ export interface PromptTemplate {
   extraPrompt: string;
   explainLikeMasterTeacher: boolean;
   askMentor: boolean;
+  mentorScaffoldingContext?: string;
   generateVocabulary?: boolean;
   generateDifferentiated?: boolean;
   generateParental?: boolean;
@@ -539,9 +555,12 @@ export interface UserOverride {
   allowAssessmentGeneration?: boolean;
 }
 
+export type AIEngineMode = 'emgen_fallback_nanobanana' | 'emgen_only' | 'nanobanana_only';
+
 export interface SystemPolicies {
   imageEngineEnabled: boolean;
   videoEngineEnabled: boolean;
+  aiEngineMode?: AIEngineMode;
   allowMaterialGeneration: boolean;
   allowVideoCompilation: boolean;
   allowImageGeneration: boolean;

@@ -26,7 +26,6 @@ export default function SidebarTimerWidget() {
   // Floating Position State (for simple dragging)
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef<{ startX: number; startY: number; posX: number; posY: number }>({ startX: 0, startY: 0, posX: 0, posY: 0 });
 
   // TIMER STATES
   const [timerDuration, setTimerDuration] = useState<number>(300); // default 5 mins
@@ -38,9 +37,18 @@ export default function SidebarTimerWidget() {
   const [stopwatchTime, setStopwatchTime] = useState<number>(0); // in ms
   const [stopwatchIsActive, setStopwatchIsActive] = useState<boolean>(false);
   const [stopwatchLaps, setStopwatchLaps] = useState<string[]>([]);
+
+  // REFS - Declared at top level
+  const dragRef = useRef<{ startX: number; startY: number; posX: number; posY: number }>({ startX: 0, startY: 0, posX: 0, posY: 0 });
   const stopwatchIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const stopwatchStartRef = useRef<number>(0);
   const stopwatchPausedRef = useRef<number>(0);
+  const stopwatchIsActiveRef = useRef<boolean>(stopwatchIsActive);
+
+  // Keep stopwatchIsActiveRef in sync
+  useEffect(() => {
+    stopwatchIsActiveRef.current = stopwatchIsActive;
+  }, [stopwatchIsActive]);
 
   // Bell audio synthesizer
   const playAlertSound = useCallback(() => {
@@ -71,8 +79,12 @@ export default function SidebarTimerWidget() {
 
   // Request system notification permission on widget load
   useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission().catch(() => {});
+    try {
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+    } catch {
+      // Ignore notification permissions if restricted in sandbox iframe
     }
   }, []);
 
@@ -134,11 +146,6 @@ export default function SidebarTimerWidget() {
     setStopwatchTime(0);
     setStopwatchLaps([]);
   };
-
-  const stopwatchIsActiveRef = useRef(stopwatchIsActive);
-  useEffect(() => {
-    stopwatchIsActiveRef.current = stopwatchIsActive;
-  }, [stopwatchIsActive]);
 
   useEffect(() => {
     let interval: any = null;
@@ -316,13 +323,13 @@ export default function SidebarTimerWidget() {
       {!isCollapsed && (
         <div className="p-4 space-y-4">
           {/* Mode Switcher Tabs */}
-          <div className="flex bg-slate-100 p-1 rounded-xl">
+          <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl">
             <button
               onClick={() => setActiveTab('timer')}
               className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                 activeTab === 'timer'
-                  ? 'bg-white text-slate-800 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800'
+                  ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-xs'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100'
               }`}
             >
               Lesson Timer
@@ -331,8 +338,8 @@ export default function SidebarTimerWidget() {
               onClick={() => setActiveTab('stopwatch')}
               className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                 activeTab === 'stopwatch'
-                  ? 'bg-white text-slate-800 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800'
+                  ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-xs'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100'
               }`}
             >
               Stopwatch
@@ -408,10 +415,9 @@ export default function SidebarTimerWidget() {
                     <button
                       key={preset.value}
                       onClick={() => selectPreset(preset.value)}
-                      className={`py-1 px-1.5 border rounded-lg text-xs font-bold transition cursor-pointer ${
-                        timerPreset === preset.value
-                          ? 'bg-[#5f6f52]/10 border-[#5f6f52] text-[#5f6f52]'
-                          : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                      data-active={timerPreset === preset.value}
+                      className={`theme-pill py-1 px-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                        timerPreset === preset.value ? 'active' : ''
                       }`}
                     >
                       {preset.label}
@@ -421,7 +427,7 @@ export default function SidebarTimerWidget() {
 
                 {/* Custom input bar */}
                 <div className="flex items-center gap-1.5 justify-center">
-                  <div className="flex items-center gap-1 border border-slate-200 rounded-lg px-2 py-1 bg-slate-50">
+                  <div className="flex items-center gap-1 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 bg-slate-50 dark:bg-slate-800">
                     <input
                       type="number"
                       min="0"
@@ -436,9 +442,9 @@ export default function SidebarTimerWidget() {
                         setTimerSecondsLeft(total);
                         setTimerIsActive(false);
                       }}
-                      className="w-8 text-center text-xs font-bold bg-transparent border-none focus:outline-none text-slate-800 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      className="w-8 text-center text-xs font-bold bg-transparent border-none focus:outline-none text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
-                    <span className="text-xs text-slate-400 font-bold">:</span>
+                    <span className="text-xs text-slate-400 dark:text-slate-500 font-bold">:</span>
                     <input
                       type="number"
                       min="0"
@@ -453,7 +459,7 @@ export default function SidebarTimerWidget() {
                         setTimerSecondsLeft(total);
                         setTimerIsActive(false);
                       }}
-                      className="w-8 text-center text-xs font-bold bg-transparent border-none focus:outline-none text-slate-800 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      className="w-8 text-center text-xs font-bold bg-transparent border-none focus:outline-none text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
                   </div>
                   <span className="text-[10px] text-slate-400 font-bold uppercase">Custom</span>

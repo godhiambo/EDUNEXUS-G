@@ -15,8 +15,8 @@ import { db, handleFirestoreError, OperationType, cleanUndefined, compressObject
 import { SavedDocument, PeerFeedback, DocumentFeedback } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { logActivity } from '../lib/activityLogger';
-import { triggerAutoBackupIfEnabled } from '../lib/googleWorkspace';
 import ParentTeacherPortal from './ParentTeacherPortal';
+import AICollaborationRooms from './AICollaborationRooms';
 import { 
   Users, 
   Share2, 
@@ -39,7 +39,7 @@ import {
 
 export default function CollaborationHub() {
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'exchange' | 'contributions' | 'ai-feedback' | 'parent-messaging'>('exchange');
+  const [activeTab, setActiveTab] = useState<'ai-rooms' | 'exchange' | 'contributions' | 'ai-feedback' | 'parent-messaging'>('ai-rooms');
   
   // Real-time states
   const [allDocs, setAllDocs] = useState<SavedDocument[]>([]);
@@ -245,9 +245,6 @@ export default function CollaborationHub() {
     try {
       await setDoc(doc(db, 'documents', newDocId), cleanUndefined(compressObject(importedDoc)));
       
-      // Trigger automated backup to Google Drive if enabled
-      triggerAutoBackupIfEnabled(importedDoc);
-
       alert(`Successfully imported "${document.title}" into your library!`);
       
       logActivity(
@@ -372,7 +369,21 @@ export default function CollaborationHub() {
       </div>
 
       {/* Segmented control tabs */}
-      <div className="flex border-b border-[#e5e1da] gap-1 shrink-0">
+      <div className="flex flex-wrap border-b border-[#e5e1da] gap-1 shrink-0">
+        <button
+          onClick={() => {
+            setActiveTab('ai-rooms');
+            setReviewingDoc(null);
+          }}
+          className={`px-5 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'ai-rooms'
+              ? 'border-emerald-600 text-emerald-700 font-extrabold bg-emerald-50/50'
+              : 'border-transparent text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <span>💬 AI Collaboration Rooms</span>
+          <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 text-[9px] rounded-full font-bold">WhatsApp Synced</span>
+        </button>
         <button
           onClick={() => {
             setActiveTab('exchange');
@@ -428,6 +439,9 @@ export default function CollaborationHub() {
       </div>
 
       {/* Main Tab Routing */}
+      {activeTab === 'ai-rooms' && (
+        <AICollaborationRooms />
+      )}
       {activeTab === 'exchange' && (
         <div className="space-y-6 animate-fadeIn">
           {/* Filters Panel */}

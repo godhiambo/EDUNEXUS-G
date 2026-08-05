@@ -9,14 +9,6 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  connectGoogleWorkspace,
-  getGoogleWorkspaceToken,
-  listFilesInDriveFolder,
-  downloadDriveFile,
-  uploadFileToDriveFolder,
-  GoogleDriveFile
-} from '../lib/googleWorkspace';
-import {
   Upload,
   Loader2,
   Paperclip,
@@ -39,6 +31,7 @@ import {
   Folder,
   FolderPlus,
   Plus,
+  Globe,
   HardDrive,
   Eye,
   ArrowUpDown,
@@ -175,8 +168,8 @@ export default function FileLibrary({ onSelectResourceForTutor }: FileLibraryPro
     if (selectedSubjectFilter !== 'All') {
       return `${selectedSubjectFilter} Focus`;
     }
-    if (profile?.subject) {
-      return `${profile.subject} Teaching Focus`;
+    if ((profile as any)?.subject) {
+      return `${(profile as any).subject} Teaching Focus`;
     }
     return 'STEM & General Curriculum';
   };
@@ -324,15 +317,87 @@ export default function FileLibrary({ onSelectResourceForTutor }: FileLibraryPro
     setSyncLog(prev => [`[${timestamp}] ${message}`, ...prev].slice(0, 50));
   };
 
-  // Google Drive Integration States
-  const [librarySource, setLibrarySource] = useState<'local' | 'drive' | 'open-books'>('local');
-  const [driveFiles, setDriveFiles] = useState<GoogleDriveFile[]>([]);
-  const [loadingDriveFiles, setLoadingDriveFiles] = useState<boolean>(false);
-  const [driveError, setDriveError] = useState<string | null>(null);
-  const [isConnectingDrive, setIsConnectingDrive] = useState<boolean>(false);
-  const [selectedDriveFile, setSelectedDriveFile] = useState<GoogleDriveFile | null>(null);
-  const [importingDriveFileId, setImportingDriveFileId] = useState<string | null>(null);
-  const [driveSearchQuery, setDriveSearchQuery] = useState<string>('');
+  const [librarySource, setLibrarySource] = useState<'local' | 'open-books' | 'wikilibrary'>('local');
+
+  // WikiLibrary States & Handlers
+  const [wikiQuery, setWikiQuery] = useState<string>('');
+  const [wikiResults, setWikiResults] = useState<Array<{ title: string; snippet: string; pageid: number }>>([]);
+  const [loadingWiki, setLoadingWiki] = useState<boolean>(false);
+  const [wikiError, setWikiError] = useState<string | null>(null);
+  const [selectedWikiDoc, setSelectedWikiDoc] = useState<{ title: string; extract: string; pageurl: string; thumbnail?: string } | null>(null);
+  const [wikiImporting, setWikiImporting] = useState<boolean>(false);
+
+  const searchWikiLibrary = async (queryTerm: string) => {
+    if (!queryTerm.trim()) return;
+    setLoadingWiki(true);
+    setWikiError(null);
+    try {
+      const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(queryTerm)}&utf8=1&format=json&origin=*`);
+      const data = await res.json();
+      if (data?.query?.search) {
+        setWikiResults(data.query.search.map((s: any) => ({
+          title: s.title,
+          snippet: s.snippet.replace(/<[^>]+>/g, ''),
+          pageid: s.pageid
+        })));
+      } else {
+        setWikiResults([]);
+      }
+    } catch (err) {
+      setWikiError('Could not fetch WikiLibrary results. Please verify connection.');
+    } finally {
+      setLoadingWiki(false);
+    }
+  };
+
+  const fetchWikiArticleSummary = async (title: string) => {
+    setLoadingWiki(true);
+    try {
+      const res = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
+      const data = await res.json();
+      setSelectedWikiDoc({
+        title: data.title || title,
+        extract: data.extract || 'No article summary extract available.',
+        thumbnail: data.thumbnail?.source,
+        pageurl: data.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(title)}`
+      });
+    } catch (err) {
+      setSelectedWikiDoc({
+        title,
+        extract: 'Unable to load article extract from Wikipedia.',
+        pageurl: `https://en.wikipedia.org/wiki/${encodeURIComponent(title)}`
+      });
+    } finally {
+      setLoadingWiki(false);
+    }
+  };
+
+  const handleImportWikiArticleToLibrary = async (wikiDoc: { title: string; extract: string; pageurl: string; thumbnail?: string }) => {
+    setWikiImporting(true);
+    try {
+      const fileId = `wiki_${Date.now()}`;
+      const newRes: UploadedResource = {
+        id: fileId,
+        fileName: `${wikiDoc.title} (WikiLibrary Open Reference)`,
+        fileType: 'pdf',
+        fileSize: `${Math.round((wikiDoc.extract.length / 1024) * 10) / 10 || 1.8} KB` as any,
+        uploadedAt: new Date().toISOString(),
+        extractedText: `# ${wikiDoc.title}\n\n*Source: Wikipedia / WikiLibrary Open Knowledge Hub*\n*Reference URL: ${wikiDoc.pageurl}*\n\n## Overview & Summary\n${wikiDoc.extract}`,
+        subject: selectedSubjectFilter !== 'All' ? selectedSubjectFilter : 'General Knowledge',
+        isOfflineCached: true,
+        summary: wikiDoc.extract.slice(0, 220) + '...'
+      } as any;
+
+      await setDoc(doc(db, 'uploadedResources', fileId), newRes);
+      setResources(prev => [newRes, ...prev]);
+      addSyncLogEntry(`Imported WikiLibrary article "${wikiDoc.title}" to local library.`);
+      setSelectedResource(newRes);
+    } catch (err) {
+      console.warn('Error saving Wiki article to library:', err);
+    } finally {
+      setWikiImporting(false);
+    }
+  };
 
   // Open Digital Books States & Handlers
   const [openBookCategoryFilter, setOpenBookCategoryFilter] = useState<string>('All');
@@ -473,169 +538,6 @@ export default function FileLibrary({ onSelectResourceForTutor }: FileLibraryPro
     } catch (err: any) {
       console.error("Error importing Gutenberg book:", err);
       alert("Failed to import Gutenberg book.");
-    }
-  };
-
-  // Fetch files from the Google Drive "EduNexus Curriculum Backup" folder
-  const fetchDriveFiles = async () => {
-    const token = getGoogleWorkspaceToken();
-    if (!token) return;
-
-    setLoadingDriveFiles(true);
-    setDriveError(null);
-    try {
-      const files = await listFilesInDriveFolder('EduNexus Curriculum Backup');
-      setDriveFiles(files);
-    } catch (err: any) {
-      console.error("Error fetching Google Drive files:", err);
-      setDriveError(err.message || "Failed to fetch files from Google Drive.");
-    } finally {
-      setLoadingDriveFiles(false);
-    }
-  };
-
-  useEffect(() => {
-    if (librarySource === 'drive') {
-      fetchDriveFiles();
-    }
-  }, [librarySource]);
-
-  const handleConnectGoogleDrive = async () => {
-    setIsConnectingDrive(true);
-    setDriveError(null);
-    try {
-      const result = await connectGoogleWorkspace();
-      if (result) {
-        fetchDriveFiles();
-      }
-    } catch (err: any) {
-      console.error("Failed to connect Google Workspace:", err);
-      setDriveError(err.message || "Failed to connect to Google Workspace.");
-    } finally {
-      setIsConnectingDrive(false);
-    }
-  };
-
-  const handleImportDriveFile = async (driveFile: GoogleDriveFile) => {
-    setImportingDriveFileId(driveFile.id);
-    try {
-      // 1. Download/export file content
-      const { content, blob } = await downloadDriveFile(driveFile.id, driveFile.mimeType);
-
-      // 2. Extract plain text content
-      let extractedText = '';
-      if (driveFile.mimeType === 'application/vnd.google-apps.document') {
-        extractedText = content;
-      } else if (blob) {
-        // Convert Blob to base64 for PDF / DOCX / Image text extraction
-        const base64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const resStr = reader.result as string;
-            resolve(resStr.split(',')[1]);
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
-
-        const isPDF = driveFile.mimeType === 'application/pdf' || driveFile.name.toLowerCase().endsWith('.pdf');
-        const isDOCX = driveFile.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || driveFile.name.toLowerCase().endsWith('.docx');
-
-        const parseResponse = await fetch('/api/parse-document', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            base64,
-            fileName: driveFile.name,
-            fileType: isPDF ? 'pdf' : (isDOCX ? 'docx' : 'image')
-          })
-        });
-
-        if (parseResponse.ok) {
-          const parseData = await parseResponse.json();
-          extractedText = parseData.text || '';
-        } else {
-          extractedText = `[Imported Google Drive File: ${driveFile.name}]\nImported file content text extraction was unable to run.`;
-        }
-      }
-
-      if (!extractedText.trim()) {
-        extractedText = `[Imported Google Drive Document: ${driveFile.name}]\nNo plain text content could be extracted. Please open the document link to view contents.`;
-      }
-
-      // 3. Upload file content to Firebase Storage so we have a functioning downloadUrl
-      const fileId = `res-drive-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-      const ext = driveFile.name.split('.').pop()?.toLowerCase() || 'txt';
-      const storageRef = ref(storage, `curriculum_documents/${profile?.uid || 'anonymous'}/${fileId}/${driveFile.name}`);
-      
-      let downloadUrl = driveFile.webViewLink || '';
-      
-      try {
-        if (blob) {
-          const uploadResult = await uploadBytes(storageRef, blob);
-          downloadUrl = await getDownloadURL(uploadResult.ref);
-        } else {
-          const textBlob = new Blob([content || extractedText], { type: 'text/plain' });
-          const uploadResult = await uploadBytes(storageRef, textBlob);
-          downloadUrl = await getDownloadURL(uploadResult.ref);
-        }
-      } catch (storageErr) {
-        console.warn("Storage upload failed, fallback to webViewLink:", storageErr);
-      }
-
-      // 4. Intelligently determine Subject & Topic if blank or from filename
-      let subject = 'General / Interdisciplinary';
-      let topic = 'General Resource';
-      const nameLower = driveFile.name.toLowerCase();
-      if (nameLower.includes('math') || nameLower.includes('algebra') || nameLower.includes('geometry') || nameLower.includes('arithmetic')) {
-        subject = 'Mathematics';
-        topic = 'Primary School Syllabus';
-      } else if (nameLower.includes('science') || nameLower.includes('biology') || nameLower.includes('physics') || nameLower.includes('chemistry')) {
-        subject = 'Science';
-        topic = 'CBC Grade 4 Guide';
-      } else if (nameLower.includes('english') || nameLower.includes('reading') || nameLower.includes('grammar') || nameLower.includes('literacy')) {
-        subject = 'English';
-        topic = 'Language Arts Guide';
-      } else if (nameLower.includes('history') || nameLower.includes('social') || nameLower.includes('geography') || nameLower.includes('civics')) {
-        subject = 'Social Studies';
-        topic = 'History & Geography Reference';
-      } else if (nameLower.includes('swahili') || nameLower.includes('kiswahili')) {
-        subject = 'Kiswahili';
-        topic = 'Insha na Sarufi';
-      } else if (nameLower.includes('art') || nameLower.includes('music') || nameLower.includes('creative')) {
-        subject = 'Creative Arts';
-        topic = 'Expressive Mediums';
-      }
-
-      // 5. Register in Firestore as an UploadedResource
-      const sizeNum = driveFile.size ? parseInt(driveFile.size) : 0;
-      const resourceData: UploadedResource = {
-        id: fileId,
-        userId: profile?.uid || 'anonymous',
-        fileName: driveFile.name,
-        fileType: driveFile.mimeType === 'application/vnd.google-apps.document' ? 'docx' : ext,
-        storagePath: storageRef.fullPath,
-        downloadUrl,
-        extractedText,
-        uploadedAt: new Date().toISOString(),
-        subject,
-        topic,
-        folderId: '',
-        fileSize: sizeNum || undefined,
-        accessCount: 0,
-        generationCount: 0
-      };
-
-      await setDoc(doc(db, 'uploadedResources', fileId), resourceData);
-      
-      setSelectedResource(resourceData);
-      setLibrarySource('local'); // Switch back to see it
-      alert(`"${driveFile.name}" has been successfully imported and indexed into your local curriculum library!`);
-    } catch (err: any) {
-      console.error("Error importing file from Google Drive:", err);
-      alert(`Failed to import file from Google Drive: ${err.message || 'unknown error'}`);
-    } finally {
-      setImportingDriveFileId(null);
     }
   };
 
@@ -1927,35 +1829,35 @@ Safety rules: Clean hands, safe food handling.
   return (
     <div className="flex flex-col gap-4">
       {/* FileLibrary Storage Header Status & Visual Progress Bar */}
-      <div className="file-library-header bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shrink-0 bg-gradient-to-r from-slate-50/80 via-white to-slate-50/60 relative">
+      <div className="file-library-header bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-800/80 shadow-xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shrink-0 relative text-slate-100">
         <div className="flex items-center gap-3.5 min-w-0">
-          <div className="p-2.5 bg-[#5f6f52]/10 border border-[#5f6f52]/20 text-[#5f6f52] rounded-2xl shrink-0">
-            <HardDrive className="w-5 h-5 text-[#5f6f52]" />
+          <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 rounded-2xl shrink-0">
+            <HardDrive className="w-5 h-5 text-cyan-400" />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap mb-0.5">
-              <h2 className="text-sm sm:text-base font-serif font-bold text-slate-800 tracking-tight">
+              <h2 className="text-sm sm:text-base font-bold text-transparent bg-clip-text bg-gradient-to-r from-teal-300 via-cyan-200 to-white tracking-tight">
                 Cloud Storage Bucket Usage
               </h2>
               <span className={`text-[10px] uppercase font-extrabold px-2.5 py-0.5 rounded-full border flex items-center gap-1.5 shadow-2xs ${
                 storageMetrics.isCritical
-                  ? 'bg-red-50 text-red-700 border-red-200 animate-pulse'
+                  ? 'bg-red-500/10 text-red-400 border-red-500/30 animate-pulse'
                   : storageMetrics.isWarning
-                  ? 'bg-amber-50 text-amber-700 border-amber-200'
-                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  : 'bg-teal-500/10 text-teal-300 border-teal-500/30'
               }`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${
-                  storageMetrics.isCritical ? 'bg-red-600' : storageMetrics.isWarning ? 'bg-amber-500' : 'bg-emerald-500'
+                  storageMetrics.isCritical ? 'bg-red-500' : storageMetrics.isWarning ? 'bg-amber-400' : 'bg-teal-400'
                 }`} />
                 {storageMetrics.isCritical ? 'Storage Near Capacity' : storageMetrics.isWarning ? 'Storage 70%+ Full' : 'Bucket Healthy'}
               </span>
             </div>
-            <p className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+            <p className="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
               <span>{resources.length} files stored</span>
               <span>•</span>
               <span>Quota Limit: {formatFileSize(STORAGE_LIMIT_BYTES)}</span>
               <span>•</span>
-              <span className="font-medium text-slate-600">{formatFileSize(storageMetrics.remainingBytes)} available</span>
+              <span className="font-medium text-slate-300">{formatFileSize(storageMetrics.remainingBytes)} available</span>
             </p>
           </div>
         </div>
@@ -1963,13 +1865,13 @@ Safety rules: Clean hands, safe food handling.
         {/* Visual Progress Bar & Graphical File Type Breakdown Chart */}
         <div className="w-full md:w-auto flex flex-col items-start md:items-end gap-2 shrink-0">
           <div className="flex items-center justify-between md:justify-end gap-3 w-full text-xs font-semibold">
-            <span className="text-slate-600 font-mono font-bold">
-              {formatFileSize(storageMetrics.totalBytes)} <span className="text-slate-400 font-sans font-normal">/ {formatFileSize(STORAGE_LIMIT_BYTES)}</span>
+            <span className="text-slate-300 font-mono font-bold">
+              {formatFileSize(storageMetrics.totalBytes)} <span className="text-slate-500 font-sans font-normal">/ {formatFileSize(STORAGE_LIMIT_BYTES)}</span>
             </span>
             <span className={`font-mono font-black text-xs px-2.5 py-0.5 rounded-md ${
-              storageMetrics.isCritical ? 'bg-red-100 text-red-800' :
-              storageMetrics.isWarning ? 'bg-amber-100 text-amber-800' :
-              'bg-[#5f6f52]/10 text-[#5f6f52]'
+              storageMetrics.isCritical ? 'bg-red-500/20 text-red-300' :
+              storageMetrics.isWarning ? 'bg-amber-500/20 text-amber-300' :
+              'bg-cyan-500/10 text-cyan-300 border border-cyan-500/30'
             }`}>
               {storageMetrics.usedPercentage.toFixed(1)}% Used
             </span>
@@ -2487,23 +2389,6 @@ Safety rules: Clean hands, safe food handling.
               </button>
               <button
                 type="button"
-                onClick={() => setLibrarySource('drive')}
-                className={`flex-1 py-1.5 rounded-lg font-bold text-center transition flex items-center justify-center gap-1.5 ${
-                  librarySource === 'drive'
-                    ? 'bg-white text-[#5f6f52] shadow-xs border border-slate-200/50'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <HardDrive className="w-3.5 h-3.5 text-[#5f6f52]" />
-                <span className="flex items-center gap-1.5">
-                  Google Drive Backup
-                  {getGoogleWorkspaceToken() && (
-                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
-                  )}
-                </span>
-              </button>
-              <button
-                type="button"
                 id="tab-open-digital-books"
                 onClick={() => setLibrarySource('open-books')}
                 className={`flex-1 py-1.5 rounded-lg font-bold text-center transition flex items-center justify-center gap-1.5 ${
@@ -2516,6 +2401,27 @@ Safety rules: Clean hands, safe food handling.
                 <span className="flex items-center gap-1">
                   Global Open Books
                   <span className="px-1.5 py-0.2 bg-[#5f6f52]/10 text-[#5f6f52] rounded-full text-[9px] font-black">70,000+</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                id="tab-wikilibrary"
+                onClick={() => {
+                  setLibrarySource('wikilibrary');
+                  if (wikiResults.length === 0) {
+                    searchWikiLibrary(selectedSubjectFilter !== 'All' ? selectedSubjectFilter : 'Science');
+                  }
+                }}
+                className={`flex-1 py-1.5 rounded-lg font-bold text-center transition flex items-center justify-center gap-1.5 ${
+                  librarySource === 'wikilibrary'
+                    ? 'bg-white text-[#5f6f52] shadow-xs border border-slate-200/50'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5 text-sky-600" />
+                <span className="flex items-center gap-1">
+                  WikiLibrary
+                  <span className="px-1.5 py-0.2 bg-sky-100 text-sky-800 rounded-full text-[9px] font-black">Open Ref</span>
                 </span>
               </button>
             </div>
@@ -2603,30 +2509,6 @@ Safety rules: Clean hands, safe food handling.
                     My Uploads
                   </button>
                 </div>
-              </div>
-            )}
-
-            {librarySource === 'drive' && getGoogleWorkspaceToken() && (
-              <div className="flex gap-2 flex-wrap md:flex-nowrap pt-1">
-                <div className="relative flex-1 min-w-[120px]">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="Search backup folder files..."
-                    value={driveSearchQuery}
-                    onChange={(e) => setDriveSearchQuery(e.target.value)}
-                    className="w-full text-xs bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-1.5 focus:ring-1 focus:ring-[#5f6f52] focus:outline-none"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={fetchDriveFiles}
-                  disabled={loadingDriveFiles}
-                  className="px-3 py-1.5 bg-white border border-slate-200 hover:border-[#5f6f52] rounded-xl text-slate-600 hover:text-[#5f6f52] transition flex items-center gap-1.5 text-xs font-bold shrink-0 shadow-xs cursor-pointer"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${loadingDriveFiles ? 'animate-spin' : ''}`} />
-                  <span>Refresh</span>
-                </button>
               </div>
             )}
 
@@ -3370,7 +3252,7 @@ Safety rules: Clean hands, safe food handling.
                   }
                 }
 
-                const isItemLoading = res.status === 'processing' || (res as any).isSyncing;
+                const isItemLoading = (res as any).status === 'processing' || (res as any).isSyncing;
 
                 return (
                   <motion.div
@@ -3634,187 +3516,7 @@ Safety rules: Clean hands, safe food handling.
             )}
           </motion.div>
         </>
-      ) : librarySource === 'drive' ? (
-        // GOOGLE DRIVE PANEL VIEW
-        <div className="flex-1 flex flex-col overflow-hidden bg-slate-50/10">
-          {!getGoogleWorkspaceToken() ? (
-            <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-slate-50/50 flex-1">
-              <div className="p-4 bg-[#5f6f52]/10 rounded-2xl text-[#5f6f52] mb-4 border border-[#5f6f52]/10 shadow-xs">
-                <HardDrive className="w-10 h-10" />
-              </div>
-              <h3 className="font-serif font-bold text-base text-slate-800 mb-1.5">Google Drive Integration</h3>
-              <p className="text-xs text-slate-500 max-w-xs mb-5 leading-relaxed">
-                Connect your Google Account to access files inside your <strong className="text-slate-700">"EduNexus Curriculum Backup"</strong> folder.
-              </p>
-              <button
-                type="button"
-                onClick={handleConnectGoogleDrive}
-                disabled={isConnectingDrive}
-                className="bg-[#5f6f52] hover:bg-[#4d5a42] text-white text-xs font-bold py-2.5 px-6 rounded-xl shadow-md transition duration-200 cursor-pointer flex items-center gap-2 disabled:opacity-50"
-              >
-                {isConnectingDrive ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Connecting Drive...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Connect Google Drive</span>
-                  </>
-                )}
-              </button>
-              {driveError && (
-                <p className="text-xs text-red-600 mt-4 font-semibold max-w-xs">{driveError}</p>
-              )}
-            </div>
-          ) : (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              {loadingDriveFiles ? (
-                <div className="flex-1 flex flex-col items-center justify-center p-10 bg-white">
-                  <Loader2 className="w-8 h-8 animate-spin text-[#5f6f52] mb-2" />
-                  <p className="text-xs text-slate-500 font-semibold">Scanning "EduNexus Curriculum Backup" folder...</p>
-                </div>
-              ) : driveError ? (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white">
-                  <p className="text-xs text-red-600 font-semibold mb-3">{driveError}</p>
-                  <button
-                    type="button"
-                    onClick={fetchDriveFiles}
-                    className="bg-slate-100 border border-slate-200 hover:bg-slate-200 text-slate-700 text-xs font-bold py-1.5 px-4 rounded-xl cursor-pointer transition"
-                  >
-                    Try Refreshing Again
-                  </button>
-                </div>
-              ) : (() => {
-                const filteredDrive = driveFiles.filter(f =>
-                  f.name.toLowerCase().includes(driveSearchQuery.toLowerCase())
-                );
-
-                if (filteredDrive.length === 0) {
-                  return (
-                    <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-white">
-                      <div className="p-3 bg-slate-50 rounded-2xl mb-3 text-slate-400 border border-slate-100">
-                        <FileText className="w-8 h-8" />
-                      </div>
-                      <h4 className="font-bold text-sm text-slate-700 mb-1">No Files Found</h4>
-                      <p className="text-xs text-slate-500 max-w-xs leading-normal">
-                        No files were found in your <strong className="text-slate-600">"EduNexus Curriculum Backup"</strong> folder matching "{driveSearchQuery}".
-                      </p>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50/20">
-                    {filteredDrive.map((driveFile) => {
-                      const isImported = resources.some(r => r.fileName === driveFile.name);
-                      const isImporting = importingDriveFileId === driveFile.id;
-                      const isSelected = selectedDriveFile?.id === driveFile.id;
-
-                      return (
-                        <div
-                          key={driveFile.id}
-                          onClick={() => setSelectedDriveFile(driveFile)}
-                          className={`p-3 rounded-xl border transition cursor-pointer text-xs flex flex-col gap-2 relative group ${
-                            isSelected
-                              ? 'border-[#5f6f52] bg-[#5f6f52]/5 text-[#5f6f52] shadow-xs'
-                              : isImported
-                              ? 'border-emerald-100 bg-emerald-50/5 hover:border-emerald-200 text-slate-600 hover:bg-emerald-50/15'
-                              : 'border-slate-150 bg-white hover:border-slate-250 hover:bg-slate-50 text-slate-600'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                              <div className={`p-2 rounded-xl shrink-0 ${
-                                driveFile.mimeType === 'application/vnd.google-apps.document' ? 'bg-blue-50 text-blue-600 border border-blue-100' :
-                                driveFile.mimeType === 'application/pdf' ? 'bg-red-50 text-red-600 border border-red-100' :
-                                driveFile.mimeType.startsWith('image/') ? 'bg-amber-50 text-amber-600 border border-amber-100' :
-                                'bg-slate-50 text-slate-500 border border-slate-150'
-                              }`}>
-                                <FileText className="w-4 h-4" />
-                              </div>
-                              <div className="min-w-0">
-                                <h4 className="font-bold text-slate-700 truncate" title={driveFile.name}>
-                                  {driveFile.name}
-                                </h4>
-                                <p className="text-[10px] text-slate-400 font-semibold mt-0.5 flex items-center gap-1">
-                                  <span className="w-1 h-1 bg-green-500 rounded-full" />
-                                  Backup Folder Document
-                                </p>
-                              </div>
-                            </div>
-                            
-                            {isImported && (
-                              <span className="text-[8px] font-black text-emerald-800 bg-emerald-100 border border-emerald-200 px-1.5 py-0.5 rounded-md flex items-center gap-0.5 shrink-0 select-none">
-                                <Check className="w-2.5 h-2.5 shrink-0" />
-                                <span>Indexed</span>
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="flex items-center justify-between text-[9px] text-slate-400 mt-1 border-t border-slate-50 pt-1.5 flex-wrap gap-1">
-                            <span className="flex items-center gap-1">
-                              <Calendar className="w-3 h-3" />
-                              {driveFile.createdTime ? new Date(driveFile.createdTime).toLocaleDateString() : 'N/A'}
-                            </span>
-                            {driveFile.size && (
-                              <span className="flex items-center gap-1">
-                                <HardDrive className="w-3 h-3 text-slate-400" />
-                                {(parseInt(driveFile.size) / 1024).toFixed(1)} KB
-                              </span>
-                            )}
-                            
-                            <div className="flex items-center gap-1.5 ml-auto">
-                              {driveFile.webViewLink && (
-                                <a
-                                  href={driveFile.webViewLink}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition"
-                                  title="Open directly in Google Drive"
-                                >
-                                  <ExternalLink className="w-3.5 h-3.5" />
-                                </a>
-                              )}
-                              
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleImportDriveFile(driveFile);
-                                }}
-                                disabled={isImporting}
-                                className={`px-2 py-0.5 rounded-lg text-[9px] font-extrabold flex items-center gap-1 transition select-none cursor-pointer ${
-                                  isImporting
-                                    ? 'bg-slate-100 text-slate-400 cursor-wait'
-                                    : 'bg-[#5f6f52]/10 hover:bg-[#5f6f52] text-[#5f6f52] hover:text-white border border-[#5f6f52]/10'
-                                }`}
-                              >
-                                {isImporting ? (
-                                  <>
-                                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                                    <span>Importing...</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Download className="w-2.5 h-2.5" />
-                                    <span>{isImported ? 'Re-import' : 'Import'}</span>
-                                  </>
-                                )}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-            </div>
-          )}
-        </div>
-      ) : (
+      ) : librarySource === 'open-books' ? (
         /* GLOBAL OPEN DIGITAL BOOKS PANEL VIEW */
         <div className="flex-1 flex flex-col overflow-hidden bg-slate-50/10 p-4 space-y-4">
           {/* Header Banner */}
@@ -4009,7 +3711,158 @@ Safety rules: Clean hands, safe food handling.
             )}
           </div>
         </div>
-      )}
+      ) : librarySource === 'wikilibrary' ? (
+        // WIKILIBRARY OPEN REFERENCE PANEL VIEW
+        <div className="flex-1 flex flex-col overflow-hidden bg-slate-50/20 p-4 space-y-4">
+          <div className="bg-gradient-to-r from-sky-900 via-slate-900 to-indigo-950 text-white p-4 rounded-2xl shadow-sm border border-sky-800/40">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-sky-500/20 rounded-xl border border-sky-400/30 text-sky-300">
+                  <Globe className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
+                    WikiLibrary Open Knowledge Explorer
+                    <span className="px-2 py-0.5 bg-sky-500/20 text-sky-300 border border-sky-400/30 text-[9px] rounded-full uppercase tracking-wider font-extrabold">Wikipedia & Wikibooks</span>
+                  </h3>
+                  <p className="text-xs text-sky-200/80">
+                    Live reference articles, scientific summaries, and open textbooks. Search or click below to extract instantly into EduNexus.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Topic Chips */}
+            <div className="flex items-center gap-2 overflow-x-auto mt-3 pt-2 border-t border-sky-800/40 scrollbar-none">
+              <span className="text-[10px] font-extrabold text-sky-300 uppercase tracking-wider shrink-0">Popular Topics:</span>
+              {['Photosynthesis', 'Cell Biology', 'Plate Tectonics', 'World War II', 'Linear Algebra', 'Quantum Mechanics', 'African History', 'Climate Change', 'Classical Literature'].map((topic) => (
+                <button
+                  key={`wiki-chip-${topic}`}
+                  type="button"
+                  onClick={() => {
+                    setWikiQuery(topic);
+                    searchWikiLibrary(topic);
+                  }}
+                  className="px-2.5 py-1 bg-sky-800/50 hover:bg-sky-700/60 border border-sky-700/50 text-sky-100 rounded-lg text-xs font-semibold transition shrink-0 cursor-pointer"
+                >
+                  {topic}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Search bar */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search millions of Wikipedia & Wikibooks articles..."
+                value={wikiQuery}
+                onChange={(e) => setWikiQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && searchWikiLibrary(wikiQuery)}
+                className="w-full text-xs bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 focus:ring-2 focus:ring-sky-500 focus:outline-none"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => searchWikiLibrary(wikiQuery || 'Science')}
+              disabled={loadingWiki}
+              className="px-4 py-2.5 bg-sky-700 hover:bg-sky-800 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+            >
+              {loadingWiki ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+              <span>Search Wiki</span>
+            </button>
+          </div>
+
+          {wikiError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium">
+              {wikiError}
+            </div>
+          )}
+
+          {/* Search Results Grid */}
+          <div className="flex-1 overflow-y-auto pr-1">
+            {loadingWiki && wikiResults.length === 0 ? (
+              <div className="py-16 text-center text-slate-500">
+                <Loader2 className="w-8 h-8 animate-spin text-sky-600 mx-auto mb-2" />
+                <p className="text-xs font-bold">Querying Wikipedia & WikiLibrary databases...</p>
+              </div>
+            ) : wikiResults.length === 0 ? (
+              <div className="py-12 text-center bg-white rounded-2xl border border-slate-150 p-6 space-y-3">
+                <Globe className="w-10 h-10 text-sky-400 mx-auto" />
+                <h4 className="font-bold text-sm text-slate-800">WikiLibrary Knowledge Engine Ready</h4>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  Type any topic in the search box above or select one of the popular topics to explore live articles from Wikipedia and Wikibooks.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {wikiResults.map((item) => (
+                  <motion.div
+                    key={`wiki-res-${item.pageid}`}
+                    whileHover={{ y: -2 }}
+                    className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-xs hover:border-sky-300 transition space-y-2.5 flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="px-2 py-0.5 bg-sky-50 text-sky-700 border border-sky-100 rounded text-[9px] font-extrabold uppercase tracking-wider">
+                          Wikipedia / WikiLibrary
+                        </span>
+                        <a
+                          href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.title)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[10px] font-bold text-sky-600 hover:underline flex items-center gap-1"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>View Wiki Page</span>
+                        </a>
+                      </div>
+                      <h4 className="font-extrabold text-xs text-slate-800 hover:text-sky-700 transition cursor-pointer" onClick={() => fetchWikiArticleSummary(item.title)}>
+                        {item.title}
+                      </h4>
+                      <p className="text-[11px] text-slate-500 leading-snug line-clamp-3 mt-1">
+                        {item.snippet}...
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => fetchWikiArticleSummary(item.title)}
+                        className="flex-1 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[10px] rounded-lg transition flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Eye className="w-3 h-3" />
+                        <span>Read Summary</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const summaryRes = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(item.title)}`);
+                          const summaryData = await summaryRes.json();
+                          handleImportWikiArticleToLibrary({
+                            title: item.title,
+                            extract: summaryData.extract || item.snippet,
+                            pageurl: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title)}`,
+                            thumbnail: summaryData.thumbnail?.source
+                          });
+                        }}
+                        disabled={wikiImporting}
+                        className="px-3 py-1.5 bg-sky-700 hover:bg-sky-800 text-white font-bold text-[10px] rounded-lg transition flex items-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
+                      >
+                        <Download className="w-3 h-3" />
+                        <span>Import to Library</span>
+                      </button>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   </div>
 
@@ -4198,94 +4051,6 @@ Safety rules: Clean hands, safe food handling.
               </div>
             </div>
             
-          </div>
-        ) : selectedDriveFile ? (
-          <div className="flex flex-col h-full overflow-hidden">
-            {/* GOOGLE DRIVE PREVIEW VIEW */}
-            <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
-              <div className="space-y-1.5 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-[9px] uppercase font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1 font-sans">
-                    <HardDrive className="w-2.5 h-2.5" />
-                    GOOGLE DRIVE FILE
-                  </span>
-                  <span className="text-[10px] text-slate-400 flex items-center gap-1 font-sans font-semibold">
-                    <Calendar className="w-3.5 h-3.5" />
-                    Created on {selectedDriveFile.createdTime ? new Date(selectedDriveFile.createdTime).toLocaleDateString() : 'N/A'}
-                  </span>
-                </div>
-                <h2 className="text-base font-serif font-bold text-slate-800 leading-snug truncate">
-                  {selectedDriveFile.name}
-                </h2>
-                <p className="text-xs text-slate-400 font-mono truncate max-w-[400px]">
-                  MimeType: {selectedDriveFile.mimeType}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                {selectedDriveFile.webViewLink && (
-                  <a
-                    href={selectedDriveFile.webViewLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="p-2 border border-slate-200 hover:border-[#5f6f52] hover:bg-[#5f6f52]/5 text-slate-600 hover:text-[#5f6f52] rounded-xl transition duration-200 cursor-pointer flex items-center gap-1 text-xs font-bold font-sans"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>View original</span>
-                  </a>
-                )}
-                
-                <button
-                  type="button"
-                  onClick={() => handleImportDriveFile(selectedDriveFile)}
-                  disabled={importingDriveFileId === selectedDriveFile.id}
-                  className="p-2 bg-[#5f6f52] hover:bg-[#4d5a42] text-white rounded-xl transition duration-200 cursor-pointer flex items-center gap-1 text-xs font-semibold shadow-xs disabled:opacity-50"
-                >
-                  {importingDriveFileId === selectedDriveFile.id ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Importing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Import to Archive</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-8 flex flex-col items-center justify-center text-center bg-slate-50/50">
-              <div className="max-w-md space-y-4">
-                <div className="p-4 bg-[#5f6f52]/5 text-[#5f6f52] rounded-2xl w-16 h-16 mx-auto flex items-center justify-center border border-[#5f6f52]/10 shadow-inner">
-                  <FileText className="w-8 h-8" />
-                </div>
-                <h3 className="font-serif font-bold text-lg text-slate-800">Unindexed Curriculum Document</h3>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  This document lives securely inside your <strong className="text-slate-700 font-bold">"EduNexus Curriculum Backup"</strong> Google Drive folder.
-                </p>
-                <div className="bg-white border border-slate-150 p-4 rounded-2xl text-left text-xs text-slate-600 space-y-2 max-w-sm mx-auto shadow-xs">
-                  <h4 className="font-extrabold text-[#5f6f52] uppercase text-[9px] tracking-wider flex items-center gap-1 font-sans">
-                    <Check className="w-3.5 h-3.5" />
-                    What happens when you import?
-                  </h4>
-                  <ul className="list-disc list-inside space-y-1 text-slate-500 pl-1 leading-normal font-medium">
-                    <li>Plain text is extracted instantly from the file.</li>
-                    <li>The curriculum is indexed for the Socratic Tutor.</li>
-                    <li>A persistent backup copy is registered locally.</li>
-                  </ul>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleImportDriveFile(selectedDriveFile)}
-                  disabled={importingDriveFileId === selectedDriveFile.id}
-                  className="bg-[#5f6f52] hover:bg-[#4d5a42] text-white text-xs font-bold py-2.5 px-6 rounded-xl shadow-md transition duration-200 cursor-pointer disabled:opacity-50"
-                >
-                  {importingDriveFileId === selectedDriveFile.id ? "Extracting Text..." : "Import & Extract Text Now"}
-                </button>
-              </div>
-            </div>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center flex-1 text-center p-8 text-slate-400">
@@ -4678,8 +4443,8 @@ Safety rules: Clean hands, safe food handling.
                               onClick={() => {
                                 const tempBook: OpenBook = {
                                   id: previewingResource.id,
-                                  title: previewingResource.title,
-                                  author: previewingResource.category || 'Curriculum Resource',
+                                  title: previewingResource.fileName,
+                                  author: previewingResource.fileType || 'Curriculum Resource',
                                   category: 'Literature & Classics',
                                   subject: previewingResource.subject || 'Curriculum Studies',
                                   gradeLevel: 'Grade 1 - 12',
@@ -4693,7 +4458,7 @@ Safety rules: Clean hands, safe food handling.
                                   license: 'EduNexus Digital Resource',
                                   chapters: [
                                     {
-                                      title: previewingResource.title,
+                                      title: previewingResource.fileName,
                                       content: previewingResource.extractedText || 'No extracted text available for this document.'
                                     }
                                   ]
@@ -5019,6 +4784,85 @@ Safety rules: Clean hands, safe food handling.
         onClose={() => setActiveReadingBook(null)}
         onImportToLibrary={handleImportOpenBookToLibrary}
       />
+
+      {/* Selected Wiki Article Preview Modal */}
+      <AnimatePresence>
+        {selectedWikiDoc && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-2xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-3">
+                  {selectedWikiDoc.thumbnail ? (
+                    <img src={selectedWikiDoc.thumbnail} alt={selectedWikiDoc.title} className="w-12 h-12 object-cover rounded-xl border border-slate-200 shadow-xs" />
+                  ) : (
+                    <div className="p-3 bg-sky-100 text-sky-700 rounded-xl">
+                      <Globe className="w-6 h-6" />
+                    </div>
+                  )}
+                  <div>
+                    <span className="px-2 py-0.5 bg-sky-50 text-sky-700 text-[9px] font-extrabold uppercase rounded border border-sky-100">
+                      WikiLibrary Open Knowledge Article
+                    </span>
+                    <h3 className="font-extrabold text-base text-slate-800 mt-0.5">{selectedWikiDoc.title}</h3>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedWikiDoc(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="prose prose-slate prose-xs max-w-none bg-slate-50 p-4 rounded-xl border border-slate-150 leading-relaxed text-slate-700">
+                <p className="whitespace-pre-wrap">{selectedWikiDoc.extract}</p>
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100 flex-wrap gap-2">
+                <a
+                  href={selectedWikiDoc.pageurl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs font-bold text-sky-700 hover:underline flex items-center gap-1.5"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open Full Wikipedia Article</span>
+                </a>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedWikiDoc(null)}
+                    className="px-4 py-2 border border-slate-200 text-slate-600 hover:bg-slate-100 font-bold text-xs rounded-xl transition cursor-pointer"
+                  >
+                    Close
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleImportWikiArticleToLibrary(selectedWikiDoc);
+                      setSelectedWikiDoc(null);
+                    }}
+                    disabled={wikiImporting}
+                    className="px-4 py-2 bg-sky-700 hover:bg-sky-800 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Import into EduNexus Documents</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Upload Full Book for AI Access Modal */}
       <UploadFullBookModal

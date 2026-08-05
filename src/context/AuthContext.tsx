@@ -202,8 +202,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const isBootstrappedAdmin = emailLower === 'ojiambo.godfry@gmail.com' || emailLower === 'godfreynexused@gmail.com';
             const isDemoStudent = emailLower === 'student.demo@edunexus.test';
             const hasPasswordProvider = firebaseUser.providerData?.some((provider) => provider.providerId === 'password');
+            const hasGoogleProvider = firebaseUser.providerData?.some((provider) => provider.providerId === 'google.com');
 
-            if (pendingRole || googleRegRole || emailRegRole || hasPasswordProvider || isBootstrappedAdmin || isDemoStudent) {
+            if (pendingRole || googleRegRole || emailRegRole || hasPasswordProvider || hasGoogleProvider || isBootstrappedAdmin || isDemoStudent) {
               let defaultRole: UserRole = pendingRole || googleRegRole || emailRegRole || 'Teacher';
               if (isBootstrappedAdmin) {
                 defaultRole = 'Administrator';
@@ -319,6 +320,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
     });
     return unsub;
+  }, [user]);
+
+  // Maintain active user presence heartbeat in Firestore
+  useEffect(() => {
+    if (!user || user.uid.startsWith('offline-sandbox-')) return;
+
+    const touchHeartbeat = async () => {
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        await setDoc(userRef, { 
+          lastActiveAt: new Date().toISOString(),
+          isOnline: true 
+        }, { merge: true });
+      } catch (err) {
+        // Silently catch transient network heartbeat errors
+      }
+    };
+
+    // Touch on mount
+    touchHeartbeat();
+
+    // Heartbeat every 2 minutes
+    const interval = setInterval(touchHeartbeat, 120000);
+
+    return () => clearInterval(interval);
   }, [user]);
 
   // If user is Administrator, listen to ALL users in the system to enable user management
@@ -581,6 +607,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return {
       imageEngineEnabled: true,
       videoEngineEnabled: true,
+      aiEngineMode: 'emgen_fallback_nanobanana',
       allowMaterialGeneration: true,
       allowVideoCompilation: true,
       allowImageGeneration: true,

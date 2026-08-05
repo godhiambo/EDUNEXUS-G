@@ -694,13 +694,13 @@ export default function LearnersPerformance() {
   };
 
   const handleSimulate100PercentMasteryAlert = () => {
-    const student = records.find(r => r.name === selectedStudentForAlert) || { name: selectedStudentForAlert, admission_number: 'ADM-2026-0301' };
+    const student = records.find(r => r.name === selectedStudentForAlert) || { name: selectedStudentForAlert, admissionNumber: 'ADM-2026-0301' };
     const topicObj = flashcardTopicData.find(t => t.topic === selectedTopicForAlert) || { topic: selectedTopicForAlert, subject: 'Mathematics', totalCards: 40 };
 
     const newAlert: MasteryAlert = {
       id: `alert-${Date.now()}`,
       studentName: student.name,
-      admissionNumber: student.admission_number,
+      admissionNumber: student.admissionNumber || (student as any).admission_number || 'ADM-2026-0301',
       topic: topicObj.topic,
       subject: topicObj.subject,
       cardsMastered: topicObj.totalCards,
@@ -2105,7 +2105,7 @@ Daniel Ndambuki,ADM-2026-0308,Physics,89`;
                 >
                   {records.map((r) => (
                     <option key={`hm-st-${r.id}`} value={r.name}>
-                      {r.name} ({r.admission_number || r.admissionNumber})
+                      {r.name} ({r.admissionNumber || (r as any).admission_number})
                     </option>
                   ))}
                 </select>
@@ -2381,7 +2381,7 @@ Daniel Ndambuki,ADM-2026-0308,Physics,89`;
                 >
                   {records.slice(0, 8).map((rec) => (
                     <option key={`st-opt-${rec.id}`} value={rec.name}>
-                      {rec.name} ({rec.admission_number})
+                      {rec.name} ({rec.admissionNumber || (rec as any).admission_number})
                     </option>
                   ))}
                 </select>

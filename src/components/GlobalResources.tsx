@@ -1,12 +1,11 @@
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { handleResponseJson } from '../utils/api';
 import { db, cleanUndefined, compressObject } from '../firebase';
 import { collection, doc, setDoc, getDocs } from 'firebase/firestore';
 import { SavedDocument } from '../types';
 import { INITIAL_DOCUMENTS } from '../data/seedDocs';
-import { triggerAutoBackupIfEnabled } from '../lib/googleWorkspace';
 import { OPEN_BOOKS_CATALOG, OpenBook } from '../data/openBooksData';
 import OpenBookReaderModal from './OpenBookReaderModal';
 import UploadFullBookModal from './UploadFullBookModal';
@@ -46,7 +45,8 @@ import {
   WifiOff,
   FileDown,
   Gauge,
-  ChevronDown
+  ChevronDown,
+  Loader2
 } from 'lucide-react';
 
 export type DifficultyLevel = 'Beginner' | 'Intermediate' | 'Advanced';
@@ -107,7 +107,7 @@ interface ResourceResult {
 }
 
 interface ShareItem {
-  type: 'book' | 'resource';
+  type: 'book' | 'resource' | 'wiki';
   title: string;
   url: string;
   subjectOrCategory: string;
@@ -116,6 +116,192 @@ interface ShareItem {
   bookData?: OpenBook;
   resourceData?: ResourceResult;
 }
+
+export interface WikiLibraryArticle {
+  id: string;
+  title: string;
+  url: string;
+  category: string;
+  subject: string;
+  description: string;
+  gradeLevel: string;
+  whyTeachersLoveIt: string;
+  suggestedActivity: string;
+  extractSummary: string;
+  wikiSource: string;
+  difficulty: DifficultyLevel;
+}
+
+export const WIKILIBRARY_ARTICLES: WikiLibraryArticle[] = [
+  {
+    id: 'wiki-cell-respiration',
+    title: 'Cellular Respiration, Mitochondria & ATP Synthesis',
+    url: 'https://en.wikipedia.org/wiki/Cellular_respiration',
+    category: 'STEM & Life Sciences',
+    subject: 'Biology & Biochemistry',
+    description: 'Comprehensive encyclopedic breakdown of metabolic pathways including glycolysis, the Krebs cycle, electron transport chain, and ATP production.',
+    gradeLevel: 'Grade 9-12 & AP Biology',
+    whyTeachersLoveIt: 'Clear structural breakdown of complex biochemical steps with metabolic energy equations.',
+    suggestedActivity: 'Have students draw a flowchart mapping glucose breakdown into net ATP yield during aerobic respiration.',
+    extractSummary: 'Cellular respiration is a set of metabolic reactions and processes that take place in the cells of organisms to convert chemical energy from oxygen molecules or nutrients into adenosine triphosphate (ATP), and then release waste products.',
+    wikiSource: 'Wikipedia Open Science',
+    difficulty: 'Intermediate'
+  },
+  {
+    id: 'wiki-newton-laws',
+    title: "Newton's Laws of Motion & Orbital Mechanics",
+    url: 'https://en.wikibooks.org/wiki/High_School_Physics/Forces',
+    category: 'STEM & Physical Sciences',
+    subject: 'Physics & Mechanics',
+    description: 'Physics handbook reference covering fundamental kinematics, force vectors, momentum conservation, and satellite motion.',
+    gradeLevel: 'Grade 8-12',
+    whyTeachersLoveIt: 'Presents vector equations alongside practical engineering applications in automotive and aerospace design.',
+    suggestedActivity: 'Set up a ramp and friction cart experiment to calculate F = ma across varying payload masses.',
+    extractSummary: "Newton's laws of motion are three laws that describe the relationship between the motion of an object and the forces acting on it. The first law defines inertia, the second relates force to mass and acceleration (F = ma), and the third asserts equal and opposite forces.",
+    wikiSource: 'Wikibooks Open Textbooks',
+    difficulty: 'Intermediate'
+  },
+  {
+    id: 'wiki-plate-tectonics',
+    title: 'Plate Tectonics, Seismic Waves & Mountain Building',
+    url: 'https://en.wikipedia.org/wiki/Plate_tectonics',
+    category: 'Environmental & Earth Science',
+    subject: 'Geology & Physical Geography',
+    description: 'Geological reference manual detailing lithospheric plates, mantle convection currents, subduction zones, and earthquake fault lines.',
+    gradeLevel: 'Grade 6-12',
+    whyTeachersLoveIt: 'High-impact global tectonic boundary maps and seismic velocity charts for interactive earth science units.',
+    suggestedActivity: 'Analyze cross-sectional diagrams to model oceanic-continental convergent plate collisions.',
+    extractSummary: "Plate tectonics is a scientific theory that explains how major landforms are created as a result of Earth's subterranean movements. The theory, which solidified in the 1960s, transformed the earth sciences by explaining continental drift.",
+    wikiSource: 'Wikipedia Open Earth Science',
+    difficulty: 'Beginner'
+  },
+  {
+    id: 'wiki-silk-road',
+    title: 'The Silk Road & Ancient Afro-Eurasian Trade Networks',
+    url: 'https://en.wikipedia.org/wiki/Silk_Road',
+    category: 'World History & Humanities',
+    subject: 'World History & Geography',
+    description: 'Historical reference document examining maritime and overland commerce routes connecting East Asia, the Middle East, and Europe.',
+    gradeLevel: 'Grade 7-12',
+    whyTeachersLoveIt: 'Rich primary source merchant logs and cartographic maps showing cultural, religious, and technological diffusion.',
+    suggestedActivity: 'Assign small study groups to track commodities (silk, paper, tea, spices) across key Silk Road hubs.',
+    extractSummary: 'The Silk Road was an ancient network of Eurasian trade routes active from the Han dynasty until the Ottoman Empire banned trade with the West. It played a central role in facilitating cultural, political, and economic interactions.',
+    wikiSource: 'Wikipedia Open History',
+    difficulty: 'Beginner'
+  },
+  {
+    id: 'wiki-linear-algebra',
+    title: 'Linear Algebra: Matrix Transformations & Eigenspaces',
+    url: 'https://en.wikibooks.org/wiki/Linear_Algebra',
+    category: 'Mathematics & Computing',
+    subject: 'Higher Mathematics',
+    description: 'Open textbook module covering matrix operations, systems of linear equations, vector spaces, dot products, and eigenvalues.',
+    gradeLevel: 'Grade 11-12 & University',
+    whyTeachersLoveIt: 'Directly connects abstract matrix transformations to computer graphics rendering and machine learning.',
+    suggestedActivity: 'Solve a 3x3 linear system representing economic input-output models using matrix row reduction.',
+    extractSummary: 'Linear algebra is the branch of mathematics concerning linear equations, linear functions, and their representations through matrices and vector spaces. It is central to almost all areas of mathematics and computer science.',
+    wikiSource: 'Wikibooks Open Mathematics',
+    difficulty: 'Advanced'
+  },
+  {
+    id: 'wiki-shakespeare',
+    title: 'Shakespearean Tragedy, Rhetoric & Poetic Meter',
+    url: 'https://en.wikipedia.org/wiki/Shakespearean_tragedy',
+    category: 'Languages & Literature',
+    subject: 'English & World Literature',
+    description: 'Literary reference analyzing dramatic structure, soliloquies, blank verse, iambic pentameter, and Elizabethan staging.',
+    gradeLevel: 'Grade 8-12',
+    whyTeachersLoveIt: 'Side-by-side original play texts with modern prose annotations and thematic breakdowns.',
+    suggestedActivity: 'Annotate a famous soliloquy to identify iambic rhythm, metaphors, and rhetorical devices.',
+    extractSummary: 'Shakespearean tragedy is the designation given to most tragedies written by William Shakespeare. Features include a tragic hero of noble stature, a tragic flaw (hubris), internal conflict, and dramatic catharsis.',
+    wikiSource: 'Wikipedia Open Humanities',
+    difficulty: 'Intermediate'
+  },
+  {
+    id: 'wiki-human-rights',
+    title: 'Universal Declaration of Human Rights & Global Civics',
+    url: 'https://en.wikisource.org/wiki/Universal_Declaration_of_Human_Rights',
+    category: 'World History & Humanities',
+    subject: 'Civics & International Law',
+    description: 'Primary historical document repository and commentary on the 1948 UN Declaration, civil liberties, and international law.',
+    gradeLevel: 'Grade 7-12',
+    whyTeachersLoveIt: 'Unfiltered primary document text that fosters critical debate on global rights, responsibilities, and governance.',
+    suggestedActivity: 'Compare specific articles of the UN Declaration with local constitutional civil rights charters.',
+    extractSummary: 'The Universal Declaration of Human Rights (UDHR) is an international document adopted by the United Nations General Assembly that enshrines the rights and freedoms of all human beings.',
+    wikiSource: 'Wikisource Open Primary Documents',
+    difficulty: 'Beginner'
+  },
+  {
+    id: 'wiki-ecosystems',
+    title: 'Ecosystem Energy Pyramids & Climate Feedback Loops',
+    url: 'https://en.wikipedia.org/wiki/Ecological_pyramid',
+    category: 'Environmental & Earth Science',
+    subject: 'Ecology & Environmental Science',
+    description: 'Ecological reference on trophic levels, biomass transfer, the carbon cycle, and climate feedback mechanisms.',
+    gradeLevel: 'Grade 6-12',
+    whyTeachersLoveIt: 'Quantitative biomass flow charts illustrating the 10% ecological energy transfer rule.',
+    suggestedActivity: 'Construct a food web diagram and calculate biomass lost between primary producers and apex predators.',
+    extractSummary: 'An ecological pyramid is a graphical representation designed to show the biomass or bio productivity at each trophic level in a given ecosystem.',
+    wikiSource: 'Wikipedia Open Science',
+    difficulty: 'Beginner'
+  },
+  {
+    id: 'wiki-data-structures',
+    title: 'Data Structures, Binary Trees & Algorithm Complexity',
+    url: 'https://en.wikibooks.org/wiki/A-level_Computing/AQA/Computer_Components,_General_Computing_Concepts,_Theoretical_Instruction/Data_Structures',
+    category: 'Mathematics & Computing',
+    subject: 'Computer Science',
+    description: 'Open computing reference covering arrays, linked lists, binary search trees, hash tables, and Big-O notation.',
+    gradeLevel: 'Grade 9-12 & AP Computer Science',
+    whyTeachersLoveIt: 'Clean pseudocode and Python/Java code examples designed for secondary computer science courses.',
+    suggestedActivity: 'Implement a binary search algorithm and compare its time complexity against a linear scan.',
+    extractSummary: 'In computer science, a data structure is a data organization, management, and storage format that enables efficient access and modification. More precisely, a data structure is a collection of data values and relationships.',
+    wikiSource: 'Wikibooks Open Computing',
+    difficulty: 'Intermediate'
+  },
+  {
+    id: 'wiki-organic-chemistry',
+    title: 'Organic Chemistry: Functional Groups & Reactions',
+    url: 'https://en.wikipedia.org/wiki/Organic_chemistry',
+    category: 'STEM & Physical Sciences',
+    subject: 'Chemistry',
+    description: 'Detailed chemical reference manual covering hydrocarbons, functional groups, reaction mechanisms, and stereochemistry.',
+    gradeLevel: 'Grade 11-12 & AP Chemistry',
+    whyTeachersLoveIt: 'Includes molecular structure visualizers and electron-pushing reaction mechanism diagrams.',
+    suggestedActivity: 'Build physical molecular models of structural isomers and identify functional groups in common items.',
+    extractSummary: 'Organic chemistry is a branch of chemistry that studies the structure, properties and reactions of organic compounds, which contain carbon in covalent bonding.',
+    wikiSource: 'Wikipedia Open Chemistry',
+    difficulty: 'Advanced'
+  },
+  {
+    id: 'wiki-industrial-revolution',
+    title: 'The Industrial Revolution & Technological Evolution',
+    url: 'https://en.wikipedia.org/wiki/Industrial_Revolution',
+    category: 'World History & Humanities',
+    subject: 'History & Economics',
+    description: 'Comprehensive history module examining steam engine technology, factory urbanization, labor reform, and economic shifts.',
+    gradeLevel: 'Grade 8-12',
+    whyTeachersLoveIt: 'Rich primary source economic charts, worker diaries, and early patent drawings.',
+    suggestedActivity: 'Hold a classroom debate analyzing the economic gains versus human social costs of rapid industrialization.',
+    extractSummary: 'The Industrial Revolution was the transition to new manufacturing processes in Great Britain, continental Europe, and the United States, that occurred during the period from around 1760 to about 1820–1840.',
+    wikiSource: 'Wikipedia Open History',
+    difficulty: 'Intermediate'
+  },
+  {
+    id: 'wiki-udl-framework',
+    title: 'Universal Design for Learning (UDL) & Differentiated Scaffolding',
+    url: 'https://en.wikiversity.org/wiki/Universal_Design_for_Learning',
+    category: 'Pedagogy & SEN',
+    subject: 'Inclusive Pedagogy',
+    description: 'Open educational guide detailing multi-modal representation, accessible learning options, and scaffolding strategies for diverse learners.',
+    gradeLevel: 'Teacher Professional Development',
+    whyTeachersLoveIt: 'Practical strategy checklists to adapt standard lesson units for neurodiverse students.',
+    suggestedActivity: 'Audit a current lesson unit to add three alternative choices for students to demonstrate subject mastery.',
+    extractSummary: 'Universal Design for Learning (UDL) is a framework to optimize teaching based on scientific insights into how humans learn. It aims to reduce barriers and increase learning opportunities for all pupils.',
+    wikiSource: 'Wikiversity Free Learning Modules',
+    difficulty: 'Beginner'
+  }
+];
 
 export default function GlobalResources() {
   const { profile } = useAuth();
@@ -131,7 +317,177 @@ export default function GlobalResources() {
   // Instant live filter states
   const [searchFilter, setSearchFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
-  const [contentTypeFilter, setContentTypeFilter] = useState<'all' | 'resources' | 'books'>('all');
+  const [contentTypeFilter, setContentTypeFilter] = useState<'all' | 'resources' | 'books' | 'wikilibrary'>('all');
+
+  // WikiLibrary Educational Reference Hub States
+  const [wikiSearchQuery, setWikiSearchQuery] = useState('');
+  const [wikiSearchResults, setWikiSearchResults] = useState<Array<{ title: string; snippet: string; pageid: number }>>([]);
+  const [isSearchingWiki, setIsSearchingWiki] = useState(false);
+  const [selectedWikiCategory, setSelectedWikiCategory] = useState<string>('All');
+  const [selectedWikiArticleModal, setSelectedWikiArticleModal] = useState<{
+    id?: string;
+    title: string;
+    extract: string;
+    url: string;
+    category?: string;
+    subject?: string;
+    gradeLevel?: string;
+    whyTeachersLoveIt?: string;
+    suggestedActivity?: string;
+    wikiSource?: string;
+  } | null>(null);
+  const [isLoadingWikiSummary, setIsLoadingWikiSummary] = useState(false);
+
+  const handleSearchWikipedia = async (q: string) => {
+    if (!q.trim()) return;
+    setIsSearchingWiki(true);
+    try {
+      const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(q)}&utf8=1&format=json&origin=*`);
+      const data = await res.json();
+      if (data && data.query && data.query.search) {
+        setWikiSearchResults(data.query.search);
+      } else {
+        setWikiSearchResults([]);
+      }
+    } catch (err) {
+      console.error("Wikipedia search error:", err);
+      setWikiSearchResults([]);
+    } finally {
+      setIsSearchingWiki(false);
+    }
+  };
+
+  const handleOpenWikiArticleSummary = async (articleTitle: string, defaultUrl?: string) => {
+    setIsLoadingWikiSummary(true);
+    try {
+      const res = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(articleTitle)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedWikiArticleModal({
+          title: data.title || articleTitle,
+          extract: data.extract || 'No extract summary available.',
+          url: data.content_urls?.desktop?.page || defaultUrl || `https://en.wikipedia.org/wiki/${encodeURIComponent(articleTitle)}`,
+          category: 'Wikipedia Live Article',
+          subject: 'General Knowledge',
+          gradeLevel: 'K-12 & Higher Ed',
+          whyTeachersLoveIt: 'Instant peer-curated encyclopedic reference with structured overview & citations.',
+          suggestedActivity: 'Have students extract 3 key facts and citations for their research project.',
+          wikiSource: 'Wikipedia Live Reference'
+        });
+      } else {
+        setSelectedWikiArticleModal({
+          title: articleTitle,
+          extract: 'Summary preview currently unavailable. Click "Open Full Article" to read the complete entry.',
+          url: defaultUrl || `https://en.wikipedia.org/wiki/${encodeURIComponent(articleTitle)}`,
+          category: 'Wikipedia Live Article',
+          subject: 'General Knowledge',
+          gradeLevel: 'K-12 & Higher Ed',
+          whyTeachersLoveIt: 'Peer-reviewed open educational reference.',
+          suggestedActivity: 'Use as supplementary reading for classroom research.',
+          wikiSource: 'Wikipedia Open Reference'
+        });
+      }
+    } catch (err) {
+      console.error("Error fetching Wiki summary:", err);
+      setSelectedWikiArticleModal({
+        title: articleTitle,
+        extract: 'Error loading article summary. Please use the direct link to access the live article on Wikipedia.',
+        url: defaultUrl || `https://en.wikipedia.org/wiki/${encodeURIComponent(articleTitle)}`,
+        category: 'Wikipedia Live Article',
+        subject: 'General Knowledge',
+        gradeLevel: 'K-12 & Higher Ed',
+        whyTeachersLoveIt: 'Peer-reviewed open educational reference.',
+        suggestedActivity: 'Use as supplementary reading for classroom research.',
+        wikiSource: 'Wikipedia Open Reference'
+      });
+    } finally {
+      setIsLoadingWikiSummary(false);
+    }
+  };
+
+  const handleImportWikiArticleToMaterials = async (art: {
+    title: string;
+    extract?: string;
+    extractSummary?: string;
+    description?: string;
+    url: string;
+    category?: string;
+    subject?: string;
+    gradeLevel?: string;
+    whyTeachersLoveIt?: string;
+    suggestedActivity?: string;
+  }) => {
+    if (isStudent) {
+      alert("Permission Denied: Students are restricted from adding materials.");
+      return;
+    }
+
+    try {
+      const docId = `doc-wiki-${Date.now()}`;
+      const markdownContent = `# ${art.title}
+
+### 📖 WikiLibrary Open Educational Reference
+* **Source:** [Open Article on Wikipedia/Wikibooks](${art.url})
+* **Subject Focus:** ${art.subject || art.category || 'General Reference'}
+* **Suggested Grade/Class Levels:** ${art.gradeLevel || 'K-12 & Higher Ed'}
+
+---
+
+### 📝 Article Summary & Overview
+${art.extract || art.extractSummary || art.description || 'No extract summary available.'}
+
+---
+
+### 💡 Why Teachers Love It
+${art.whyTeachersLoveIt || 'Peer-reviewed open educational reference providing structured background knowledge and citations.'}
+
+---
+
+### 🎓 Suggested Classroom Activity
+${art.suggestedActivity || 'Assign students to read the summary, extract 3 core concepts, and construct a 5-minute presentation or mind map.'}
+
+---
+*Imported via EduNexus WikiLibrary Educational Reference Hub.*`;
+
+      const newDoc: SavedDocument = {
+        id: docId,
+        title: `📚 WikiRef: ${art.title}`,
+        docType: 'lesson-notes',
+        curriculum: 'standard',
+        subject: art.subject || art.category || 'General Knowledge',
+        classLevel: art.gradeLevel || 'K-12',
+        topic: art.title,
+        subTopic: 'WikiLibrary Article',
+        duration: 'N/A',
+        content: markdownContent,
+        createdAt: new Date().toISOString(),
+        lastModified: new Date().toISOString(),
+        tags: ['WikiLibrary', 'Educational Reference', 'Imported']
+      };
+
+      await setDoc(doc(db, 'documents', docId), cleanUndefined(compressObject(newDoc)));
+
+      try {
+        const existingOffline = JSON.parse(localStorage.getItem('edunexus_my_materials') || '[]');
+        existingOffline.unshift({
+          id: docId,
+          fileName: `📚 WikiRef: ${art.title}`,
+          fileType: 'wiki',
+          category: 'WikiLibrary Reference',
+          subject: art.subject || art.category || 'General Reference',
+          uploadedAt: new Date().toISOString(),
+          url: art.url
+        });
+        localStorage.setItem('edunexus_my_materials', JSON.stringify(existingOffline));
+      } catch (e) {}
+
+      setSavedResourceUrls(prev => [...prev, art.url]);
+      alert(`"${art.title}" has been saved to your Lesson Materials!`);
+    } catch (err) {
+      console.error("Error importing Wiki article to materials:", err);
+      alert(`"${art.title}" saved to local lesson materials!`);
+    }
+  };
   const [sortBy, setSortBy] = useState<'newest' | 'alphabetical' | 'popularity'>('newest');
   const [selectedDifficulties, setSelectedDifficulties] = useState<DifficultyLevel[]>([]);
   const [isDifficultyDropdownOpen, setIsDifficultyDropdownOpen] = useState(false);
@@ -649,9 +1005,6 @@ ${resource.suggestedActivity}
 
       await setDoc(doc(db, 'documents', docId), cleanUndefined(compressObject(newDoc)));
 
-      // Trigger automated backup to Google Drive if enabled
-      triggerAutoBackupIfEnabled(newDoc);
-
       // Create initial version
       const initialVersionId = `v-1-${Date.now()}`;
       const initialVersion = {
@@ -725,7 +1078,6 @@ ${chapterPreviews}
       };
 
       await setDoc(doc(db, 'documents', docId), cleanUndefined(compressObject(newDoc)));
-      triggerAutoBackupIfEnabled(newDoc);
 
       const initialVersionId = `v-1-${Date.now()}`;
       const initialVersion = {
@@ -748,134 +1100,178 @@ ${chapterPreviews}
     }
   };
 
-  // Compute live filtered resources and books
+  // Compute live filtered resources, books, and wiki articles with useMemo for fast rendering
   const filterTerm = searchFilter.trim().toLowerCase();
 
-  const rawFilteredResources = resources.filter(res => {
-    if (contentTypeFilter === 'books') return false;
+  const filteredResources = useMemo(() => {
+    const raw = resources.filter(res => {
+      if (contentTypeFilter === 'books') return false;
 
-    if (categoryFilter !== 'All') {
-      const typeLower = res.type.toLowerCase();
-      const catLower = res.category.toLowerCase();
-      const descLower = res.description.toLowerCase();
+      if (categoryFilter !== 'All') {
+        const typeLower = res.type.toLowerCase();
+        const descLower = res.description.toLowerCase();
 
-      if (categoryFilter === 'PDFs') {
-        const isPdf = typeLower.includes('pdf') || typeLower.includes('worksheet') || typeLower.includes('printable') || descLower.includes('pdf') || descLower.includes('worksheet') || descLower.includes('printable');
-        if (!isPdf) return false;
-      } else if (categoryFilter === 'Interactive') {
-        const isInteractive = typeLower.includes('interactive') || typeLower.includes('sim') || typeLower.includes('game') || descLower.includes('interactive') || descLower.includes('simulation');
-        if (!isInteractive) return false;
-      } else if (categoryFilter === 'Videos') {
-        const isVideo = typeLower.includes('video') || typeLower.includes('audio') || typeLower.includes('media') || descLower.includes('video') || descLower.includes('audio') || descLower.includes('podcast');
-        if (!isVideo) return false;
-      } else if (categoryFilter === 'Lesson Plans') {
-        const isLesson = typeLower.includes('lesson') || typeLower.includes('plan') || typeLower.includes('guide') || descLower.includes('lesson plan') || descLower.includes('strategy');
-        if (!isLesson) return false;
-      } else if (categoryFilter === 'Books') {
-        const isBook = typeLower.includes('book') || typeLower.includes('reading') || typeLower.includes('article') || descLower.includes('book') || descLower.includes('literature');
-        if (!isBook) return false;
+        if (categoryFilter === 'PDFs') {
+          const isPdf = typeLower.includes('pdf') || typeLower.includes('worksheet') || typeLower.includes('printable') || descLower.includes('pdf') || descLower.includes('worksheet') || descLower.includes('printable');
+          if (!isPdf) return false;
+        } else if (categoryFilter === 'Interactive') {
+          const isInteractive = typeLower.includes('interactive') || typeLower.includes('sim') || typeLower.includes('game') || descLower.includes('interactive') || descLower.includes('simulation');
+          if (!isInteractive) return false;
+        } else if (categoryFilter === 'Videos') {
+          const isVideo = typeLower.includes('video') || typeLower.includes('audio') || typeLower.includes('media') || descLower.includes('video') || descLower.includes('audio') || descLower.includes('podcast');
+          if (!isVideo) return false;
+        } else if (categoryFilter === 'Lesson Plans') {
+          const isLesson = typeLower.includes('lesson') || typeLower.includes('plan') || typeLower.includes('guide') || descLower.includes('lesson plan') || descLower.includes('strategy');
+          if (!isLesson) return false;
+        } else if (categoryFilter === 'Books') {
+          const isBook = typeLower.includes('book') || typeLower.includes('reading') || typeLower.includes('article') || descLower.includes('book') || descLower.includes('literature');
+          if (!isBook) return false;
+        }
       }
-    }
 
-    if (selectedDifficulties.length > 0) {
-      const diff = getItemDifficulty(res);
-      if (!selectedDifficulties.includes(diff)) return false;
-    }
-
-    if (showOfflineOnly) {
-      if (!offlineDownloadedKeys.includes(res.url)) return false;
-    }
-
-    if (onlyAiRecommended) {
-      const rec = getAiRecommendationInfo(res.title, res.category, res.description, res.type);
-      if (!rec) return false;
-    }
-
-    if (!filterTerm) return true;
-    return (
-      res.title.toLowerCase().includes(filterTerm) ||
-      res.category.toLowerCase().includes(filterTerm) ||
-      res.type.toLowerCase().includes(filterTerm) ||
-      res.description.toLowerCase().includes(filterTerm) ||
-      res.whyTeachersLoveIt.toLowerCase().includes(filterTerm) ||
-      res.suggestedActivity.toLowerCase().includes(filterTerm) ||
-      res.gradeLevel.toLowerCase().includes(filterTerm)
-    );
-  });
-
-  const allAvailableBooks = [...customBooks, ...OPEN_BOOKS_CATALOG];
-  const rawFilteredBooks = allAvailableBooks.filter(book => {
-    if (contentTypeFilter === 'resources') return false;
-
-    if (categoryFilter !== 'All') {
-      if (categoryFilter === 'Interactive' || categoryFilter === 'Videos') {
-        return false;
+      if (selectedDifficulties.length > 0) {
+        const diff = getItemDifficulty(res);
+        if (!selectedDifficulties.includes(diff)) return false;
       }
-      if (categoryFilter === 'Lesson Plans') {
-        const isLesson = book.category.toLowerCase().includes('lesson') || book.summary.toLowerCase().includes('lesson') || book.subject.toLowerCase().includes('lesson');
-        if (!isLesson) return false;
+
+      if (showOfflineOnly) {
+        if (!offlineDownloadedKeys.includes(res.url)) return false;
       }
-    }
 
-    if (selectedDifficulties.length > 0) {
-      const diff = getItemDifficulty(book);
-      if (!selectedDifficulties.includes(diff)) return false;
-    }
+      if (onlyAiRecommended) {
+        const rec = getAiRecommendationInfo(res.title, res.category, res.description, res.type);
+        if (!rec) return false;
+      }
 
-    if (showOfflineOnly) {
-      if (!offlineDownloadedKeys.includes(book.id)) return false;
-    }
+      if (!filterTerm) return true;
+      return (
+        res.title.toLowerCase().includes(filterTerm) ||
+        res.category.toLowerCase().includes(filterTerm) ||
+        res.type.toLowerCase().includes(filterTerm) ||
+        res.description.toLowerCase().includes(filterTerm) ||
+        res.whyTeachersLoveIt.toLowerCase().includes(filterTerm) ||
+        res.suggestedActivity.toLowerCase().includes(filterTerm) ||
+        res.gradeLevel.toLowerCase().includes(filterTerm)
+      );
+    });
 
-    if (onlyAiRecommended) {
-      const rec = getAiRecommendationInfo(book.title, book.subject, book.summary, book.author);
-      if (!rec) return false;
-    }
+    return [...raw].sort((a, b) => {
+      if (sortBy === 'alphabetical') {
+        return a.title.localeCompare(b.title);
+      }
+      if (sortBy === 'popularity') {
+        const getPopularityScore = (item: ResourceResult) => {
+          let score = 0;
+          const lower = (item.title + ' ' + item.description + ' ' + item.category + ' ' + item.type + ' ' + item.whyTeachersLoveIt).toLowerCase();
+          if (lower.includes('phet') || lower.includes('khan academy') || lower.includes('nasa') || lower.includes('smithsonian')) score += 50;
+          if (lower.includes('interactive') || lower.includes('simulation') || lower.includes('openstax')) score += 30;
+          if (lower.includes('lesson plan') || lower.includes('worksheet') || lower.includes('lab')) score += 20;
+          if (lower.includes('stem') || lower.includes('math') || lower.includes('science')) score += 10;
+          return score;
+        };
+        return getPopularityScore(b) - getPopularityScore(a);
+      }
+      return 0;
+    });
+  }, [resources, contentTypeFilter, categoryFilter, selectedDifficulties, showOfflineOnly, offlineDownloadedKeys, onlyAiRecommended, filterTerm, sortBy]);
 
-    if (!filterTerm) return true;
-    return (
-      book.title.toLowerCase().includes(filterTerm) ||
-      book.author.toLowerCase().includes(filterTerm) ||
-      book.subject.toLowerCase().includes(filterTerm) ||
-      book.category.toLowerCase().includes(filterTerm) ||
-      book.summary.toLowerCase().includes(filterTerm) ||
-      book.gradeLevel.toLowerCase().includes(filterTerm)
-    );
-  });
+  const filteredBooks = useMemo(() => {
+    const allAvailableBooks = [...customBooks, ...OPEN_BOOKS_CATALOG];
+    const raw = allAvailableBooks.filter(book => {
+      if (contentTypeFilter === 'resources') return false;
 
-  // Apply sorting ('newest', 'alphabetical', 'popularity')
-  const filteredResources = [...rawFilteredResources].sort((a, b) => {
-    if (sortBy === 'alphabetical') {
-      return a.title.localeCompare(b.title);
-    }
-    if (sortBy === 'popularity') {
-      const getPopularityScore = (res: ResourceResult) => {
-        let score = 0;
-        const lower = (res.title + ' ' + res.description + ' ' + res.category + ' ' + res.type + ' ' + res.whyTeachersLoveIt).toLowerCase();
-        if (lower.includes('phet') || lower.includes('khan academy') || lower.includes('nasa') || lower.includes('smithsonian')) score += 50;
-        if (lower.includes('interactive') || lower.includes('simulation') || lower.includes('openstax')) score += 30;
-        if (lower.includes('lesson plan') || lower.includes('worksheet') || lower.includes('lab')) score += 20;
-        if (lower.includes('stem') || lower.includes('math') || lower.includes('science')) score += 10;
-        return score;
-      };
-      return getPopularityScore(b) - getPopularityScore(a);
-    }
-    return 0; // 'newest' keeps original loaded array order
-  });
+      if (categoryFilter !== 'All') {
+        if (categoryFilter === 'Interactive' || categoryFilter === 'Videos') {
+          return false;
+        }
+        if (categoryFilter === 'Lesson Plans') {
+          const isLesson = book.category.toLowerCase().includes('lesson') || book.summary.toLowerCase().includes('lesson') || book.subject.toLowerCase().includes('lesson');
+          if (!isLesson) return false;
+        }
+      }
 
-  const filteredBooks = [...rawFilteredBooks].sort((a, b) => {
-    if (sortBy === 'alphabetical') {
-      return a.title.localeCompare(b.title);
-    }
-    if (sortBy === 'popularity') {
-      const getBookPopularity = (book: OpenBook) => {
-        let score = (book.gutenbergId ? 100 : 50) + Math.min(book.pageCount, 500);
-        if (book.category === 'Literature & Classics' || book.category === 'STEM & Textbooks') score += 40;
-        return score;
-      };
-      return getBookPopularity(b) - getBookPopularity(a);
-    }
-    return 0; // 'newest' keeps default catalog order
-  });
+      if (selectedDifficulties.length > 0) {
+        const diff = getItemDifficulty(book);
+        if (!selectedDifficulties.includes(diff)) return false;
+      }
+
+      if (showOfflineOnly) {
+        if (!offlineDownloadedKeys.includes(book.id)) return false;
+      }
+
+      if (onlyAiRecommended) {
+        const rec = getAiRecommendationInfo(book.title, book.subject, book.summary, book.author);
+        if (!rec) return false;
+      }
+
+      if (!filterTerm) return true;
+      return (
+        book.title.toLowerCase().includes(filterTerm) ||
+        book.author.toLowerCase().includes(filterTerm) ||
+        book.subject.toLowerCase().includes(filterTerm) ||
+        book.category.toLowerCase().includes(filterTerm) ||
+        book.summary.toLowerCase().includes(filterTerm) ||
+        book.gradeLevel.toLowerCase().includes(filterTerm)
+      );
+    });
+
+    return [...raw].sort((a, b) => {
+      if (sortBy === 'alphabetical') {
+        return a.title.localeCompare(b.title);
+      }
+      if (sortBy === 'popularity') {
+        const getBookPopularity = (book: OpenBook) => {
+          let score = (book.gutenbergId ? 100 : 50) + Math.min(book.pageCount, 500);
+          if (book.category === 'Literature & Classics' || book.category === 'STEM & Textbooks') score += 40;
+          return score;
+        };
+        return getBookPopularity(b) - getBookPopularity(a);
+      }
+      return 0;
+    });
+  }, [customBooks, contentTypeFilter, categoryFilter, selectedDifficulties, showOfflineOnly, offlineDownloadedKeys, onlyAiRecommended, filterTerm, sortBy]);
+
+  const filteredWikiArticles = useMemo(() => {
+    return WIKILIBRARY_ARTICLES.filter((art) => {
+      if (contentTypeFilter === 'resources' || contentTypeFilter === 'books') return false;
+
+      if (selectedWikiCategory !== 'All') {
+        if (art.category !== selectedWikiCategory && !art.subject.toLowerCase().includes(selectedWikiCategory.toLowerCase())) {
+          return false;
+        }
+      }
+
+      if (categoryFilter !== 'All') {
+        const catLower = categoryFilter.toLowerCase();
+        const artLower = (art.category + ' ' + art.subject + ' ' + art.description).toLowerCase();
+        if (catLower === 'interactive' || catLower === 'videos') return false;
+        if (catLower === 'books' && !artLower.includes('wikibooks') && !artLower.includes('textbook')) return false;
+      }
+
+      if (selectedDifficulties.length > 0) {
+        if (!selectedDifficulties.includes(art.difficulty)) return false;
+      }
+
+      if (showOfflineOnly) {
+        if (!offlineDownloadedKeys.includes(art.url)) return false;
+      }
+
+      if (!filterTerm) return true;
+      return (
+        art.title.toLowerCase().includes(filterTerm) ||
+        art.category.toLowerCase().includes(filterTerm) ||
+        art.subject.toLowerCase().includes(filterTerm) ||
+        art.description.toLowerCase().includes(filterTerm) ||
+        art.extractSummary.toLowerCase().includes(filterTerm) ||
+        art.whyTeachersLoveIt.toLowerCase().includes(filterTerm)
+      );
+    }).sort((a, b) => {
+      if (sortBy === 'alphabetical') {
+        return a.title.localeCompare(b.title);
+      }
+      return 0;
+    });
+  }, [contentTypeFilter, selectedWikiCategory, categoryFilter, selectedDifficulties, showOfflineOnly, offlineDownloadedKeys, filterTerm, sortBy]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 animate-fadeIn space-y-8" id="global-resources-tab">
@@ -1200,6 +1596,20 @@ ${chapterPreviews}
             >
               <BookOpen className="w-3.5 h-3.5" />
               <span>Open-Access Books ({filteredBooks.length})</span>
+            </motion.button>
+
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.94 }}
+              onClick={() => setContentTypeFilter('wikilibrary')}
+              className={`px-3 py-1 rounded-full text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                contentTypeFilter === 'wikilibrary'
+                  ? 'bg-sky-800 text-white shadow-xs'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              <Globe className="w-3.5 h-3.5 text-sky-600" />
+              <span>WikiLibrary Reference Hub ({filteredWikiArticles.length})</span>
             </motion.button>
 
             <motion.button
@@ -1694,8 +2104,291 @@ ${chapterPreviews}
               </div>
             )}
 
+            {/* WIKILIBRARY EDUCATIONAL REFERENCE SECTION */}
+            {(contentTypeFilter === 'all' || contentTypeFilter === 'wikilibrary') && (
+              <div className="space-y-6 pt-4 border-t border-slate-200/80">
+                {/* Header Banner */}
+                <div className="bg-gradient-to-br from-slate-900 via-sky-950 to-indigo-950 text-white rounded-3xl p-6 sm:p-8 shadow-md border border-sky-800/40 relative overflow-hidden space-y-4">
+                  <div className="absolute top-0 right-0 translate-x-8 -translate-y-8 w-64 h-64 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
+                  <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div className="space-y-2 max-w-2xl">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="bg-sky-500/20 text-sky-300 border border-sky-400/30 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full flex items-center gap-1.5">
+                          <Globe className="w-3.5 h-3.5 text-sky-300" />
+                          WikiLibrary Open Reference Knowledge Hub
+                        </span>
+                        <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full">
+                          Peer-Reviewed & Free Access
+                        </span>
+                      </div>
+                      <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight leading-snug">
+                        Educational Reference Articles & Lesson Supplement Hub
+                      </h2>
+                      <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                        Search millions of peer-curated encyclopedic topics, scientific articles, primary history documents, and open textbook modules. Supplement your lesson plans with reliable background knowledge and student inquiry guides.
+                      </p>
+                    </div>
+
+                    {/* Live Search Quick Box */}
+                    <div className="w-full md:w-80 bg-white/10 backdrop-blur-md border border-white/20 p-3.5 rounded-2xl space-y-2 shrink-0">
+                      <label className="text-[11px] font-extrabold uppercase tracking-wider text-sky-200 flex items-center gap-1.5">
+                        <Search className="w-3.5 h-3.5 text-sky-400" /> Live Wiki Reference Search
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={wikiSearchQuery}
+                          onChange={(e) => setWikiSearchQuery(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleSearchWikipedia(wikiSearchQuery); }}
+                          placeholder="Search Wikipedia (e.g. Mitosis, French Revolution)..."
+                          className="flex-1 bg-white/90 text-slate-900 placeholder:text-slate-500 text-xs font-semibold px-3 py-2 rounded-xl border border-white/40 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSearchWikipedia(wikiSearchQuery)}
+                          disabled={isSearchingWiki || !wikiSearchQuery.trim()}
+                          className="bg-sky-500 hover:bg-sky-600 disabled:bg-slate-700 text-white font-bold px-3 py-2 rounded-xl text-xs transition cursor-pointer flex items-center justify-center shrink-0"
+                        >
+                          {isSearchingWiki ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Wiki Category Topic Chips */}
+                  <div className="pt-3 border-t border-sky-800/60 flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] font-bold text-sky-200 mr-1 flex items-center gap-1">
+                      <Filter className="w-3 h-3 text-sky-400" /> Filter Topics:
+                    </span>
+                    {[
+                      'All',
+                      'STEM & Life Sciences',
+                      'STEM & Physical Sciences',
+                      'World History & Humanities',
+                      'Mathematics & Computing',
+                      'Languages & Literature',
+                      'Environmental & Earth Science',
+                      'Pedagogy & SEN'
+                    ].map((cat) => {
+                      const isActive = selectedWikiCategory === cat;
+                      return (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => setSelectedWikiCategory(cat)}
+                          className={`px-3 py-1 rounded-full text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                            isActive
+                              ? 'bg-sky-400 text-slate-950 font-black shadow-xs'
+                              : 'bg-white/10 hover:bg-white/20 text-sky-100 border border-white/10'
+                          }`}
+                        >
+                          <span>{cat === 'All' ? 'All Topics' : cat}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Live Wikipedia Search Results Bar */}
+                {wikiSearchResults.length > 0 && (
+                  <div className="bg-sky-50/80 border border-sky-200 rounded-2xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-sky-950 flex items-center gap-2">
+                        <Globe className="w-4 h-4 text-sky-600" /> Live Wikipedia Results for "{wikiSearchQuery}" ({wikiSearchResults.length})
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => { setWikiSearchResults([]); setWikiSearchQuery(''); }}
+                        className="text-xs text-sky-700 hover:text-sky-900 font-bold underline cursor-pointer"
+                      >
+                        Clear Search
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {wikiSearchResults.map((item) => (
+                        <div key={item.pageid} className="bg-white p-3.5 rounded-xl border border-sky-150 hover:border-sky-300 shadow-2xs space-y-2 flex flex-col justify-between">
+                          <div>
+                            <h4 className="text-xs font-bold text-slate-900 leading-snug">{item.title}</h4>
+                            <div
+                              className="text-[11px] text-slate-500 line-clamp-3 mt-1 leading-relaxed"
+                              dangerouslySetInnerHTML={{ __html: item.snippet }}
+                            />
+                          </div>
+                          <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenWikiArticleSummary(item.title)}
+                              className="text-[11px] font-bold text-sky-700 hover:text-sky-900 flex items-center gap-1 cursor-pointer"
+                            >
+                              <BookOpen className="w-3 h-3" /> Read Summary
+                            </button>
+                            <a
+                              href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.title)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[10px] text-slate-400 hover:text-slate-600 flex items-center gap-0.5"
+                            >
+                              Wikipedia <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Curated Educational Reference Articles Grid */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                    <h3 className="text-sm font-extrabold uppercase tracking-wider text-sky-950 flex items-center gap-2">
+                      <BookOpen className="w-4 h-4 text-sky-700" />
+                      <span>WikiLibrary Curated Reference Articles ({filteredWikiArticles.length})</span>
+                    </h3>
+                    <span className="text-xs text-slate-400 font-medium hidden sm:inline">Categorized for Lesson Planning & Inquiry</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {filteredWikiArticles.map((art, idx) => {
+                      const isSaved = savedResourceUrls.includes(art.url);
+                      const isOfflineSaved = offlineDownloadedKeys.includes(art.url);
+                      return (
+                        <motion.div
+                          key={art.id}
+                          initial={{ opacity: 0, y: 14 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.28, delay: Math.min(idx * 0.035, 0.22) }}
+                          className="bg-white border border-sky-100 hover:border-sky-300 hover:shadow-xl hover:-translate-y-1 transform transition-all duration-300 rounded-3xl p-5 flex flex-col justify-between group relative overflow-hidden"
+                        >
+                          <div className="space-y-3">
+                            {/* Header Pills */}
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <span className="text-[10px] uppercase font-bold tracking-wider text-sky-800 bg-sky-50 border border-sky-200 px-2.5 py-0.5 rounded-full">
+                                {art.category}
+                              </span>
+                              <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                <GraduationCap className="w-3 h-3 text-sky-600" /> {art.gradeLevel}
+                              </span>
+                            </div>
+
+                            {/* Article Title */}
+                            <h4 className="text-sm font-extrabold text-slate-800 leading-snug group-hover:text-sky-800 transition-colors">
+                              {art.title}
+                            </h4>
+
+                            {/* Wiki Source badge */}
+                            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-medium">
+                              <Globe className="w-3 h-3 text-sky-500 shrink-0" />
+                              <span>{art.wikiSource}</span>
+                              <span>•</span>
+                              <span>{art.subject}</span>
+                            </div>
+
+                            {/* Summary / Description */}
+                            <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed">
+                              {art.description || art.extractSummary}
+                            </p>
+
+                            {/* Why Teachers Love It & Classroom Activity Box */}
+                            <div className="bg-sky-50/50 p-3 rounded-2xl border border-sky-100/80 space-y-2 text-xs">
+                              <div>
+                                <span className="font-extrabold text-sky-900 flex items-center gap-1 mb-0.5">
+                                  <Lightbulb className="w-3.5 h-3.5 text-amber-500 shrink-0" /> Why Teachers Love It:
+                                </span>
+                                <p className="text-slate-600 leading-tight">{art.whyTeachersLoveIt}</p>
+                              </div>
+                              <div className="pt-1.5 border-t border-sky-100">
+                                <span className="font-extrabold text-[#5f6f52] flex items-center gap-1 mb-0.5">
+                                  <FileText className="w-3.5 h-3.5 text-blue-500 shrink-0" /> Classroom Activity:
+                                </span>
+                                <p className="text-slate-600 leading-tight">{art.suggestedActivity}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedWikiArticleModal({
+                                title: art.title,
+                                extract: art.extractSummary || art.description,
+                                url: art.url,
+                                category: art.category,
+                                subject: art.subject,
+                                gradeLevel: art.gradeLevel,
+                                whyTeachersLoveIt: art.whyTeachersLoveIt,
+                                suggestedActivity: art.suggestedActivity,
+                                wikiSource: art.wikiSource
+                              })}
+                              className="bg-sky-50 hover:bg-sky-100 text-sky-800 font-bold px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1 cursor-pointer"
+                            >
+                              <BookOpen className="w-3.5 h-3.5" /> Read Summary
+                            </button>
+
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleOfflineDownload({
+                                  idOrUrl: art.url,
+                                  type: 'resource',
+                                  title: art.title,
+                                  categoryOrSubject: art.category,
+                                  description: art.description,
+                                  resourceData: {
+                                    title: art.title,
+                                    url: art.url,
+                                    category: art.category,
+                                    type: art.wikiSource,
+                                    description: art.description,
+                                    gradeLevel: art.gradeLevel,
+                                    whyTeachersLoveIt: art.whyTeachersLoveIt,
+                                    suggestedActivity: art.suggestedActivity
+                                  }
+                                })}
+                                className={`p-1.5 rounded-xl text-xs transition cursor-pointer ${
+                                  isOfflineSaved ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                }`}
+                                title={isOfflineSaved ? 'Saved for offline access' : 'Save for offline access'}
+                              >
+                                {isOfflineSaved ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" /> : <HardDriveDownload className="w-3.5 h-3.5" />}
+                              </button>
+
+                              <a
+                                href={art.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition text-xs"
+                                title="Open Live Article in New Tab"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+
+                              {!isStudent && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleImportWikiArticleToMaterials(art)}
+                                  disabled={isSaved}
+                                  className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+                                    isSaved ? 'bg-emerald-50 text-emerald-700' : 'bg-sky-800 hover:bg-sky-900 text-white'
+                                  }`}
+                                >
+                                  {isSaved ? <BookmarkCheck className="w-3.5 h-3.5 text-emerald-600" /> : <BookmarkPlus className="w-3.5 h-3.5" />}
+                                  <span>{isSaved ? 'Saved' : 'Import'}</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* No results placeholder */}
-            {filteredResources.length === 0 && filteredBooks.length === 0 && (
+            {filteredResources.length === 0 && filteredBooks.length === 0 && filteredWikiArticles.length === 0 && (
               <div className="bg-white border border-slate-150 rounded-3xl p-10 text-center text-slate-500">
                 <Globe className="w-12 h-12 text-[#a9b388] mx-auto mb-4" />
                 <h3 className="text-base font-bold text-slate-800">No Matching Resources or Books Found</h3>
@@ -1921,6 +2614,116 @@ ${chapterPreviews}
           <span>{offlineDownloadNotification}</span>
         </div>
       )}
+
+      {/* WIKILIBRARY ARTICLE SUMMARY MODAL */}
+      <AnimatePresence>
+        {selectedWikiArticleModal && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 12 }}
+              className="bg-white border border-slate-200 shadow-2xl rounded-3xl max-w-2xl w-full overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              {/* Header */}
+              <div className="bg-gradient-to-r from-sky-950 via-slate-900 to-indigo-950 text-white p-6 flex items-start justify-between gap-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="bg-sky-500/20 text-sky-300 border border-sky-400/30 text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                      <Globe className="w-3 h-3 text-sky-300" /> WikiLibrary Reference
+                    </span>
+                    {selectedWikiArticleModal.category && (
+                      <span className="bg-white/10 text-slate-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                        {selectedWikiArticleModal.category}
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-lg font-black text-white leading-snug">
+                    {selectedWikiArticleModal.title}
+                  </h3>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedWikiArticleModal(null)}
+                  className="p-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-full transition cursor-pointer shrink-0"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-6 overflow-y-auto space-y-5 flex-1 text-slate-800 text-sm">
+                <div className="bg-sky-50/60 p-4 rounded-2xl border border-sky-100 space-y-2">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-sky-900 flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-sky-700" /> Article Extract & Summary
+                  </h4>
+                  <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                    {selectedWikiArticleModal.extract}
+                  </p>
+                </div>
+
+                {selectedWikiArticleModal.whyTeachersLoveIt && (
+                  <div className="bg-amber-50/60 p-4 rounded-2xl border border-amber-200/80 space-y-1">
+                    <h5 className="text-xs font-extrabold text-amber-900 flex items-center gap-1.5">
+                      <Lightbulb className="w-4 h-4 text-amber-600" /> Why Teachers Love It
+                    </h5>
+                    <p className="text-xs text-slate-700 leading-relaxed">
+                      {selectedWikiArticleModal.whyTeachersLoveIt}
+                    </p>
+                  </div>
+                )}
+
+                {selectedWikiArticleModal.suggestedActivity && (
+                  <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-200/80 space-y-1">
+                    <h5 className="text-xs font-extrabold text-emerald-950 flex items-center gap-1.5">
+                      <GraduationCap className="w-4 h-4 text-emerald-700" /> Suggested Classroom Activity
+                    </h5>
+                    <p className="text-xs text-slate-700 leading-relaxed">
+                      {selectedWikiArticleModal.suggestedActivity}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 flex-wrap">
+                <a
+                  href={selectedWikiArticleModal.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Open Full Article on Wiki
+                </a>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedWikiArticleModal(null)}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200/60 transition cursor-pointer"
+                  >
+                    Close
+                  </button>
+
+                  {!isStudent && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleImportWikiArticleToMaterials(selectedWikiArticleModal);
+                        setSelectedWikiArticleModal(null);
+                      }}
+                      className="bg-sky-800 hover:bg-sky-900 text-white font-extrabold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <BookmarkPlus className="w-4 h-4" /> Save to Materials
+                    </button>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
     </div>
   );
@@ -2490,6 +3293,56 @@ const getStaticFallbackResources = (query: string, subject: string, type: string
       gradeLevel: "All Grades (K-12)",
       whyTeachersLoveIt: "Provides concrete options for representation, expression, and engagement to support diverse student needs.",
       suggestedActivity: "Use the engagement guidelines checklist to add two alternative choices for students to express their understanding in this lesson."
+    },
+    {
+      title: "WikiLibrary Open Knowledge Hub (Wikipedia & Wikibooks Search)",
+      url: "https://en.wikipedia.org",
+      category: "WikiLibrary Open Reference",
+      type: "Reference Site",
+      description: "Direct live interface to Wikipedia, Wikibooks, and Wikimedia reference databases. Search millions of peer-curated encyclopedic topics, scientific articles, and open historical documents.",
+      gradeLevel: "All Grades (K-12 & Higher Ed)",
+      whyTeachersLoveIt: "Instant access to world knowledge with structured summaries, citation maps, and cross-disciplinary research links.",
+      suggestedActivity: "Use the WikiLibrary search to extract key background definitions and citations for student project research."
+    },
+    {
+      title: "Wikibooks Open Textbooks Library (WikiLibrary Collection)",
+      url: "https://en.wikibooks.org",
+      category: "WikiLibrary Open Reference",
+      type: "Worksheet",
+      description: "Open community textbook collection covering physics, world history, calculus, biology, computing, and environmental science.",
+      gradeLevel: "Grade 6-12 & University",
+      whyTeachersLoveIt: "Fully editable and downloadable open-access textbooks with chapter-by-chapter exercises.",
+      suggestedActivity: "Assign a Wikibooks chapter as supplementary reading for differentiated learning groups."
+    },
+    {
+      title: "Wikimedia Commons Open Educational Media Archive (WikiLibrary)",
+      url: "https://commons.wikimedia.org",
+      category: "WikiLibrary Open Reference",
+      type: "Interactive Simulator",
+      description: "Over 100 million freely usable educational images, diagrams, historical maps, anatomical charts, and scientific animations.",
+      gradeLevel: "All Grades",
+      whyTeachersLoveIt: "Goldmine for high-resolution visual aids, diagrams, and historical photographs to enhance lesson slides.",
+      suggestedActivity: "Download copyright-free scientific diagrams to embed in student lab worksheets."
+    },
+    {
+      title: "Wikisource Open Primary Document Repository (WikiLibrary)",
+      url: "https://en.wikisource.org",
+      category: "WikiLibrary Open Reference",
+      type: "Reference Site",
+      description: "Digital library of free-content primary source documents, speeches, treaties, historical letters, and classical literature.",
+      gradeLevel: "Grade 7-12",
+      whyTeachersLoveIt: "Essential primary sources for history and literature analysis without paywalls.",
+      suggestedActivity: "Have students analyze historical speeches or primary constitutional documents in small study circles."
+    },
+    {
+      title: "Wikiversity Free Interactive Courses (WikiLibrary)",
+      url: "https://en.wikiversity.org",
+      category: "WikiLibrary Open Reference",
+      type: "Lesson Plan",
+      description: "Open learning community devoted to educational materials, online learning projects, and research modules across all subjects.",
+      gradeLevel: "Grade 8-12 & Higher Ed",
+      whyTeachersLoveIt: "Flexible university-level and secondary learning tracks created by global educators.",
+      suggestedActivity: "Explore Wikiversity guided research activities to challenge advanced learners."
     }
   ];
 

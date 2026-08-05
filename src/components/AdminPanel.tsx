@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { UserRole, ActivityLog, UserOverride, SystemPolicies, AdminNotification } from '../types';
+import { UserRole, UserAccount, ActivityLog, UserOverride, SystemPolicies, AdminNotification } from '../types';
 import { 
   Users, 
   Shield, 
@@ -28,7 +28,8 @@ import {
   Server,
   Zap,
   RefreshCw,
-  Gauge
+  Gauge,
+  Globe
 } from 'lucide-react';
 import { collection, query, orderBy, limit, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -36,6 +37,8 @@ import FeedbackHub from './FeedbackHub';
 import ActivityHeatmap from './ActivityHeatmap';
 import TeacherActivityHeatmap from './TeacherActivityHeatmap';
 import SystemMonitorPanel from './SystemMonitorPanel';
+import SEODashboardTab from './SEODashboardTab';
+import AISystemAnalyzer from './AISystemAnalyzer';
 
 export default function AdminPanel() {
   const { 
@@ -54,7 +57,7 @@ export default function AdminPanel() {
   const [roleFilter, setRoleFilter] = useState<'all' | 'Teacher' | 'Student' | 'Parent' | 'Administrator' | 'AuthorizedStaff'>('all');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [adminTab, setAdminTab] = useState<'users' | 'notifications' | 'feedback' | 'logs' | 'pilot' | 'policies' | 'monitor'>('users');
+  const [adminTab, setAdminTab] = useState<'users' | 'notifications' | 'feedback' | 'logs' | 'pilot' | 'policies' | 'monitor' | 'seo' | 'analyzer'>('users');
   const [logsVisualTab, setLogsVisualTab] = useState<'overall' | 'teacher30'>('teacher30');
 
   // Live Platform Telemetry & Load Monitor states
@@ -311,10 +314,9 @@ export default function AdminPanel() {
   }, [adminTab]);
 
   const [pilotFeedback, setPilotFeedback] = useState<any[]>([]);
-  const [isPilotLoading, setIsPilotLoading] = useState(false);
+  const [isPilotLoading, setIsPilotLoading] = useState(true);
 
   useEffect(() => {
-    if (adminTab !== 'pilot') return;
     setIsPilotLoading(true);
     const feedbackRef = collection(db, 'pilotFeedbacks');
     
@@ -334,7 +336,7 @@ export default function AdminPanel() {
     });
 
     return () => unsubscribe();
-  }, [adminTab]);
+  }, []);
 
   const handleRoleChange = async (uid: string, nextRole: UserRole) => {
     if (uid === profile?.uid) {
@@ -410,6 +412,43 @@ export default function AdminPanel() {
     const e = email.toLowerCase().trim();
     return e === 'ojiambo.godfry@gmail.com' || e === 'godfreynexused@gmail.com';
   };
+
+  const getUserOnlineStatus = (u: UserAccount, currentUid?: string) => {
+    if (u.uid === currentUid) {
+      return { isOnline: true, label: 'Online Now (Self)', status: 'online' };
+    }
+    if (!u.lastActiveAt) {
+      return { isOnline: false, label: 'Offline', status: 'offline' };
+    }
+    const lastActiveMs = new Date(u.lastActiveAt).getTime();
+    if (isNaN(lastActiveMs)) {
+      return { isOnline: false, label: 'Offline', status: 'offline' };
+    }
+    const diffMs = Date.now() - lastActiveMs;
+    if (diffMs < 5 * 60 * 1000) { // Within 5 mins
+      return { isOnline: true, label: 'Online Now', status: 'online' };
+    } else if (diffMs < 30 * 60 * 1000) { // Within 30 mins
+      const mins = Math.max(1, Math.floor(diffMs / 60000));
+      return { isOnline: false, label: `Active ${mins}m ago`, status: 'recent' };
+    } else if (diffMs < 24 * 60 * 60 * 1000) {
+      const hours = Math.floor(diffMs / (3600 * 1000));
+      return { isOnline: false, label: `Last active ${hours}h ago`, status: 'offline' };
+    } else {
+      return { isOnline: false, label: 'Offline', status: 'offline' };
+    }
+  };
+
+  const onlineStats = React.useMemo(() => {
+    const onlineUsersList = allUsers.filter(u => getUserOnlineStatus(u, profile?.uid).isOnline);
+    return {
+      totalOnline: onlineUsersList.length,
+      teachersOnline: onlineUsersList.filter(u => u.role === 'Teacher').length,
+      studentsOnline: onlineUsersList.filter(u => u.role === 'Student').length,
+      parentsOnline: onlineUsersList.filter(u => u.role === 'Parent').length,
+      adminsOnline: onlineUsersList.filter(u => u.role === 'Administrator').length,
+      onlineUsersList,
+    };
+  }, [allUsers, profile?.uid]);
 
   const roleCounts = React.useMemo(() => {
     return {
@@ -569,7 +608,12 @@ export default function AdminPanel() {
           }`}
         >
           <ClipboardList className="w-4 h-4" />
-          <span>App Pilot & Assessment</span>
+          <span>Pilot Survey & Evaluation Feedback</span>
+          {pilotFeedback.length > 0 && (
+            <span className="ml-1 px-2 py-0.5 text-[10px] font-extrabold bg-indigo-600 text-white rounded-full">
+              {pilotFeedback.length}
+            </span>
+          )}
         </button>
 
         <button
@@ -594,6 +638,33 @@ export default function AdminPanel() {
         >
           <Gauge className="w-4 h-4" />
           <span>System Monitor & Quotas</span>
+        </button>
+
+        <button
+          onClick={() => setAdminTab('seo')}
+          className={`flex items-center gap-2 px-5 py-3 text-xs font-bold transition-all border-b-2 rounded-t-xl cursor-pointer ${
+            adminTab === 'seo'
+              ? 'border-emerald-600 text-emerald-700 bg-emerald-50/10'
+              : 'border-transparent text-slate-500 hover:text-emerald-700 hover:bg-slate-50'
+          }`}
+        >
+          <Globe className="w-4 h-4" />
+          <span>SEO & Search Visibility</span>
+        </button>
+
+        <button
+          onClick={() => setAdminTab('analyzer')}
+          className={`flex items-center gap-2 px-5 py-3 text-xs font-bold transition-all border-b-2 rounded-t-xl cursor-pointer ${
+            adminTab === 'analyzer'
+              ? 'border-cyan-600 text-cyan-700 bg-cyan-50/20 shadow-2xs'
+              : 'border-transparent text-slate-500 hover:text-cyan-700 hover:bg-slate-50'
+          }`}
+        >
+          <Cpu className="w-4 h-4 text-cyan-600 animate-pulse" />
+          <span>AI System Analyzer</span>
+          <span className="px-1.5 py-0.5 text-[9px] font-black bg-cyan-600 text-white rounded-full uppercase tracking-wider">
+            New
+          </span>
         </button>
       </div>
 
@@ -946,6 +1017,117 @@ export default function AdminPanel() {
             </div>
           )}
 
+          {/* Live Logged-In Users & Active Sessions Tracker */}
+          <div className="bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border border-slate-700/80 rounded-2xl p-5 md:p-6 text-white space-y-4 shadow-xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+            
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10 border-b border-slate-700/60 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-400">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-slate-900 animate-ping" />
+                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-slate-900" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-extrabold text-white">Live Logged-In Users & Active Sessions</h3>
+                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 font-mono font-bold text-xs">
+                      {onlineStats.totalOnline} Currently Logged In
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300">
+                    Real-time presence tracking of authenticated educator, student, parent, and admin sessions in Firestore.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="text-right text-xs font-mono">
+                  <span className="block text-slate-400 text-[10px] uppercase font-bold">Total Registered</span>
+                  <span className="text-white font-extrabold text-sm">{allUsers.length} Profiles</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Active Role Breakdown Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 relative z-10 text-xs">
+              <div className="bg-slate-800/80 border border-slate-700/80 p-3 rounded-xl flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-emerald-400" />
+                  <span className="text-slate-300 font-medium">Teachers</span>
+                </div>
+                <span className="font-extrabold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                  {onlineStats.teachersOnline} / {roleCounts.Teacher}
+                </span>
+              </div>
+
+              <div className="bg-slate-800/80 border border-slate-700/80 p-3 rounded-xl flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <GraduationCap className="w-4 h-4 text-blue-400" />
+                  <span className="text-slate-300 font-medium">Students</span>
+                </div>
+                <span className="font-extrabold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-md border border-blue-500/20">
+                  {onlineStats.studentsOnline} / {roleCounts.Student}
+                </span>
+              </div>
+
+              <div className="bg-slate-800/80 border border-slate-700/80 p-3 rounded-xl flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-purple-400" />
+                  <span className="text-slate-300 font-medium">Parents</span>
+                </div>
+                <span className="font-extrabold text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-md border border-purple-500/20">
+                  {onlineStats.parentsOnline} / {roleCounts.Parent}
+                </span>
+              </div>
+
+              <div className="bg-slate-800/80 border border-slate-700/80 p-3 rounded-xl flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-rose-400" />
+                  <span className="text-slate-300 font-medium">Admins</span>
+                </div>
+                <span className="font-extrabold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-md border border-rose-500/20">
+                  {onlineStats.adminsOnline} / {roleCounts.Administrator}
+                </span>
+              </div>
+            </div>
+
+            {/* Active Online Users Strip */}
+            {onlineStats.totalOnline > 0 && (
+              <div className="pt-2 border-t border-slate-700/60 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Active Online Sessions:</span>
+                  <div className="flex -space-x-2 overflow-hidden">
+                    {onlineStats.onlineUsersList.map((u) => (
+                      <div 
+                        key={u.uid} 
+                        className="w-7 h-7 rounded-full bg-emerald-600 border-2 border-slate-900 flex items-center justify-center text-white text-[10px] font-extrabold uppercase shadow-sm"
+                        title={`${u.displayName} (${u.role}) - Online Now`}
+                      >
+                        {u.displayName.slice(0, 2)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {onlineStats.onlineUsersList.map((u) => (
+                    <span 
+                      key={u.uid}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-[11px] text-slate-200"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      <span className="font-bold">{u.displayName}</span>
+                      <span className="text-[9px] text-slate-400">({u.role})</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Role explanation cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="border border-rose-200 bg-rose-50/20 p-4 rounded-xl space-y-1">
@@ -1131,32 +1313,51 @@ export default function AdminPanel() {
                         )}
                       </td>
                       <td className="py-4 px-4 text-center">
-                        {u.uid === profile?.uid ? (
-                          <span className="inline-flex items-center bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-full text-[10px] font-bold">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5" />
-                            Active (Self)
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleToggleSuspend(u.uid, !!u.suspended)}
-                            disabled={updatingId === u.uid}
-                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all cursor-pointer ${
-                              u.suspended
-                                ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                                : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                            } disabled:opacity-50`}
-                            title={u.suspended ? "Click to Activate" : "Click to Suspend"}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full ${u.suspended ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'}`} />
-                            <span>{u.suspended ? 'Suspended' : 'Active'}</span>
-                          </button>
-                        )}
+                        {(() => {
+                          const status = getUserOnlineStatus(u, profile?.uid);
+                          if (u.suspended) {
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleSuspend(u.uid, true)}
+                                disabled={updatingId === u.uid}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-all cursor-pointer"
+                                title="Account Suspended - Click to Reactivate"
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                                <span>Suspended</span>
+                              </button>
+                            );
+                          }
+
+                          if (status.isOnline) {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-full text-[10px] font-bold shadow-2xs">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                                <span>{status.label}</span>
+                              </span>
+                            );
+                          } else if (status.status === 'recent') {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-full text-[10px] font-semibold">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                <span>{status.label}</span>
+                              </span>
+                            );
+                          } else {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-600 border border-slate-200 px-2.5 py-1 rounded-full text-[10px] font-medium">
+                                <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                                <span>Offline</span>
+                              </span>
+                            );
+                          }
+                        })()}
                       </td>
                       <td className="py-4 px-4 text-slate-500">
-                        <span className="flex items-center gap-1.5">
+                        <span className="flex items-center gap-1.5 text-[11px]" title={u.lastActiveAt ? `Last active: ${new Date(u.lastActiveAt).toLocaleString()}` : 'No recent login recorded'}>
                           <Clock className="w-3.5 h-3.5 opacity-60" />
-                          {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : 'N/A'}
+                          <span>{u.createdAt ? new Date(u.createdAt).toLocaleDateString() : 'N/A'}</span>
                         </span>
                       </td>
                       <td className="py-4 px-4 text-right">
@@ -1378,6 +1579,110 @@ export default function AdminPanel() {
               <Cpu className="w-4.5 h-4.5 text-indigo-600" />
               AI Generation Engine Controls
             </h3>
+            
+            {/* Admin AI Model Strategy Control Card */}
+            <div className="border border-amber-300 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/40 p-5 rounded-2xl space-y-4 mb-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-black text-amber-950 dark:text-amber-100 flex items-center gap-2">
+                    <span>⚡ AI Image Engine Strategy & Fallback Control (Admin)</span>
+                  </h4>
+                  <p className="text-xs text-amber-800/90 dark:text-amber-200/90 mt-1">
+                    Select how image synthesis models (Emgen & Nano Banana) operate across the platform for all users.
+                  </p>
+                </div>
+                <span className="px-2.5 py-1 rounded-full bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 font-extrabold text-[10px] uppercase tracking-wider">
+                  Admin Global Policy
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                {/* Option 1: Nano Banana as Fallback for Emgen */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateSystemPolicies({
+                      ...systemPolicies,
+                      aiEngineMode: 'emgen_fallback_nanobanana'
+                    });
+                  }}
+                  className={`p-4 rounded-xl border text-left transition-all duration-200 cursor-pointer flex flex-col justify-between ${
+                    (systemPolicies.aiEngineMode || 'emgen_fallback_nanobanana') === 'emgen_fallback_nanobanana'
+                      ? 'border-amber-500 bg-white dark:bg-slate-900 ring-2 ring-amber-500/30 shadow-sm'
+                      : 'border-amber-200/80 dark:border-amber-800/60 bg-amber-100/40 dark:bg-amber-900/20 hover:bg-white dark:hover:bg-slate-900'
+                  }`}
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                      🍌 Nano Banana as Fallback for Emgen
+                    </span>
+                    {(systemPolicies.aiEngineMode || 'emgen_fallback_nanobanana') === 'emgen_fallback_nanobanana' && (
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                    Tries Emgen (High Quality) first. If Emgen fails or rate limits, automatically falls back to Nano Banana (Rapid) seamlessly. (Default for standard users)
+                  </p>
+                </button>
+
+                {/* Option 2: Use Emgen Only */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateSystemPolicies({
+                      ...systemPolicies,
+                      aiEngineMode: 'emgen_only'
+                    });
+                  }}
+                  className={`p-4 rounded-xl border text-left transition-all duration-200 cursor-pointer flex flex-col justify-between ${
+                    systemPolicies.aiEngineMode === 'emgen_only'
+                      ? 'border-amber-500 bg-white dark:bg-slate-900 ring-2 ring-amber-500/30 shadow-sm'
+                      : 'border-amber-200/80 dark:border-amber-800/60 bg-amber-100/40 dark:bg-amber-900/20 hover:bg-white dark:hover:bg-slate-900'
+                  }`}
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                      🎨 Use Emgen Only
+                    </span>
+                    {systemPolicies.aiEngineMode === 'emgen_only' && (
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                    Strictly forces high-resolution Emgen model for all visual outputs. Disables fallback to Nano Banana.
+                  </p>
+                </button>
+
+                {/* Option 3: Use Nano Banana Only */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateSystemPolicies({
+                      ...systemPolicies,
+                      aiEngineMode: 'nanobanana_only'
+                    });
+                  }}
+                  className={`p-4 rounded-xl border text-left transition-all duration-200 cursor-pointer flex flex-col justify-between ${
+                    systemPolicies.aiEngineMode === 'nanobanana_only'
+                      ? 'border-amber-500 bg-white dark:bg-slate-900 ring-2 ring-amber-500/30 shadow-sm'
+                      : 'border-amber-200/80 dark:border-amber-800/60 bg-amber-100/40 dark:bg-amber-900/20 hover:bg-white dark:hover:bg-slate-900'
+                  }`}
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                      🍌 Use Nano Banana Only
+                    </span>
+                    {systemPolicies.aiEngineMode === 'nanobanana_only' && (
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                    Strictly forces lightweight, ultra-rapid Nano Banana model for all visual outputs. Emgen is bypassed.
+                  </p>
+                </button>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="border border-slate-200 bg-slate-50/50 p-5 rounded-2xl space-y-3 flex flex-col justify-between">
                 <div className="flex justify-between items-start gap-2">
@@ -2059,6 +2364,14 @@ export default function AdminPanel() {
 
       {adminTab === 'monitor' && (
         <SystemMonitorPanel />
+      )}
+
+      {adminTab === 'seo' && (
+        <SEODashboardTab />
+      )}
+
+      {adminTab === 'analyzer' && (
+        <AISystemAnalyzer />
       )}
     </div>
   );

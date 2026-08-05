@@ -270,6 +270,9 @@ export function drawCanvasAnimation3D(
 ) {
   const query = `${topicStr} ${subjectStr}`.toLowerCase();
   const effectiveStyle = hudStyleOverride || (
+    query.includes('fertiliz') || query.includes('flower') || query.includes('angiosperm') || query.includes('ovule') ? '3d-flower' :
+    query.includes('digest') || query.includes('stomach') || query.includes('duodenum') || query.includes('enzyme') || query.includes('villi') ? '3d-digestion' :
+    query.includes('stamen') || query.includes('anther') || query.includes('sporangium') || query.includes('pollen') ? '3d-stamen' :
     query.includes('bio') || query.includes('plant') || query.includes('cell') || query.includes('leaf') || query.includes('life') ? '3d-dna' :
     query.includes('physic') || query.includes('atom') || query.includes('quantum') || query.includes('chemist') ? '3d-atom' :
     query.includes('math') || query.includes('engine') || query.includes('tech') || query.includes('robot') ? '3d-cube' : '3d-globe'
@@ -290,12 +293,140 @@ export function drawCanvasAnimation3D(
   ctx.restore();
 
   // 2. Interactive 3D Topic Geometry Centerpiece
-  const cx = width - 260 * scale;
-  const cy = 260 * scale;
+  const cx = width > height ? width - 260 * scale : width / 2;
+  const cy = width > height ? 260 * scale : height * 0.38;
   const radius = 100 * scale;
 
   ctx.save();
-  if (effectiveStyle === '3d-dna' || (effectiveStyle === 'auto' && (query.includes('bio') || query.includes('plant') || query.includes('cell') || query.includes('leaf') || query.includes('life')))) {
+  if (effectiveStyle === '3d-flower') {
+    // --- 3D Double Fertilization & Angiosperm Embryo Sac ---
+    const pulse = Math.sin(currentFrame * 0.05) * 8 * scale;
+    // Outer Ovule Wall
+    ctx.strokeStyle = '#10b981';
+    ctx.lineWidth = 3 * scale;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, radius * 0.8, radius * 1.1 + pulse, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Embryo Sac Center Glow
+    const eGlow = ctx.createRadialGradient(cx, cy, 5 * scale, cx, cy, radius * 0.7);
+    eGlow.addColorStop(0, 'rgba(254, 250, 224, 0.9)');
+    eGlow.addColorStop(0.5, 'rgba(245, 158, 11, 0.5)');
+    eGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = eGlow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Syngamy & Triple Fusion Nodes
+    const rot = currentFrame * 0.04;
+    const n1X = cx + Math.cos(rot) * 22 * scale;
+    const n1Y = cy + Math.sin(rot) * 22 * scale;
+    const n2X = cx - Math.cos(rot) * 22 * scale;
+    const n2Y = cy - Math.sin(rot) * 22 * scale;
+
+    ctx.fillStyle = '#fefae0';
+    ctx.beginPath();
+    ctx.arc(n1X, n1Y, 10 * scale, 0, Math.PI * 2);
+    ctx.arc(n2X, n2Y, 10 * scale, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pollen tube entry stream
+    const ptProgress = (currentFrame % 180) / 180;
+    const ptY = cy - radius * 1.3 + ptProgress * radius * 1.3;
+    ctx.strokeStyle = '#eab308';
+    ctx.lineWidth = 4 * scale;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - radius * 1.3);
+    ctx.lineTo(cx, ptY);
+    ctx.stroke();
+
+    // Labeled Callout Badges
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${Math.round(11 * scale)}px sans-serif`;
+    ctx.fillText('⚡ Syngamy (2n Zygote)', cx - 60 * scale, cy - 45 * scale);
+    ctx.fillText('✨ Triple Fusion (3N PEN)', cx - 65 * scale, cy + 55 * scale);
+
+  } else if (effectiveStyle === '3d-digestion') {
+    // --- 3D Human Digestion & Enzyme Pathway ---
+    // Duodenum Lumen Tunnel
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
+    ctx.lineWidth = 2 * scale;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, radius * 1.2, radius * 0.6, Math.sin(currentFrame * 0.03) * 0.1, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Intestinal Villi Micro-Projections
+    for (let v = 0; v < 12; v++) {
+      const vAngle = (v / 12) * Math.PI * 2 + currentFrame * 0.02;
+      const vx = cx + Math.cos(vAngle) * radius * 0.9;
+      const vy = cy + Math.sin(vAngle) * radius * 0.45;
+      
+      ctx.fillStyle = v % 2 === 0 ? '#ef4444' : '#3b82f6';
+      ctx.beginPath();
+      ctx.arc(vx, vy, (4 + Math.sin(currentFrame * 0.1 + v) * 2) * scale, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Enzyme Particles (Amylase & Protease)
+    for (let e = 0; e < 8; e++) {
+      const ex = cx + Math.sin(currentFrame * 0.08 + e * 0.8) * 45 * scale;
+      const ey = cy + Math.cos(currentFrame * 0.08 + e * 0.8) * 25 * scale;
+      ctx.fillStyle = e % 2 === 0 ? '#10b981' : '#f59e0b';
+      ctx.beginPath();
+      ctx.arc(ex, ey, 5 * scale, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Labeled Callouts
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${Math.round(11 * scale)}px sans-serif`;
+    ctx.fillText('🧪 Amylase & Protease', cx - 55 * scale, cy - 35 * scale);
+    ctx.fillText('🩸 Villi Capillary Bed', cx - 55 * scale, cy + 45 * scale);
+
+  } else if (effectiveStyle === '3d-stamen') {
+    // --- 3D Stamen, Anther Lobe & Microspores ---
+    // 4 Bilobed Anther Compartments
+    const offsets = [
+      [-30, -30], [30, -30],
+      [-30, 30],  [30, 30]
+    ];
+
+    offsets.forEach(([ox, oy], idx) => {
+      const spX = cx + ox * scale;
+      const spY = cy + oy * scale;
+      
+      ctx.strokeStyle = '#eab308';
+      ctx.lineWidth = 2 * scale;
+      ctx.beginPath();
+      ctx.arc(spX, spY, 22 * scale, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Pollen Mother Cells / Microspores
+      ctx.fillStyle = idx % 2 === 0 ? '#10b981' : '#fefae0';
+      ctx.beginPath();
+      ctx.arc(spX, spY, (6 + Math.sin(currentFrame * 0.1 + idx) * 2) * scale, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Callase enzyme dissolution particles
+    for (let c = 0; c < 10; c++) {
+      const cAngle = (c / 10) * Math.PI * 2 + currentFrame * 0.05;
+      const cxP = cx + Math.cos(cAngle) * 65 * scale;
+      const cyP = cy + Math.sin(cAngle) * 65 * scale;
+      ctx.fillStyle = '#10b981';
+      ctx.beginPath();
+      ctx.arc(cxP, cyP, 3 * scale, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Labeled Callouts
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${Math.round(11 * scale)}px sans-serif`;
+    ctx.fillText('🧫 Microsporangium (Pollen Sac)', cx - 75 * scale, cy - 50 * scale);
+    ctx.fillText('🧬 Callase Enzyme Dissolve', cx - 65 * scale, cy + 60 * scale);
+
+  } else if (effectiveStyle === '3d-dna' || (effectiveStyle === 'auto' && (query.includes('bio') || query.includes('plant') || query.includes('cell') || query.includes('leaf') || query.includes('life')))) {
     // --- 3D DNA Double Helix Animation ---
     const rot = currentFrame * 0.06;
     const numPoints = 14;
@@ -570,7 +701,291 @@ export default function VideoStudio() {
 
   // Live Motion Graphics & Video Animation HUD Overlay States
   const [motionHudEnabled, setMotionHudEnabled] = useState(true);
-  const [motionHudStyle, setMotionHudStyle] = useState<'3d-dna' | '3d-atom' | '3d-cube' | '3d-globe'>('3d-dna');
+  const [motionHudStyle, setMotionHudStyle] = useState<'3d-flower' | '3d-digestion' | '3d-stamen' | '3d-dna' | '3d-atom' | '3d-cube' | '3d-globe'>('3d-flower');
+
+  // Aspect Ratio State ('9:16' Vertical Reel/Short vs '16:9' Widescreen Landscape)
+  const [videoAspectRatio, setVideoAspectRatio] = useState<'9:16' | '16:9'>('9:16');
+
+  // 1-Click Quick Short Science Video Creator for Teachers and Students
+  const loadQuickShortTemplate = (templateKey: 'double-fertilization' | 'human-digestion' | 'stamen-microspores' | 'photosynthesis') => {
+    setVideoAspectRatio('9:16');
+    setDuration(1); // 1 minute reel/short format
+    setSelectedStyle('Animated & Motion Graphics');
+    setSelectedTone('Enthusiastic & Energetic Field Guide');
+    setSchoolBrandingEnabled(true);
+    setSchoolName('Bio_Genius Classes');
+    setSelectedLogoTemplate('shield');
+
+    let lessonData: DocumentaryLesson;
+
+    if (templateKey === 'double-fertilization') {
+      setTopic('Double Fertilization in Angiosperms');
+      setSubject('Biology');
+      setGradeLevel('Grade 9-10 (High School)');
+      setMotionHudStyle('3d-flower');
+      lessonData = {
+        title: 'Double Fertilization in Angiosperms',
+        topic: 'Double Fertilization in Angiosperms',
+        subject: 'Biology',
+        gradeLevel: 'Grade 9-10 (High School)',
+        duration: 1,
+        style: 'Animated & Motion Graphics',
+        narratorTone: 'Enthusiastic & Energetic Field Guide',
+        visualFormat: '3D Scientific Micro-Animations',
+        musicPacing: 'Slow Ambient Synth & Soft Keys',
+        depthSummary: 'A 60-second animated scientific reel explaining Syngamy and Triple Fusion inside flowering plant embryo sacs.',
+        introduction: 'Did you know? Flowering plants perform one of nature\'s most extraordinary events: Double Fertilization!',
+        conclusion: 'Because two fertilization events occur in the same embryo sac—Syngamy and Triple Fusion—this unique process defines flowering plants!',
+        createdAt: new Date().toISOString(),
+        followUpQuestions: [
+          'What is the ploidy level of the Zygote versus the Primary Endosperm Nucleus?',
+          'Why is double fertilization unique to angiosperms?',
+          'How does the pollen tube navigate through the micropyle?'
+        ],
+        scenes: [
+          {
+            sceneNumber: 1,
+            title: 'Angiosperm Ovule & Embryo Sac',
+            durationSeconds: 12,
+            visualDescription: '3D macro cross-section of a blooming Hibiscus flower zooming into the ovule and female gametophyte embryo sac.',
+            narrationScript: 'Did you know? Flowering plants perform one of nature\'s most extraordinary events: Double Fertilization, found only in angiosperms.',
+            audioEffects: 'Gentle nature swell with chime accent',
+            pedagogicalNote: 'Highlight 7-celled 8-nucleate embryo sac structure.'
+          },
+          {
+            sceneNumber: 2,
+            title: 'Cellular Components of Embryo Sac',
+            durationSeconds: 12,
+            visualDescription: 'Detailed 3D view showing egg cell, two synergids, central cell with two polar nuclei, and three antipodal cells.',
+            narrationScript: 'Inside the ovule lies the embryo sac—containing the egg cell, two synergids, two central polar nuclei, and three antipodal cells.',
+            audioEffects: 'Pulsing ambient focus tone',
+            pedagogicalNote: 'Focus on polar nuclei positioning.'
+          },
+          {
+            sceneNumber: 3,
+            title: 'Pollen Tube Germination & Micropyle Entry',
+            durationSeconds: 12,
+            visualDescription: 'Germinating pollen tube carrying two male gametes growing down the style and entering the micropyle.',
+            narrationScript: 'After pollination, the pollen grain germinates! The pollen tube carries two male gametes down the style and enters via the micropyle.',
+            audioEffects: 'Micro-fluid motion sound effect',
+            pedagogicalNote: 'Illustrate chemotropic attraction of pollen tube.'
+          },
+          {
+            sceneNumber: 4,
+            title: 'First Fertilization: Syngamy',
+            durationSeconds: 12,
+            visualDescription: 'First male gamete fusing with egg cell nucleus with bright glowing energy aura forming diploid zygote.',
+            narrationScript: 'The first male gamete fuses with the egg cell to form a diploid zygote. This process is called Syngamy!',
+            audioEffects: 'Bright energetic synth impact',
+            pedagogicalNote: 'Emphasize 2n diploid zygote formation.'
+          },
+          {
+            sceneNumber: 5,
+            title: 'Second Fertilization: Triple Fusion',
+            durationSeconds: 12,
+            visualDescription: 'Second male gamete fusing with two polar nuclei forming triploid primary endosperm nucleus.',
+            narrationScript: 'The second male gamete fuses with the two polar nuclei to form the triploid Primary Endosperm Nucleus—Triple Fusion!',
+            audioEffects: 'Resonant chord resolution',
+            pedagogicalNote: 'Emphasize 3n endosperm nourishing function.'
+          }
+        ]
+      };
+    } else if (templateKey === 'human-digestion') {
+      setTopic('Human Digestive System & Enzyme Pathway');
+      setSubject('Biology');
+      setGradeLevel('Grade 9-10 (High School)');
+      setMotionHudStyle('3d-digestion');
+      lessonData = {
+        title: 'Human Digestive System & Enzyme Pathway',
+        topic: 'Human Digestive System & Enzyme Pathway',
+        subject: 'Biology',
+        gradeLevel: 'Grade 9-10 (High School)',
+        duration: 1,
+        style: 'Animated & Motion Graphics',
+        narratorTone: 'Enthusiastic & Energetic Field Guide',
+        visualFormat: '3D Scientific Micro-Animations',
+        musicPacing: 'Pulsing Minimalist Soundscape',
+        depthSummary: 'A 60-second anatomical reel tracking chyme from stomach to duodenum, enzyme breakdown, and villi capillary absorption.',
+        introduction: 'Ever wondered what happens to food after leaving your stomach? Let\'s explore the chemical magic of digestion!',
+        conclusion: 'From macromolecule hydrolysis to capillary absorption, the digestive system turns food into vital life energy!',
+        createdAt: new Date().toISOString(),
+        followUpQuestions: [
+          'Which enzymes break down carbohydrates versus proteins in the duodenum?',
+          'How do intestinal villi increase absorption surface area?',
+          'Why do fatty acids enter lymph lacteals instead of direct blood capillaries?'
+        ],
+        scenes: [
+          {
+            sceneNumber: 1,
+            title: 'Duodenum Entry & Acid Chyme',
+            durationSeconds: 15,
+            visualDescription: '3D anatomical camera tracking chyme flowing from stomach pyloric sphincter into the C-shaped duodenum tube.',
+            narrationScript: 'After leaving the stomach, partially digested food chyme enters the duodenum, where liver bile and pancreatic juices neutralize stomach acid.',
+            audioEffects: 'Hydrodynamic fluid flow sound',
+            pedagogicalNote: 'Clarify pH transition from stomach acid to alkaline duodenum.'
+          },
+          {
+            sceneNumber: 2,
+            title: 'Enzymatic Hydrolysis (Amylase & Protease)',
+            durationSeconds: 15,
+            visualDescription: 'Glowing enzyme molecules labeled Amylase and Protease breaking complex polymer chains into amino acids and glucose.',
+            narrationScript: 'Pancreatic enzymes like Amylase and Protease cleave carbohydrates and proteins into tiny molecules ready for cellular absorption.',
+            audioEffects: 'Chemical bond-breaking sparkle sound',
+            pedagogicalNote: 'Highlight specificity of digestive enzymes.'
+          },
+          {
+            sceneNumber: 3,
+            title: 'Jejunum Microvilli Absorption',
+            durationSeconds: 15,
+            visualDescription: 'Macro zoom inside the jejunum lumen showing millions of carpet-like intestinal villi absorbing nutrient motes.',
+            narrationScript: 'In the jejunum and ileum, millions of microscopic villi create a massive surface area to absorb glucose and amino acids.',
+            audioEffects: 'Rhythmic pulsing heartbeat bass',
+            pedagogicalNote: 'Relate villi structure to surface area maximization.'
+          },
+          {
+            sceneNumber: 4,
+            title: 'Bloodstream & Lymphatic System Entry',
+            durationSeconds: 15,
+            visualDescription: 'Glucose entering red blood capillaries while fat droplets enter lymphatic lacteals circulating through the torso.',
+            narrationScript: 'Glucose enters capillary blood vessels, while fats enter lymphatic lacteals before reaching the bloodstream to nourish every cell!',
+            audioEffects: 'Triumphant orchestral finale',
+            pedagogicalNote: 'Distinguish blood vs lymph nutrient pathways.'
+          }
+        ]
+      };
+    } else if (templateKey === 'stamen-microspores') {
+      setTopic('Structure of Stamen & Microsporogenesis');
+      setSubject('Biology');
+      setGradeLevel('Grade 11-12 (Advanced AP)');
+      setMotionHudStyle('3d-stamen');
+      lessonData = {
+        title: 'Structure of Stamen & Microsporogenesis',
+        topic: 'Structure of Stamen & Microsporogenesis',
+        subject: 'Biology',
+        gradeLevel: 'Grade 11-12 (Advanced AP)',
+        duration: 1,
+        style: 'Animated & Motion Graphics',
+        narratorTone: 'Professional & Academic Scholar',
+        visualFormat: '3D Scientific Micro-Animations',
+        musicPacing: 'Stately Cinematic Orchestral',
+        depthSummary: 'A 60-second micro-anatomical reel demonstrating anther lobes, microsporangia, meiotic divisions, and callase dissolution.',
+        introduction: 'Let\'s examine the male reproductive structure of flowering plants: the stamen and microsporangia.',
+        conclusion: 'From Pollen Mother Cells to mature pollen grains, microsporogenesis ensures genetic continuity across plant generations!',
+        createdAt: new Date().toISOString(),
+        followUpQuestions: [
+          'How many microsporangia are present in a typical bilobed anther?',
+          'What role does the tapetum layer play during microsporogenesis?',
+          'Which enzyme dissolves the callose wall releasing microspores?'
+        ],
+        scenes: [
+          {
+            sceneNumber: 1,
+            title: 'Stamen & Bilobed Anther Morphology',
+            durationSeconds: 15,
+            visualDescription: '3D render of a Lily flower stamen showing slender filament supporting a yellow bilobed anther.',
+            narrationScript: 'The stamen is the male reproductive organ of a flower. At its tip lies the bilobed anther, where pollen grains are formed.',
+            audioEffects: 'Cinematic string entrance',
+            pedagogicalNote: 'Identify stamen filament and anther lobes.'
+          },
+          {
+            sceneNumber: 2,
+            title: 'Transverse Section & 4 Microsporangia',
+            durationSeconds: 15,
+            visualDescription: 'Cross-section slice of anther revealing 4 circular microsporangia pollen sacs with epidermis and sporogenous tissue.',
+            narrationScript: 'A transverse section reveals two lobes containing four microsporangia or pollen sacs, lined with protective wall layers and tapetum.',
+            audioEffects: 'Precision mechanical aperture sound',
+            pedagogicalNote: 'Detail 4 wall layers: epidermis, endothecium, middle layers, tapetum.'
+          },
+          {
+            sceneNumber: 3,
+            title: 'Pollen Mother Cell Meiosis',
+            durationSeconds: 15,
+            visualDescription: 'Sporogenous cell enlarging into Pollen Mother Cell undergoing meiotic division into a 4-cell microspore tetrad.',
+            narrationScript: 'Sporogenous cells become Pollen Mother Cells. Each undergoes meiosis to yield four haploid microspores arranged in a tetrad.',
+            audioEffects: 'Cellular mitosis heartbeat sound',
+            pedagogicalNote: 'Emphasize meiotic reduction division from 2n to n.'
+          },
+          {
+            sceneNumber: 4,
+            title: 'Callase Enzyme & Microspore Release',
+            durationSeconds: 15,
+            visualDescription: 'Tapetum secreting callase enzyme motes dissolving callose envelope, freeing individual microspores.',
+            narrationScript: 'The tapetum secretes callase enzyme, dissolving the outer wall and releasing free microspores to mature into pollen grains!',
+            audioEffects: 'Sparkling particle release effect',
+            pedagogicalNote: 'Highlight tapetal callase enzymatic role.'
+          }
+        ]
+      };
+    } else {
+      setTopic('Photosynthesis & Chloroplast Energy Flow');
+      setSubject('Biology');
+      setGradeLevel('Grade 9-10 (High School)');
+      setMotionHudStyle('3d-dna');
+      lessonData = {
+        title: 'Photosynthesis & Chloroplast Energy Flow',
+        topic: 'Photosynthesis & Chloroplast Energy Flow',
+        subject: 'Biology',
+        gradeLevel: 'Grade 9-10 (High School)',
+        duration: 1,
+        style: 'Animated & Motion Graphics',
+        narratorTone: 'Enthusiastic & Energetic Field Guide',
+        visualFormat: '3D Scientific Micro-Animations',
+        musicPacing: 'Warm Lo-Fi Beats & Focus Guitar',
+        depthSummary: 'A 60-second reel showcasing sunlight absorption, thylakoid photolysis, and glucose synthesis in plant chloroplasts.',
+        introduction: 'Plants perform the ultimate solar powered alchemy: Photosynthesis!',
+        conclusion: 'By capturing light energy to synthesize glucose, chloroplasts power virtually all life on Earth!',
+        createdAt: new Date().toISOString(),
+        followUpQuestions: [
+          'Where do light-dependent reactions occur within the chloroplast?',
+          'What molecule is split during photolysis to yield oxygen?',
+          'What are the primary products of the Calvin Cycle?'
+        ],
+        scenes: [
+          {
+            sceneNumber: 1,
+            title: 'Leaf Structure & Stomata Entry',
+            durationSeconds: 15,
+            visualDescription: 'Sunlight striking green leaf surface, entering stomatal pores and mesophyll cells.',
+            narrationScript: 'Sunlight strikes the leaf surface as carbon dioxide enters through stomata into photosynthetic mesophyll cells.',
+            audioEffects: 'Warm acoustic guitar strum',
+            pedagogicalNote: 'Connect gas exchange to leaf anatomy.'
+          },
+          {
+            sceneNumber: 2,
+            title: 'Thylakoid Membrane Light Reactions',
+            durationSeconds: 15,
+            visualDescription: 'Photons hitting chlorophyll inside thylakoid membrane, splitting water into protons and oxygen gas.',
+            narrationScript: 'Inside chloroplast thylakoids, chlorophyll absorbs photons, splitting water molecules into oxygen and energizing ATP!',
+            audioEffects: 'Electric pulse energy sound',
+            pedagogicalNote: 'Focus on water photolysis equation.'
+          },
+          {
+            sceneNumber: 3,
+            title: 'Stroma & Calvin Cycle Glucose Synthesis',
+            durationSeconds: 15,
+            visualDescription: 'Carbon dioxide combining with RuBP in the fluid stroma to synthesize high-energy glucose sugar molecules.',
+            narrationScript: 'In the liquid stroma, the Calvin cycle fixes carbon dioxide using ATP energy to produce rich glucose sugar.',
+            audioEffects: 'Smooth melodic resolution',
+            pedagogicalNote: 'Distinguish light-dependent vs light-independent reactions.'
+          },
+          {
+            sceneNumber: 4,
+            title: 'Oxygen Release & Energy Distribution',
+            durationSeconds: 15,
+            visualDescription: 'Oxygen gas escaping leaf stomata as glucose nourishes plant growth and surrounding ecosystem.',
+            narrationScript: 'Oxygen is released back into our atmosphere as glucose fuels plant growth—sustaining life across our planet!',
+            audioEffects: 'Uplifting swell finale',
+            pedagogicalNote: 'Summarize global ecological importance.'
+          }
+        ]
+      };
+    }
+
+    setCurrentDoc(lessonData);
+    generateAutoCaptions(lessonData);
+    setRenderedFileUrl(getVideoForTopic(lessonData.topic, lessonData.subject));
+    setRenderLogs(prev => [...prev, `[1-Click Short Creator] Loaded template: "${lessonData.title}" in 9:16 Vertical Shorts Mode!`]);
+  };
 
   // Video Chapters State
   const [chapters, setChapters] = useState<Array<{
@@ -1417,14 +1832,17 @@ export default function VideoStudio() {
   }, [currentDoc]);
 
   // Versioning Event Handlers
-  const handleSaveNewVersion = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentDoc || !newVersionName.trim()) return;
+  const handleSaveNewVersion = (eOrName?: React.FormEvent | string) => {
+    if (eOrName && typeof eOrName === 'object' && 'preventDefault' in eOrName) {
+      eOrName.preventDefault();
+    }
+    const nameToUse = typeof eOrName === 'string' && eOrName.trim() ? eOrName.trim() : newVersionName.trim();
+    if (!nameToUse) return;
 
     const newVer: VideoVersion = {
       id: `ver-${Date.now()}`,
-      docId: currentDoc.id || 'sandbox',
-      versionName: newVersionName,
+      docId: currentDoc?.id || 'sandbox',
+      versionName: nameToUse,
       changelog: newVersionChangelog.trim() || 'Custom teacher adjustments & timeline tweaks.',
       timestamp: new Date().toLocaleString(),
       chapters: chapters,
@@ -1453,8 +1871,8 @@ export default function VideoStudio() {
 
     const updated = [newVer, ...videoVersions];
     setVideoVersions(updated);
-    localStorage.setItem(`video_versions_${currentDoc.id || 'sandbox'}`, JSON.stringify(updated));
-    setRenderLogs(prev => [...prev, `[Versioning] Successfully created version snapshot: "${newVersionName}"`]);
+    localStorage.setItem(`video_versions_${currentDoc?.id || 'sandbox'}`, JSON.stringify(updated));
+    setRenderLogs(prev => [...prev, `[Versioning] Successfully created version snapshot: "${nameToUse}"`]);
     
     // Reset inputs
     setNewVersionName('');
@@ -2345,6 +2763,153 @@ export default function VideoStudio() {
         </div>
       </div>
 
+      {/* 1-Click Educational Short Video Creator for Teachers & Students */}
+      <div className="bg-gradient-to-r from-emerald-900 via-slate-900 to-teal-950 text-white rounded-3xl p-6 shadow-xl border border-emerald-500/30 space-y-4 relative overflow-hidden" id="quick-short-video-creator">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-300 shadow-inner shrink-0">
+              <Sparkles className="w-5 h-5 animate-pulse text-emerald-300" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-lg font-serif font-bold text-white tracking-tight">
+                  1-Click Short Video Creator
+                </h3>
+                <span className="text-[10px] bg-emerald-400/20 text-emerald-300 border border-emerald-400/40 font-mono font-bold px-2.5 py-0.5 rounded-full">
+                  9:16 Shorts & Reels
+                </span>
+              </div>
+              <p className="text-xs text-slate-300">
+                Simple 60-second animated scientific reels designed for teachers and students to produce and share instantly.
+              </p>
+            </div>
+          </div>
+
+          {/* Aspect Ratio Selector Pills */}
+          <div className="flex items-center bg-slate-950/80 p-1 rounded-xl border border-white/10 text-xs">
+            <button
+              onClick={() => setVideoAspectRatio('9:16')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                videoAspectRatio === '9:16'
+                  ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>📱 9:16 Vertical Reel</span>
+            </button>
+            <button
+              onClick={() => setVideoAspectRatio('16:9')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                videoAspectRatio === '16:9'
+                  ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>💻 16:9 Landscape</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Preset Cards Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+          <button
+            onClick={() => loadQuickShortTemplate('double-fertilization')}
+            className="group text-left p-3.5 bg-slate-800/80 hover:bg-emerald-950/60 border border-slate-700 hover:border-emerald-500/60 rounded-2xl transition-all cursor-pointer shadow-md flex flex-col justify-between space-y-2 hover:-translate-y-0.5"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xl">🌺</span>
+              <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-md">
+                Angiosperm Bio
+              </span>
+            </div>
+            <div>
+              <h4 className="font-bold text-xs text-white group-hover:text-emerald-300 transition-colors">
+                Double Fertilization
+              </h4>
+              <p className="text-[10px] text-slate-300 line-clamp-2 mt-0.5">
+                Embryo sac, Syngamy & Triple Fusion in flowering plants.
+              </p>
+            </div>
+            <div className="flex items-center justify-between text-[9px] text-emerald-400/90 font-mono pt-1 border-t border-slate-700/60">
+              <span>60s Short</span>
+              <span className="font-bold group-hover:underline flex items-center gap-0.5">Generate & Play →</span>
+            </div>
+          </button>
+
+          <button
+            onClick={() => loadQuickShortTemplate('human-digestion')}
+            className="group text-left p-3.5 bg-slate-800/80 hover:bg-emerald-950/60 border border-slate-700 hover:border-emerald-500/60 rounded-2xl transition-all cursor-pointer shadow-md flex flex-col justify-between space-y-2 hover:-translate-y-0.5"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xl">🫁</span>
+              <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-md">
+                Human Anatomy
+              </span>
+            </div>
+            <div>
+              <h4 className="font-bold text-xs text-white group-hover:text-emerald-300 transition-colors">
+                Digestive Pathway & Enzymes
+              </h4>
+              <p className="text-[10px] text-slate-300 line-clamp-2 mt-0.5">
+                Chyme in duodenum, Amylase/Protease & villi absorption.
+              </p>
+            </div>
+            <div className="flex items-center justify-between text-[9px] text-emerald-400/90 font-mono pt-1 border-t border-slate-700/60">
+              <span>60s Short</span>
+              <span className="font-bold group-hover:underline flex items-center gap-0.5">Generate & Play →</span>
+            </div>
+          </button>
+
+          <button
+            onClick={() => loadQuickShortTemplate('stamen-microspores')}
+            className="group text-left p-3.5 bg-slate-800/80 hover:bg-emerald-950/60 border border-slate-700 hover:border-emerald-500/60 rounded-2xl transition-all cursor-pointer shadow-md flex flex-col justify-between space-y-2 hover:-translate-y-0.5"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xl">🌿</span>
+              <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-md">
+                Botanical AP
+              </span>
+            </div>
+            <div>
+              <h4 className="font-bold text-xs text-white group-hover:text-emerald-300 transition-colors">
+                Stamen & Microsporogenesis
+              </h4>
+              <p className="text-[10px] text-slate-300 line-clamp-2 mt-0.5">
+                Bilobed anther, meiosis in microsporangia & callase.
+              </p>
+            </div>
+            <div className="flex items-center justify-between text-[9px] text-emerald-400/90 font-mono pt-1 border-t border-slate-700/60">
+              <span>60s Short</span>
+              <span className="font-bold group-hover:underline flex items-center gap-0.5">Generate & Play →</span>
+            </div>
+          </button>
+
+          <button
+            onClick={() => loadQuickShortTemplate('photosynthesis')}
+            className="group text-left p-3.5 bg-slate-800/80 hover:bg-emerald-950/60 border border-slate-700 hover:border-emerald-500/60 rounded-2xl transition-all cursor-pointer shadow-md flex flex-col justify-between space-y-2 hover:-translate-y-0.5"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xl">☀️</span>
+              <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-md">
+                Cellular Energy
+              </span>
+            </div>
+            <div>
+              <h4 className="font-bold text-xs text-white group-hover:text-emerald-300 transition-colors">
+                Photosynthesis & Chloroplasts
+              </h4>
+              <p className="text-[10px] text-slate-300 line-clamp-2 mt-0.5">
+                Light reactions, thylakoid photolysis & Calvin cycle.
+              </p>
+            </div>
+            <div className="flex items-center justify-between text-[9px] text-emerald-400/90 font-mono pt-1 border-t border-slate-700/60">
+              <span>60s Short</span>
+              <span className="font-bold group-hover:underline flex items-center gap-0.5">Generate & Play →</span>
+            </div>
+          </button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left Column: Input Settings (5 Cols) */}
         <div className="lg:col-span-5 space-y-6">
@@ -2360,7 +2925,9 @@ export default function VideoStudio() {
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block">
                   Documentary Core Subject / Topic
                 </label>
-                <HelpCircle className="w-4 h-4 text-slate-400 hover:text-[#5f6f52] cursor-pointer" title="Input any concept or historical event you want to film" />
+                <span title="Input any concept or historical event you want to film">
+                  <HelpCircle className="w-4 h-4 text-slate-400 hover:text-[#5f6f52] cursor-pointer" />
+                </span>
               </div>
               <textarea
                 value={topic}
@@ -2806,14 +3373,14 @@ export default function VideoStudio() {
 
               {/* List of Versions */}
               <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                {videoVersions.filter(v => v.docId === currentDoc.id).length === 0 ? (
+                {videoVersions.filter(v => v.docId === (currentDoc?.id || 'current')).length === 0 ? (
                   <div className="text-center py-6 border border-dashed border-slate-200 rounded-xl">
                     <History className="w-8 h-8 text-slate-300 mx-auto mb-1 animate-pulse" />
                     <p className="text-[11px] text-slate-400 italic">No history backups saved for this lesson yet.</p>
                   </div>
                 ) : (
                   videoVersions
-                    .filter(v => v.docId === currentDoc.id)
+                    .filter(v => v.docId === (currentDoc?.id || 'current'))
                     .map((version) => (
                       <div 
                         key={version.id} 
@@ -2821,7 +3388,7 @@ export default function VideoStudio() {
                       >
                         <div className="flex justify-between items-start">
                           <div className="space-y-0.5">
-                            <p className="font-bold text-slate-700 leading-snug">{version.name}</p>
+                            <p className="font-bold text-slate-700 leading-snug">{version.versionName}</p>
                             <p className="text-[9px] text-slate-400 font-mono">
                               {new Date(version.timestamp).toLocaleString(undefined, {
                                 month: 'short',
@@ -2836,8 +3403,8 @@ export default function VideoStudio() {
                             <button
                               type="button"
                               onClick={() => {
-                                if (confirm(`Restore "${version.name}"? This will rollback chapters, annotations, voice choices, and subtitles to this state.`)) {
-                                  handleRestoreVersion(version.id);
+                                if (confirm(`Restore "${version.versionName}"? This will rollback chapters, annotations, voice choices, and subtitles to this state.`)) {
+                                  handleRestoreVersion(version);
                                 }
                               }}
                               className="text-[10px] bg-[#5f6f52]/10 hover:bg-[#5f6f52] text-[#5f6f52] hover:text-white py-1 px-2 rounded-md font-bold transition-all cursor-pointer"
@@ -2848,7 +3415,7 @@ export default function VideoStudio() {
                             <button
                               type="button"
                               onClick={() => {
-                                if (confirm(`Are you sure you want to delete backup "${version.name}"?`)) {
+                                if (confirm(`Are you sure you want to delete backup "${version.versionName}"?`)) {
                                   handleDeleteVersion(version.id);
                                 }
                               }}
@@ -2862,10 +3429,10 @@ export default function VideoStudio() {
 
                         {/* Version Snapshot Specs */}
                         <div className="grid grid-cols-2 gap-x-2 gap-y-1 bg-slate-50 p-2 rounded-lg text-[9px] text-slate-500 font-mono">
-                          <div>Chapters: <strong className="text-slate-700">{version.chaptersCount}</strong></div>
-                          <div>Annotations: <strong className="text-slate-700">{version.annotationsCount}</strong></div>
-                          <div>Subtitles: <strong className="text-slate-700">{version.captionsEnabled ? 'Enabled' : 'Disabled'}</strong></div>
-                          <div className="truncate">Voice: <strong className="text-slate-700 capitalize">{version.voiceId}</strong></div>
+                          <div>Chapters: <strong className="text-slate-700">{version.chapters?.length || 0}</strong></div>
+                          <div>Annotations: <strong className="text-slate-700">{version.annotations?.length || 0}</strong></div>
+                          <div>Subtitles: <strong className="text-slate-700">{version.settings?.includeSubtitles ? 'Enabled' : 'Disabled'}</strong></div>
+                          <div className="truncate">Voice: <strong className="text-slate-700 capitalize">{version.settings?.selectedVoice || 'Default'}</strong></div>
                         </div>
                       </div>
                     ))
@@ -3516,7 +4083,7 @@ export default function VideoStudio() {
 
                             <button
                               type="button"
-                              onClick={startVideoRender}
+                              onClick={() => startVideoRender()}
                               className="w-full py-3 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 text-xs shadow-md transition-all cursor-pointer"
                             >
                               <Activity className="w-4 h-4 text-emerald-400" />
@@ -3732,17 +4299,35 @@ export default function VideoStudio() {
                     <div className="lg:col-span-7 flex flex-col justify-between space-y-4">
                       
                       {/* Integrated High-Def Preview Window */}
-                      <div ref={playerContainerRef} className="bg-slate-950 rounded-2xl border-4 border-slate-900 shadow-2xl overflow-hidden relative aspect-video flex flex-col justify-center text-center" id="video-preview-player-frame">
+                      <div
+                        ref={playerContainerRef}
+                        className={`bg-slate-950 rounded-3xl border-4 border-slate-900 shadow-2xl overflow-hidden relative flex flex-col justify-center text-center transition-all duration-300 ${
+                          videoAspectRatio === '9:16'
+                            ? 'aspect-[9/16] max-w-[360px] mx-auto w-full my-2'
+                            : 'aspect-video w-full'
+                        }`}
+                        id="video-preview-player-frame"
+                      >
                         
                         {/* Title Bezel overlay */}
-                        <div className="absolute left-0 right-0 top-0 bg-slate-900/90 border-b border-slate-800/80 px-4 py-2 flex items-center justify-between text-[10px] text-slate-400 font-mono z-20">
-                          <span className="flex items-center gap-1.5 font-bold">
-                            <span className={`w-2 h-2 rounded-full ${renderStatus === 'completed' ? 'bg-green-500' : renderStatus === 'rendering' ? 'bg-red-500 animate-pulse' : 'bg-slate-500'}`} />
-                            {renderStatus === 'completed' ? 'HIGH-DEF PLAYER PREVIEW (COMPLETED)' : 'DIRECTOR EXPORT MONITOR'}
+                        <div className="absolute left-0 right-0 top-0 bg-slate-900/90 border-b border-slate-800/80 px-3 py-1.5 flex items-center justify-between text-[10px] text-slate-400 font-mono z-20">
+                          <span className="flex items-center gap-1.5 font-bold truncate">
+                            <span className={`w-2 h-2 rounded-full shrink-0 ${renderStatus === 'completed' ? 'bg-green-500' : renderStatus === 'rendering' ? 'bg-red-500 animate-pulse' : 'bg-slate-500'}`} />
+                            <span className="truncate">{renderStatus === 'completed' ? 'PLAYER PREVIEW' : 'DIRECTOR MONITOR'}</span>
                           </span>
-                          <span className="bg-slate-800 px-1.5 py-0.5 rounded text-slate-200">
-                            {renderResolution.toUpperCase()} @ {frameRate}FPS
-                          </span>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              onClick={() => setVideoAspectRatio(prev => prev === '9:16' ? '16:9' : '9:16')}
+                              className="bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 px-2 py-0.5 rounded font-bold transition-all cursor-pointer text-[9px]"
+                              title="Toggle Video Aspect Ratio"
+                            >
+                              {videoAspectRatio === '9:16' ? '📱 9:16 Reel' : '💻 16:9 Screen'}
+                            </button>
+                            <span className="bg-slate-800 px-1.5 py-0.5 rounded text-slate-200">
+                              {renderResolution.toUpperCase()}
+                            </span>
+                          </div>
                         </div>
 
                         {/* Rendering state: circular analyzer overlay & progress details */}
@@ -3829,7 +4414,7 @@ export default function VideoStudio() {
                             <div className="pt-2">
                               <button
                                 type="button"
-                                onClick={startVideoRender}
+                                onClick={() => startVideoRender()}
                                 className="px-4 py-1.5 bg-[#5f6f52] hover:bg-[#4d5b41] text-white text-[10px] font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1 mx-auto"
                               >
                                 <Cpu className="w-3.5 h-3.5" />

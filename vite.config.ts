@@ -26,7 +26,17 @@ export default defineConfig(() => {
       chunkSizeWarningLimit: 2000,
     },
     optimizeDeps: {
-      include: ['react', 'react-dom', 'lucide-react', 'motion/react', 'firebase/app', 'firebase/firestore', 'firebase/auth'],
+      include: [
+        'react',
+        'react-dom',
+        'lucide-react',
+        'motion/react',
+        'firebase/app',
+        'firebase/firestore',
+        'firebase/auth',
+        '@vis.gl/react-google-maps',
+        'recharts'
+      ],
     },
   };
 });

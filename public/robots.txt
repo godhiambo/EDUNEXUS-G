@@ -1,0 +1,27 @@
+User-agent: *
+Allow: /
+Allow: /about
+Allow: /privacy
+Allow: /terms
+Allow: /contact
+Allow: /cookies
+Allow: /data-deletion
+Allow: /accessibility
+Allow: /sitemap.xml
+Allow: /robots.txt
+Allow: /site.webmanifest
+Allow: /manifest.json
+Allow: /favicon.ico
+Allow: /*.png
+Allow: /*.svg
+
+# Disallow private user & internal administration endpoints
+Disallow: /admin
+Disallow: /dashboard
+Disallow: /login
+Disallow: /register
+Disallow: /api/
+Disallow: /user/
+Disallow: /private/
+
+Sitemap: https://joinedunexus.app/sitemap.xml

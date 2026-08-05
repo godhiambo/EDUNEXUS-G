@@ -2,6 +2,9 @@ export interface HeadingItem {
   id: string;
   text: string;
   level: number; // 1 = H1 (#), 2 = H2 (##), 3 = H3 (###)
+  pageNumber?: number; // Calculated estimated page number for print & document index
+  charIndex?: number;
+  lineIndex?: number;
 }
 
 export interface PedagogicalPhaseGroup {
@@ -37,8 +40,9 @@ export function extractDocumentHeadings(markdown: string): HeadingItem[] {
   const lines = markdown.split('\n');
   const headings: HeadingItem[] = [];
   const slugCounts: Record<string, number> = {};
+  let currentLength = 0;
 
-  lines.forEach((line) => {
+  lines.forEach((line, lineIndex) => {
     const trimmed = line.trim();
 
     // Check for markdown heading indicators
@@ -66,13 +70,22 @@ export function extractDocumentHeadings(markdown: string): HeadingItem[] {
           slugCounts[slug] = 0;
         }
 
+        // Estimate page number: ~40 lines per A4/Letter print page or ~2000 chars
+        const pageByLines = Math.max(1, Math.ceil((lineIndex + 1) / 40));
+        const pageByChars = Math.max(1, Math.ceil((currentLength + 1) / 2000));
+        const pageNumber = Math.max(pageByLines, pageByChars);
+
         headings.push({
           id: slug,
           text: rawText,
           level,
+          pageNumber,
+          charIndex: currentLength,
+          lineIndex,
         });
       }
     }
+    currentLength += line.length + 1;
   });
 
   return headings;

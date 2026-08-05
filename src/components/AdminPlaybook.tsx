@@ -24,9 +24,11 @@ import {
   Zap,
   Globe,
   Printer,
-  Sparkle
+  Sparkle,
+  X
 } from 'lucide-react';
 import { useAuth, resolveDisplayName } from '../context/AuthContext';
+import SEOAuditWidget from './SEOAuditWidget';
 
 interface ModuleDetail {
   id: string;
@@ -104,7 +106,7 @@ const APP_MODULES: ModuleDetail[] = [
       'Direct multimedia embedding into lesson notes and study guides',
       'Video playback timeline and download capability'
     ],
-    functionality: 'Dispatches video generation requests to the `/api/generate-ai-video` endpoint. If primary Veo 2.0 or Omni models reach API quotas or restrictions, it seamlessly seamlessly delivers relevant High-Definition educational clips matched to the lesson prompt.',
+    functionality: 'Dispatches video generation requests to the `/api/generate-ai-video` endpoint. If primary Veo 2.0 or Omni models reach API quotas or restrictions, it seamlessly delivers relevant High-Definition educational clips matched to the lesson prompt.',
     adminControls: 'Admins can manage video model toggles, view video generation error telemetry, and inspect fallback stream triggers.'
   },
   {
@@ -220,6 +222,213 @@ const APP_MODULES: ModuleDetail[] = [
     ],
     functionality: 'Maintains system integrity through Firestore rule enforcement, recording all critical user interactions in activity logs and managing user account states.',
     adminControls: 'Restricted exclusively to authorized administrators with full system override capability.'
+  },
+  {
+    id: 'whatsapp-meta-engine',
+    title: 'Official WhatsApp Notification & Accessibility Engine (Google AI Studio System Instructions)',
+    category: 'Administration',
+    iconName: 'MessageSquare',
+    summary: 'Official Meta WhatsApp Cloud API gateway with UDL Accessibility Engine, Webhook listener, multi-role Socratic AI routing, and school-wide broadcast dispatch.',
+    capabilities: [
+      'Official WhatsApp Meta Webhook listener endpoint (/api/whatsapp/webhook)',
+      'Verification Token & Meta App Secret authentication handshake security',
+      'Google AI Studio System Instructions for Official WhatsApp Notification & Accessibility Engine (/api/whatsapp/udl-generate)',
+      'Learner Profile Scaffolding (ADHD bullet micro-milestones, Dyslexia ocular anchors, ESL simplified vocabulary, Screen Reader audio summaries, Low-Vision high contrast)',
+      'Multilingual notification translations into Spanish (es), French (fr), Swahili (sw), and English (en)',
+      'Confidence-Rating Mechanics (Low Confidence topic trail root repositioning vs High Confidence syllabus fast-tracking)',
+      'Educator, Student, and Parent Playbooks for resource links, daily streak motivators, and home configuration tips',
+      'Interactive 1-on-1 Socratic homework photo & voice note message processing',
+      'Live message volume telemetry, session tracking, and delivery audit logs'
+    ],
+    functionality: 'Processes incoming Meta WhatsApp Webhooks, parses text/media/voice messages, invokes server-side Gemini 3.5 Flash with official UDL Accessibility system instructions, and returns formatted plain-text responses via WhatsApp Cloud API.',
+    adminControls: 'Administrators can configure Meta API access tokens, inspect live webhook log streams, manage broadcast subscriber queues, and trigger UDL Accessibility notification payloads.'
+  },
+  {
+    id: 'seo-audit-engine',
+    title: 'Automated SEO & Search Visibility Audit Engine',
+    category: 'Administration',
+    iconName: 'Globe',
+    summary: 'Lightweight periodic SEO utility scanning public links, meta tags, open graph tags, JSON-LD schemas, and domain assets.',
+    capabilities: [
+      'Automated periodic background scanning (60-second intervals)',
+      'Internal public link HEAD checks (/about, /privacy, /terms, /sitemap.xml, /robots.txt)',
+      'DOM meta tag & canonical URL verification (<title>, <meta description>, og:image, twitter:card)',
+      'Schema.org JSON-LD graph inspection (EducationalOrganization, FAQPage, BreadcrumbList)',
+      'Real-time SEO issue logging & Playbook compliance scoring'
+    ],
+    functionality: 'Periodically checks public HTML elements and endpoints to ensure 100% compliance with search engine indexing and AI overview requirements.',
+    adminControls: 'Administrators can view real-time audit logs, trigger manual on-demand scans, and inspect detailed recommendations.'
+  }
+];
+
+interface PlaybookPolicy {
+  id: string;
+  role: 'Administrator' | 'Educator' | 'Student' | 'Parent';
+  step: string;
+  title: string;
+  description: string;
+  tags?: string[];
+}
+
+const ROLE_PLAYBOOKS: PlaybookPolicy[] = [
+  // Administrator
+  {
+    id: 'admin-1',
+    role: 'Administrator',
+    step: '1. Operational System Health Audit',
+    title: 'Operational System Health Audit & Telemetry',
+    description: 'Regularly review the "Recent Activity Audit Log" under the Admin tab to track teacher logins, document creation, and safety flags. Check system connectivity status and AI backend response times.',
+    tags: ['Audit Log', 'Telemetry', 'System Health']
+  },
+  {
+    id: 'admin-2',
+    role: 'Administrator',
+    step: '2. User Account Registry',
+    title: 'User Account Registry & Role Permissions',
+    description: 'Pre-register teaching staff using the "Pre-register User Account" tool. Specify exact names, valid email addresses, and appropriate role permissions (Administrator, Teacher, Student, Parent).',
+    tags: ['Account Registry', 'Permissions', 'User Pre-registration']
+  },
+  {
+    id: 'admin-3',
+    role: 'Administrator',
+    step: '3. Policy Violation & Suspension Threshold',
+    title: 'Policy Violation & Suspension Thresholds (3-Strike Policy)',
+    description: 'When a user violates platform safety rules or prompts inappropriate content, issue a warning via the Admin Panel. Accounts exceeding the 3-warning threshold are automatically suspended.',
+    tags: ['Suspension Policy', 'Safety Violations', '3-Strike Rule']
+  },
+  {
+    id: 'admin-4',
+    role: 'Administrator',
+    step: '4. Granular User Policy Overrides',
+    title: 'Granular User Policy Overrides & Custom Quotas',
+    description: 'Apply targeted user overrides to bypass specific global restrictions (such as extended rate limits or custom document sizes) during school examination windows or faculty research trials.',
+    tags: ['Overrides', 'Quota Bypasses', 'Admin Controls']
+  },
+  {
+    id: 'admin-5',
+    role: 'Administrator',
+    step: '5. WhatsApp Meta Webhook & API Token Governance',
+    title: 'WhatsApp Meta Webhook Setup & Broadcast Queue Management',
+    description: 'Configure Meta Cloud API Permanent Access Tokens, verify Webhook callbacks (/api/whatsapp/webhook), monitor live message logs, and manage school-wide emergency broadcast dispatch queues.',
+    tags: ['WhatsApp Meta', 'Webhook Config', 'Broadcast Queues']
+  },
+  {
+    id: 'admin-6',
+    role: 'Administrator',
+    step: '6. SEO Audit Utility & Search Visibility Governance',
+    title: 'Automated SEO Audit & Search Engine Indexability Governance',
+    description: 'Monitor the Automated SEO Audit Utility under Admin Playbook. Ensure all public links, sitemaps, robots.txt, and JSON-LD structured schemas maintain 100% compliance for search engines and AI Overviews.',
+    tags: ['SEO Audit', 'Search Visibility', 'Indexability']
+  },
+
+  // Educator
+  {
+    id: 'edu-1',
+    role: 'Educator',
+    step: '1. Curriculum Navigation & Objectives',
+    title: 'Curriculum Navigation & National Objectives Alignment',
+    description: 'Select your target Grade level (Kenyan CBC, Standard 8, or Form 1-4) and specify Subject, Strand, and Sub-strand to load national learning outcomes directly into the prompt engine.',
+    tags: ['CBC Alignment', 'Curriculum', 'Grade Levels']
+  },
+  {
+    id: 'edu-2',
+    role: 'Educator',
+    step: '2. Guided AI Generation & Differentiation',
+    title: 'Guided AI Generation & Classroom Differentiation',
+    description: 'Use the AI Document Studio to generate structured lesson plans, schemes of work, and study guides. Configure cognitive levels (Bloom\'s Taxonomy) and student differentiation options.',
+    tags: ['AI Document Studio', 'Bloom\'s Taxonomy', 'Differentiation']
+  },
+  {
+    id: 'edu-3',
+    role: 'Educator',
+    step: '3. Quality Audit & Auto-Fix',
+    title: 'Pedagogical Quality Audit & One-Click Auto-Fix',
+    description: 'Submit materials to the AI Expert Reviewer to obtain an official pedagogical score. Use the one-click "Auto-Fix" feature to refine unaligned objectives or ambiguous rubrics.',
+    tags: ['Quality Score', 'Pedagogical Audit', 'Auto-Fix']
+  },
+  {
+    id: 'edu-4',
+    role: 'Educator',
+    step: '4. Visual Video Enrichment & Export',
+    title: 'Visual Video Enrichment & Multi-Format Export',
+    description: 'Generate educational video clips in the AI Video Studio to demonstrate complex visual phenomena. Embed media into notes and export clean PDF or DOCX copies for print.',
+    tags: ['AI Video Studio', 'Google Veo', 'PDF Export']
+  },
+  {
+    id: 'edu-5',
+    role: 'Educator',
+    step: '5. Automated WhatsApp Homework Broadcasts',
+    title: 'Automated WhatsApp Homework Broadcasts & Parent Reminders',
+    description: 'Dispatch instant homework alerts, revision guides, and class announcements directly to student and parent WhatsApp groups using the WhatsApp Broadcast Dispatch tab.',
+    tags: ['WhatsApp Broadcast', 'Homework Alerts', 'Parent Communication']
+  },
+
+  // Student
+  {
+    id: 'stu-1',
+    role: 'Student',
+    step: '1. Adaptive Trail Confidence Rating',
+    title: 'Adaptive Trail Confidence Rating & Scaffolding',
+    description: 'Rate your topic confidence (Low, Medium, High) in the Learning Path Workspace. Low confidence builds foundational scaffolding, while high confidence unlocks project challenges.',
+    tags: ['Adaptive Learning', 'Confidence Rating', 'Scaffolding']
+  },
+  {
+    id: 'stu-2',
+    role: 'Student',
+    step: '2. Socratic AI Tutor Assistance',
+    title: 'Socratic AI Tutor & Interactive Problem Solving',
+    description: 'When stuck on a concept, open the Socratic AI sidebar. The tutor asks guiding questions to help you discover answers independently, building critical problem-solving skills.',
+    tags: ['Socratic AI', 'Interactive Tutor', 'Problem Solving']
+  },
+  {
+    id: 'stu-3',
+    role: 'Student',
+    step: '3. Speech & Pronunciation Science',
+    title: 'Speech & Pronunciation Science (Visual Phonetics)',
+    description: 'Use the Visual Phonetics Studio to inspect tongue placement, velum movement, and vocal cord vibration animations for English and Swahili phonetic sound drills.',
+    tags: ['Phonetics', 'Swahili & English', 'Speech Drills']
+  },
+  {
+    id: 'stu-4',
+    role: 'Student',
+    step: '4. Personal Accessibility Settings',
+    title: 'Personal Accessibility Settings & UDL Controls',
+    description: 'Turn on Dyslexic font styling, adjust text line spacing, or enable multi-regional Text-to-Speech audio reading in Settings for a comfortable learning environment.',
+    tags: ['Accessibility UDL', 'Dyslexia Font', 'Text-to-Speech']
+  },
+  {
+    id: 'stu-5',
+    role: 'Student',
+    step: '5. WhatsApp 1-on-1 AI Tutor Guidance',
+    title: 'WhatsApp 1-on-1 AI Tutor & Homework Photo Solver',
+    description: 'Send math problems, homework photos, or voice notes directly to the official WhatsApp AI number (+254 704 360 522) for 24/7 Socratic learning assistance on your mobile phone.',
+    tags: ['WhatsApp Tutor', 'Homework Photo Solver', 'Mobile Tutoring']
+  },
+
+  // Parent
+  {
+    id: 'par-1',
+    role: 'Parent',
+    step: '1. Competency Scorecard Review',
+    title: 'Competency Scorecard Review & Progress Tracking',
+    description: 'Check your child\'s competency ratings (Exceeding, Meeting, Approaching Expectation) across subject strands to celebrate achievements and identify revision needs.',
+    tags: ['Competency Scorecard', 'Parent Monitoring', 'CBC Metrics']
+  },
+  {
+    id: 'par-2',
+    role: 'Parent',
+    step: '2. Home Accessibility Profiles',
+    title: 'Home Accessibility Profiles & UDL Customization',
+    description: 'Configure specialized learner profiles (such as ADHD Focus scaffolding, Dyslexia typography, or Swahili/English TTS reading) in Settings to match home study needs.',
+    tags: ['Home UDL', 'ADHD Focus', 'Parent Controls']
+  },
+  {
+    id: 'par-3',
+    role: 'Parent',
+    step: '3. WhatsApp Parent Insights & Instant Circulars',
+    title: 'WhatsApp Parent Insights & Instant School Notices',
+    description: 'Receive real-time WhatsApp updates on your child\'s learning progress, homework completion, term dates, and school circulars without needing to download external apps.',
+    tags: ['WhatsApp Insights', 'School Circulars', 'Parent Notifications']
   }
 ];
 
@@ -228,17 +437,32 @@ export default function AdminPlaybook() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [expandedModule, setExpandedModule] = useState<string | null>('curriculum-engine');
-  const [activeTab, setActiveTab] = useState<'modules' | 'playbooks' | 'pdf'>('modules');
+  const [activeTab, setActiveTab] = useState<'modules' | 'playbooks' | 'seo-audit' | 'pdf'>('modules');
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
   const categories = ['all', 'Core Academic', 'Content Generation', 'Visual & Multimedia', 'Student Engagement', 'Specialized Learning', 'Assessment', 'Quality Assurance', 'Community', 'Universal Access', 'Administration'];
 
   const filteredModules = APP_MODULES.filter(m => {
-    const matchesSearch = m.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    const matchesSearch = !searchTerm || 
+                          m.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           m.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          m.functionality.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          m.adminControls.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           m.capabilities.some(c => c.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesCategory = selectedCategory === 'all' || m.category === selectedCategory;
     return matchesSearch && matchesCategory;
+  });
+
+  const filteredPlaybooks = ROLE_PLAYBOOKS.filter(p => {
+    if (!searchTerm) return true;
+    const term = searchTerm.toLowerCase();
+    return (
+      p.title.toLowerCase().includes(term) ||
+      p.description.toLowerCase().includes(term) ||
+      p.role.toLowerCase().includes(term) ||
+      p.step.toLowerCase().includes(term) ||
+      (p.tags && p.tags.some(t => t.toLowerCase().includes(term)))
+    );
   });
 
   const generatePDFPlaybook = () => {
@@ -501,31 +725,113 @@ export default function AdminPlaybook() {
         </button>
       </div>
 
+      {/* Global Search & Quick Policy Filters Bar */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-md">
+        <div className="flex flex-col md:flex-row items-center gap-3">
+          <div className="relative flex-1 w-full">
+            <Search className="w-4 h-4 text-[#a9b388] absolute left-3.5 top-3.5" />
+            <input
+              type="text"
+              placeholder="Search system policies, modules, capabilities, administrative controls, or role playbooks..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 focus:border-[#a9b388] rounded-xl pl-10 pr-10 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none transition-all shadow-inner"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-3 text-slate-400 hover:text-white p-0.5 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                title="Clear search"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {searchTerm && (
+            <div className="flex items-center gap-2 text-[11px] font-bold text-slate-300 bg-slate-950/80 px-3 py-2 rounded-xl border border-slate-800 shrink-0">
+              <span className="text-[#a9b388]">Filtered Results:</span>
+              <span className="text-emerald-400">{filteredModules.length} Modules</span>
+              <span>•</span>
+              <span className="text-sky-400">{filteredPlaybooks.length} Policies</span>
+            </div>
+          )}
+        </div>
+
+        {/* Quick Filter Tag Chips */}
+        <div className="flex flex-wrap items-center gap-2 text-xs pt-1">
+          <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider mr-1">Quick Search Tags:</span>
+          {[
+            { label: '3-Strike Policy', query: '3-Strike' },
+            { label: 'Audit Log', query: 'Audit Log' },
+            { label: 'WhatsApp Meta', query: 'WhatsApp' },
+            { label: 'Broadcasts', query: 'Broadcast' },
+            { label: 'CBC Alignment', query: 'CBC' },
+            { label: 'Socratic AI', query: 'Socratic AI' },
+            { label: 'Accessibility UDL', query: 'Dyslexia' },
+            { label: 'Veo Video', query: 'Veo' },
+            { label: 'PDF Export', query: 'PDF' },
+          ].map((tag) => (
+            <button
+              key={tag.label}
+              onClick={() => setSearchTerm(searchTerm === tag.query ? '' : tag.query)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer border ${
+                searchTerm.toLowerCase() === tag.query.toLowerCase()
+                  ? 'bg-[#5f6f52] text-white border-[#a9b388] shadow-sm'
+                  : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
+              }`}
+            >
+              #{tag.label}
+            </button>
+          ))}
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="text-[11px] font-bold text-rose-400 hover:text-rose-300 hover:underline ml-auto cursor-pointer"
+            >
+              Reset Search Filter
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Navigation Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-950/80 p-2 rounded-2xl border border-slate-800">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setActiveTab('modules')}
-            className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2 ${
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2 cursor-pointer ${
               activeTab === 'modules'
                 ? 'bg-[#5f6f52] text-white shadow-md'
                 : 'text-slate-400 hover:text-white hover:bg-slate-900'
             }`}
           >
             <Cpu className="w-4 h-4" />
-            <span>App Parts & Capabilities ({APP_MODULES.length})</span>
+            <span>App Parts & Capabilities ({filteredModules.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('playbooks')}
-            className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2 ${
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2 cursor-pointer ${
               activeTab === 'playbooks'
                 ? 'bg-[#5f6f52] text-white shadow-md'
                 : 'text-slate-400 hover:text-white hover:bg-slate-900'
             }`}
           >
             <BookOpen className="w-4 h-4" />
-            <span>Role Standard Playbooks (Admin, Teacher, Student, Parent)</span>
+            <span>Role Standard Playbooks ({filteredPlaybooks.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('seo-audit')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === 'seo-audit'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+            }`}
+          >
+            <Globe className="w-4 h-4 text-emerald-400" />
+            <span>SEO Audit Utility & Logs</span>
           </button>
         </div>
 
@@ -538,21 +844,10 @@ export default function AdminPlaybook() {
       {/* TAB 1: MODULES & CAPABILITIES */}
       {activeTab === 'modules' && (
         <div className="space-y-6">
-          {/* Filters & Search */}
-          <div className="flex flex-col md:flex-row items-center gap-4 bg-slate-900/80 p-4 rounded-2xl border border-slate-800">
-            <div className="relative flex-1 w-full">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-              <input
-                type="text"
-                placeholder="Search modules, capabilities, features, or admin controls..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-[#a9b388]"
-              />
-            </div>
-
-            <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
-              <span className="text-[11px] font-bold text-slate-400 shrink-0">Category:</span>
+          {/* Category Filter */}
+          <div className="flex items-center justify-between bg-slate-900/80 p-4 rounded-2xl border border-slate-800">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
+              <span className="text-[11px] font-bold text-slate-400 shrink-0">Category Filter:</span>
               <select
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
@@ -564,6 +859,10 @@ export default function AdminPlaybook() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="text-xs text-slate-400 font-medium">
+              Showing <strong className="text-white font-bold">{filteredModules.length}</strong> of {APP_MODULES.length} modules
             </div>
           </div>
 
@@ -677,141 +976,195 @@ export default function AdminPlaybook() {
       {/* TAB 2: ALL ROLE PLAYBOOKS */}
       {activeTab === 'playbooks' && (
         <div className="space-y-8">
-          {/* Admin Playbook */}
-          <div className="bg-slate-950/80 border border-[#5f6f52]/50 rounded-2xl p-6 space-y-4">
-            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
-              <Shield className="w-6 h-6 text-[#a9b388]" />
-              <div>
-                <h3 className="text-lg font-bold text-white">Administrator Playbook (System Control SOP)</h3>
-                <p className="text-xs text-slate-400">Root operational mandates, audit logging procedures, and policy enforcement protocols.</p>
-              </div>
+          {filteredPlaybooks.length === 0 ? (
+            <div className="text-center py-12 bg-slate-950/50 rounded-2xl border border-slate-800 space-y-3">
+              <Search className="w-8 h-8 text-slate-600 mx-auto" />
+              <p className="text-xs text-slate-400">No role playbook policies matched "{searchTerm}".</p>
+              <button
+                onClick={() => setSearchTerm('')}
+                className="text-xs font-bold text-[#a9b388] hover:underline cursor-pointer"
+              >
+                Clear search filters
+              </button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-extrabold text-[#a9b388] text-[10px] uppercase block">1. Operational System Health Audit</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Regularly review the "Recent Activity Audit Log" under the Admin tab to track teacher logins, document creation, and safety flags. Check system connectivity status and AI backend response times.
-                </p>
-              </div>
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-extrabold text-[#a9b388] text-[10px] uppercase block">2. User Account Registry</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Pre-register teaching staff using the "Pre-register User Account" tool. Specify exact names, valid email addresses, and appropriate role permissions (Administrator, Teacher, Student, Parent).
-                </p>
-              </div>
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-extrabold text-[#a9b388] text-[10px] uppercase block">3. Policy Violation & Suspension Threshold</span>
-                <p className="text-slate-300 leading-relaxed">
-                  When a user violates platform safety rules or prompts inappropriate content, issue a warning via the Admin Panel. Accounts exceeding the 3-warning threshold are automatically suspended.
-                </p>
-              </div>
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-extrabold text-[#a9b388] text-[10px] uppercase block">4. Granular User Policy Overrides</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Apply targeted user overrides to bypass specific global restrictions (such as extended rate limits or custom document sizes) during school examination windows or faculty research trials.
-                </p>
-              </div>
-            </div>
-          </div>
+          ) : (
+            <>
+              {/* Administrator Playbook */}
+              {filteredPlaybooks.some(p => p.role === 'Administrator') && (
+                <div className="bg-slate-950/80 border border-[#5f6f52]/50 rounded-2xl p-6 space-y-4 shadow-lg">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-3">
+                      <Shield className="w-6 h-6 text-[#a9b388]" />
+                      <div>
+                        <h3 className="text-lg font-bold text-white">Administrator Playbook (System Control SOP)</h3>
+                        <p className="text-xs text-slate-400">Root operational mandates, audit logging procedures, and policy enforcement protocols.</p>
+                      </div>
+                    </div>
+                    {searchTerm && (
+                      <span className="text-[10px] font-extrabold px-2.5 py-1 bg-[#5f6f52]/20 text-[#a9b388] rounded-full border border-[#a9b388]/30">
+                        {filteredPlaybooks.filter(p => p.role === 'Administrator').length} Matched
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    {filteredPlaybooks.filter(p => p.role === 'Administrator').map(policy => (
+                      <div key={policy.id} className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2 hover:border-[#a9b388]/40 transition">
+                        <span className="font-extrabold text-[#a9b388] text-[10px] uppercase block">{policy.step}</span>
+                        <h4 className="font-bold text-white text-xs">{policy.title}</h4>
+                        <p className="text-slate-300 leading-relaxed">{policy.description}</p>
+                        {policy.tags && (
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {policy.tags.map(t => (
+                              <button
+                                key={t}
+                                onClick={() => setSearchTerm(t)}
+                                className="px-2 py-0.5 bg-slate-950 text-[9px] font-bold text-slate-400 hover:text-[#a9b388] rounded-md border border-slate-800 transition cursor-pointer"
+                              >
+                                #{t}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-          {/* Educator Playbook */}
-          <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-6 space-y-4">
-            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
-              <BookOpen className="w-6 h-6 text-sky-400" />
-              <div>
-                <h3 className="text-lg font-bold text-white">Educator Playbook (Teacher Operations Manual)</h3>
-                <p className="text-xs text-slate-400">Step-by-step workflow for lesson planning, material generation, quality audit, and media enrichment.</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-extrabold text-sky-400 text-[10px] uppercase block">1. Curriculum Navigation & Objectives</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Select your target Grade level (Kenyan CBC, Standard 8, or Form 1-4) and specify Subject, Strand, and Sub-strand to load national learning outcomes directly into the prompt engine.
-                </p>
-              </div>
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-extrabold text-sky-400 text-[10px] uppercase block">2. Guided AI Generation & Differentiation</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Use the AI Document Studio to generate structured lesson plans, schemes of work, and study guides. Configure cognitive levels (Bloom's Taxonomy) and student differentiation options.
-                </p>
-              </div>
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-extrabold text-sky-400 text-[10px] uppercase block">3. Quality Audit & Auto-Fix</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Submit materials to the AI Expert Reviewer to obtain an official pedagogical score. Use the one-click "Auto-Fix" feature to refine unaligned objectives or ambiguous rubrics.
-                </p>
-              </div>
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-extrabold text-sky-400 text-[10px] uppercase block">4. Visual Video Enrichment & Export</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Generate educational video clips in the AI Video Studio to demonstrate complex visual phenomena. Embed media into notes and export clean PDF or DOCX copies for print.
-                </p>
-              </div>
-            </div>
-          </div>
+              {/* Educator Playbook */}
+              {filteredPlaybooks.some(p => p.role === 'Educator') && (
+                <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-lg">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-3">
+                      <BookOpen className="w-6 h-6 text-sky-400" />
+                      <div>
+                        <h3 className="text-lg font-bold text-white">Educator Playbook (Teacher Operations Manual)</h3>
+                        <p className="text-xs text-slate-400">Step-by-step workflow for lesson planning, material generation, quality audit, and media enrichment.</p>
+                      </div>
+                    </div>
+                    {searchTerm && (
+                      <span className="text-[10px] font-extrabold px-2.5 py-1 bg-sky-500/10 text-sky-400 rounded-full border border-sky-500/20">
+                        {filteredPlaybooks.filter(p => p.role === 'Educator').length} Matched
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    {filteredPlaybooks.filter(p => p.role === 'Educator').map(policy => (
+                      <div key={policy.id} className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2 hover:border-sky-500/40 transition">
+                        <span className="font-extrabold text-sky-400 text-[10px] uppercase block">{policy.step}</span>
+                        <h4 className="font-bold text-white text-xs">{policy.title}</h4>
+                        <p className="text-slate-300 leading-relaxed">{policy.description}</p>
+                        {policy.tags && (
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {policy.tags.map(t => (
+                              <button
+                                key={t}
+                                onClick={() => setSearchTerm(t)}
+                                className="px-2 py-0.5 bg-slate-950 text-[9px] font-bold text-slate-400 hover:text-sky-400 rounded-md border border-slate-800 transition cursor-pointer"
+                              >
+                                #{t}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-          {/* Student Playbook */}
-          <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-6 space-y-4">
-            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
-              <Sparkles className="w-6 h-6 text-amber-400" />
-              <div>
-                <h3 className="text-lg font-bold text-white">Student Playbook (Self-Paced Learning Guide)</h3>
-                <p className="text-xs text-slate-400">Navigating adaptive learning pathways, engaging Socratic AI tutors, and phonetics practice.</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-extrabold text-amber-400 text-[10px] uppercase block">1. Adaptive Trail Confidence Rating</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Rate your topic confidence (Low, Medium, High) in the Learning Path Workspace. Low confidence builds foundational scaffolding, while high confidence unlocks project challenges.
-                </p>
-              </div>
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-extrabold text-amber-400 text-[10px] uppercase block">2. Socratic AI Tutor Assistance</span>
-                <p className="text-slate-300 leading-relaxed">
-                  When stuck on a concept, open the Socratic AI sidebar. The tutor asks guiding questions to help you discover answers independently, building critical problem-solving skills.
-                </p>
-              </div>
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-extrabold text-amber-400 text-[10px] uppercase block">3. Speech & Pronunciation Science</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Use the Visual Phonetics Studio to inspect tongue placement, velum movement, and vocal cord vibration animations for English and Swahili phonetic sound drills.
-                </p>
-              </div>
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-extrabold text-amber-400 text-[10px] uppercase block">4. Personal Accessibility Settings</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Turn on Dyslexic font styling, adjust text line spacing, or enable multi-regional Text-to-Speech audio reading in Settings for a comfortable learning environment.
-                </p>
-              </div>
-            </div>
-          </div>
+              {/* Student Playbook */}
+              {filteredPlaybooks.some(p => p.role === 'Student') && (
+                <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-lg">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-3">
+                      <Sparkles className="w-6 h-6 text-amber-400" />
+                      <div>
+                        <h3 className="text-lg font-bold text-white">Student Playbook (Self-Paced Learning Guide)</h3>
+                        <p className="text-xs text-slate-400">Navigating adaptive learning pathways, engaging Socratic AI tutors, and phonetics practice.</p>
+                      </div>
+                    </div>
+                    {searchTerm && (
+                      <span className="text-[10px] font-extrabold px-2.5 py-1 bg-amber-500/10 text-amber-400 rounded-full border border-amber-500/20">
+                        {filteredPlaybooks.filter(p => p.role === 'Student').length} Matched
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    {filteredPlaybooks.filter(p => p.role === 'Student').map(policy => (
+                      <div key={policy.id} className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2 hover:border-amber-500/40 transition">
+                        <span className="font-extrabold text-amber-400 text-[10px] uppercase block">{policy.step}</span>
+                        <h4 className="font-bold text-white text-xs">{policy.title}</h4>
+                        <p className="text-slate-300 leading-relaxed">{policy.description}</p>
+                        {policy.tags && (
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {policy.tags.map(t => (
+                              <button
+                                key={t}
+                                onClick={() => setSearchTerm(t)}
+                                className="px-2 py-0.5 bg-slate-950 text-[9px] font-bold text-slate-400 hover:text-amber-400 rounded-md border border-slate-800 transition cursor-pointer"
+                              >
+                                #{t}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-          {/* Parent Playbook */}
-          <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-6 space-y-4">
-            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
-              <Users className="w-6 h-6 text-purple-400" />
-              <div>
-                <h3 className="text-lg font-bold text-white">Parent Playbook (Home Study & Progress Monitoring)</h3>
-                <p className="text-xs text-slate-400">Monitoring learner milestones, reviewing competency scorecards, and setting up home learning profiles.</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-extrabold text-purple-400 text-[10px] uppercase block">1. Competency Scorecard Review</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Check your child's competency ratings (Exceeding, Meeting, Approaching Expectation) across subject strands to celebrate achievements and identify revision needs.
-                </p>
-              </div>
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-extrabold text-purple-400 text-[10px] uppercase block">2. Home Accessibility Profiles</span>
-                <p className="text-slate-300 leading-relaxed">
-                  Configure specialized learner profiles (such as ADHD Focus scaffolding, Dyslexia typography, or Swahili/English TTS reading) in Settings to match home study needs.
-                </p>
-              </div>
-            </div>
-          </div>
+              {/* Parent Playbook */}
+              {filteredPlaybooks.some(p => p.role === 'Parent') && (
+                <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-lg">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-3">
+                      <Users className="w-6 h-6 text-purple-400" />
+                      <div>
+                        <h3 className="text-lg font-bold text-white">Parent Playbook (Home Study & Progress Monitoring)</h3>
+                        <p className="text-xs text-slate-400">Monitoring learner milestones, reviewing competency scorecards, and setting up home learning profiles.</p>
+                      </div>
+                    </div>
+                    {searchTerm && (
+                      <span className="text-[10px] font-extrabold px-2.5 py-1 bg-purple-500/10 text-purple-400 rounded-full border border-purple-500/20">
+                        {filteredPlaybooks.filter(p => p.role === 'Parent').length} Matched
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    {filteredPlaybooks.filter(p => p.role === 'Parent').map(policy => (
+                      <div key={policy.id} className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2 hover:border-purple-500/40 transition">
+                        <span className="font-extrabold text-purple-400 text-[10px] uppercase block">{policy.step}</span>
+                        <h4 className="font-bold text-white text-xs">{policy.title}</h4>
+                        <p className="text-slate-300 leading-relaxed">{policy.description}</p>
+                        {policy.tags && (
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {policy.tags.map(t => (
+                              <button
+                                key={t}
+                                onClick={() => setSearchTerm(t)}
+                                className="px-2 py-0.5 bg-slate-950 text-[9px] font-bold text-slate-400 hover:text-purple-400 rounded-md border border-slate-800 transition cursor-pointer"
+                              >
+                                #{t}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* TAB 3: SEO AUDIT UTILITY & LOGS */}
+      {activeTab === 'seo-audit' && (
+        <div className="space-y-6">
+          <SEOAuditWidget autoScanIntervalSeconds={60} />
         </div>
       )}
 

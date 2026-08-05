@@ -612,8 +612,8 @@ export default function PrintPreview({ document: docObj, onClose, onUpdate }: Pr
                         <span className="truncate">{h.text}</span>
                       </a>
                       <span className="print-toc-leader flex-1 border-b border-dotted border-slate-300 mx-2"></span>
-                      <a href={`#${h.id}`} className="print-toc-page-num text-slate-600 font-mono text-[11px] shrink-0">
-                        {/* In physical printing, CSS target-counter(attr(href), page) calculates exact target page number */}
+                      <a href={`#${h.id}`} className="print-toc-page-num text-slate-700 font-mono text-[11px] font-bold shrink-0">
+                        Page {h.pageNumber || 1}
                       </a>
                     </li>
                   ))}

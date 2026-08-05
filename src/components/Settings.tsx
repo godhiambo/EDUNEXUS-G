@@ -9,8 +9,7 @@ import {
   connectGoogleWorkspace,
   getGoogleWorkspaceToken,
   getGoogleWorkspaceUser,
-  disconnectGoogleWorkspace,
-  backupDocumentToDrive
+  disconnectGoogleWorkspace
 } from '../lib/googleWorkspace';
 import { 
   Settings as SettingsIcon, 
@@ -48,6 +47,8 @@ import {
   KeyRound
 } from 'lucide-react';
 import AboutModal from './AboutModal';
+import PublicFileUploader from './PublicFileUploader';
+import OAuthVerificationAssistant from './OAuthVerificationAssistant';
 import AppIconShowcaseModal from './AppIconShowcaseModal';
 
 interface ServerHealthMetrics {
@@ -92,6 +93,24 @@ export default function Settings({ documents = [] }: SettingsProps) {
       setResetStatus({ type: 'error', message: err?.message || 'Failed to send password reset email.' });
     } finally {
       setIsResettingPassword(false);
+    }
+  };
+
+  const [whatsappFormatPref, setWhatsappFormatPref] = useState<'auto' | 'mobile_text' | 'pdf_document' | 'image_document' | 'rich_report'>('auto');
+  const [whatsappPrefSaved, setWhatsappPrefSaved] = useState(false);
+
+  const handleSaveWhatsappPref = async (pref: 'auto' | 'mobile_text' | 'pdf_document' | 'image_document' | 'rich_report') => {
+    setWhatsappFormatPref(pref);
+    try {
+      await fetch('/api/whatsapp/preference', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user?.uid, preferredOutputFormat: pref })
+      });
+      setWhatsappPrefSaved(true);
+      setTimeout(() => setWhatsappPrefSaved(false), 2500);
+    } catch (err) {
+      console.error('Failed to save WhatsApp preference:', err);
     }
   };
   const { language, aiLanguage, setLanguage, setAiLanguage, t } = useLanguage();
@@ -366,22 +385,25 @@ export default function Settings({ documents = [] }: SettingsProps) {
     });
 
     try {
-      let backedUpCount = 0;
-      for (const doc of documents) {
-        await backupDocumentToDrive(doc);
-        backedUpCount++;
-        setBackupProgress(p => ({ ...p, current: backedUpCount }));
-      }
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(documents, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `EduNexus_Curriculum_Library_Backup_${new Date().toISOString().slice(0, 10)}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+
       setBackupProgress(p => ({
         ...p,
+        current: documents.length,
         active: false,
-        success: `Successfully backed up and synchronized all ${documents.length} curriculum documents directly to your "EduNexus" folder on Google Drive!`
+        success: `Successfully exported a complete JSON backup containing all ${documents.length} curriculum documents!`
       }));
     } catch (err: any) {
       setBackupProgress(p => ({
         ...p,
         active: false,
-        error: `Backup interrupted: ${err.message || 'An error occurred during Google Drive backup.'}`
+        error: `Export failed: ${err.message || 'An error occurred during backup.'}`
       }));
     } finally {
       setIsWorkspaceLoading(false);
@@ -853,6 +875,64 @@ export default function Settings({ documents = [] }: SettingsProps) {
           {/* Dedicated Language Switcher Component */}
           <LanguageSwitcher />
 
+          {/* Preferred WhatsApp Output Format Settings Card */}
+          <div className="bg-gradient-to-br from-slate-900 via-emerald-950 to-slate-900 border-2 border-[#25D366]/40 rounded-2xl p-6 text-white shadow-md space-y-4">
+            <div className="flex items-center justify-between border-b border-[#25D366]/20 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#25D366]/20 border border-[#25D366]/40 p-2 flex items-center justify-center shrink-0">
+                  <Smartphone className="w-5 h-5 text-[#25D366]" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
+                    <span>Preferred WhatsApp Output Format</span>
+                    {whatsappPrefSaved && (
+                      <span className="text-[10px] bg-[#25D366] text-slate-950 font-black px-2 py-0.5 rounded-full animate-pulse">
+                        Saved
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-[11px] text-slate-300">Choose how AI lesson plans, exams, reports, and formulas are delivered to your WhatsApp</p>
+                </div>
+              </div>
+              <span className="px-2.5 py-0.5 bg-[#25D366]/20 text-[#25D366] border border-[#25D366]/40 text-[10px] font-black uppercase tracking-wider rounded-full">
+                Active Integration
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 pt-1">
+              {[
+                { id: 'auto', title: '🤖 Auto-Select', subtitle: 'Recommended', desc: 'AI chooses best format dynamically' },
+                { id: 'mobile_text', title: '📱 Mobile Text', subtitle: 'Quick Reading', desc: 'Formatted WhatsApp text with emojis' },
+                { id: 'pdf_document', title: '📄 PDF Document', subtitle: 'Printable', desc: 'Branded EduNexus PDF + preview image' },
+                { id: 'image_document', title: '🖼️ Image Card', subtitle: 'Visual Card', desc: 'High-res document PNG image card' },
+                { id: 'rich_report', title: '📊 Rich Report', subtitle: 'Full Analytics', desc: 'Comprehensive multi-page PDF report' }
+              ].map((fmt) => (
+                <div
+                  key={fmt.id}
+                  onClick={() => handleSaveWhatsappPref(fmt.id as any)}
+                  className={`p-3.5 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
+                    whatsappFormatPref === fmt.id
+                      ? 'bg-[#25D366]/20 border-[#25D366] text-white shadow-md scale-[1.02]'
+                      : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-[#25D366]/50'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <span className="text-xs font-black text-[#25D366] block">{fmt.title}</span>
+                    <span className="text-[9px] font-bold uppercase text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 inline-block">
+                      {fmt.subtitle}
+                    </span>
+                    <p className="text-[10px] text-slate-300 leading-tight mt-1.5">{fmt.desc}</p>
+                  </div>
+                  {whatsappFormatPref === fmt.id && (
+                    <div className="mt-2 text-[10px] font-extrabold text-[#25D366] flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5" /> Selected
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
             {/* Sync Settings */}
           <div className="bg-white border border-[#e5e1da] rounded-2xl shadow-sm p-6 space-y-4">
             <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
@@ -959,6 +1039,20 @@ export default function Settings({ documents = [] }: SettingsProps) {
                 </div>
               </div>
             </div>
+
+            {/* Google OAuth Verification Assistant (Admin Only) */}
+            {profile?.role === 'Administrator' && (
+              <div className="md:col-span-2">
+                <OAuthVerificationAssistant />
+              </div>
+            )}
+
+            {/* Public Directory HTML Verification File Uploader (Admin Only) */}
+            {profile?.role === 'Administrator' && (
+              <div className="md:col-span-2">
+                <PublicFileUploader />
+              </div>
+            )}
 
             {/* Google Drive Sync & Backup Block */}
             <div className="bg-white border border-[#e5e1da] rounded-2xl shadow-sm overflow-hidden md:col-span-2">

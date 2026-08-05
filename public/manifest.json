@@ -1,25 +1,64 @@
 {
   "name": "EduNexus",
   "short_name": "EduNexus",
-  "description": "An AI-powered assistant for teachers to generate curriculum-aligned lesson plans, schemes of work, worksheets, notes, and rubrics.",
+  "description": "EduNexus is an AI-powered education platform that helps students master concepts, assists teachers with lesson preparation, enables parents to monitor learner progress, and empowers schools with intelligent educational tools.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#fcfbf9",
+  "background_color": "#0b172a",
   "theme_color": "#5f6f52",
   "categories": ["education", "productivity"],
   "icons": [
     {
-      "src": "/icon.svg",
-      "sizes": "192x192 512x512",
-      "type": "image/svg+xml",
+      "src": "/favicon-16x16.png",
+      "sizes": "16x16",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon.svg",
-      "sizes": "192x192 512x512",
-      "type": "image/svg+xml",
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/maskable-icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
   ]
 }

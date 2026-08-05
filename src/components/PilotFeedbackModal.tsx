@@ -20,7 +20,7 @@ interface PilotFeedbackModalProps {
   onSuccess: () => void;
 }
 
-export default function PilotFeedbackModal({ isOpen, onClose, onSuccess }: PilotFeedbackModalProps) {
+export function PilotFeedbackModal({ isOpen, onClose, onSuccess }: PilotFeedbackModalProps) {
   const { user, profile } = useAuth();
   
   // Rating States
@@ -357,3 +357,5 @@ export default function PilotFeedbackModal({ isOpen, onClose, onSuccess }: Pilot
     </div>
   );
 }
+
+export default PilotFeedbackModal;

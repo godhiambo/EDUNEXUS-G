@@ -320,6 +320,35 @@ service cloud.firestore {
       allow write: if isSignedIn();
     }
 
+    // WhatsApp Integration Collections
+    match /whatsapp_messages/{messageId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() || true; // Server webhook and authenticated users
+    }
+
+    match /whatsapp_conversations/{phoneNumber} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() || true;
+    }
+
+    match /whatsapp_links/{phoneNumber} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+
+    match /whatsapp_broadcasts/{broadcastId} {
+      allow read: if isSignedIn();
+      allow create: if isTeacher();
+      allow update, delete: if isAdmin();
+    }
+
+    match /generated_media/{mediaId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isSignedIn();
+    }
+
     // Health / Connection Test Collection rules
     match /test/{docId} {
       allow read: if true;

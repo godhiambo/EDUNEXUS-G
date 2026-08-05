@@ -5,6 +5,9 @@ import { UserRole } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { AuthBackgroundPattern, GeometricPatternType } from './AuthBackgroundPattern';
 import PasswordResetModal from './PasswordResetModal';
+import LandingPage from './public/LandingPage';
+import CurriculumShowcasePage from './public/CurriculumShowcasePage';
+import WorkspaceSelection from './public/WorkspaceSelection';
 import { 
   GraduationCap, 
   Mail, 
@@ -19,10 +22,22 @@ import {
   EyeOff,
   Sparkles,
   Shield,
-  BookOpen
+  BookOpen,
+  Home,
+  Globe,
+  LogIn
 } from 'lucide-react';
 
 export default function AuthScreen() {
+  const [publicPage, setPublicPage] = useState<'home' | 'workspaces' | 'showcase' | 'login'>(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash;
+      if (hash.includes('showcase')) return 'showcase';
+      if (hash.includes('workspaces') || hash.includes('roles')) return 'workspaces';
+      if (hash.includes('login') || hash.includes('auth')) return 'login';
+    }
+    return 'home';
+  });
   const { 
     loginWithEmail, 
     registerWithEmail, 
@@ -193,23 +208,124 @@ export default function AuthScreen() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#06151a] via-[#0b222a] to-[#040e13] flex flex-col items-center justify-center p-4 md:p-6 relative overflow-hidden select-none">
+    <div className="min-h-screen bg-[#fdfbf7] flex flex-col font-sans select-none">
       
-      {/* Rich Dynamic Academic & Geometric Background Pattern */}
-      <AuthBackgroundPattern 
-        currentPattern={selectedPattern}
-        onPatternChange={handlePatternChange}
-        showFloatingBadges={showFloatingBadges}
-        onToggleBadges={handleToggleBadges}
-      />
+      {/* PUBLIC PERSISTENT TOP NAVIGATION BAR */}
+      <nav className="h-16 border-b border-slate-200/90 bg-white/95 backdrop-blur-md sticky top-0 z-40 px-4 sm:px-8 flex items-center justify-between shadow-xs">
+        <div 
+          onClick={() => setPublicPage('home')}
+          className="flex items-center gap-2.5 cursor-pointer group"
+        >
+          <img src="/icon.svg" className="w-8 h-8 rounded-xl shadow-xs group-hover:scale-105 transition" alt="EduNexus" referrerPolicy="no-referrer" />
+          <div>
+            <span className="font-bold text-lg text-slate-900 tracking-tight block leading-none group-hover:text-[#5f6f52] transition">EduNexus</span>
+            <span className="text-[10px] text-amber-800 font-extrabold uppercase tracking-wider block mt-0.5">Competency-Based AI Platform</span>
+          </div>
+        </div>
 
-      {/* Main Glassmorphic Auth Card */}
-      <motion.div
-        initial={{ opacity: 0, y: 20, scale: 0.96 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-        className="w-full max-w-md bg-white/70 backdrop-blur-2xl border border-white/70 shadow-[0_30px_70px_-15px_rgba(0,0,0,0.5)] rounded-[32px] overflow-hidden p-7 md:p-9 space-y-6 relative z-10"
-      >
+        {/* Public Page Links */}
+        <div className="flex items-center gap-1.5 sm:gap-3">
+          <button
+            onClick={() => setPublicPage('home')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              publicPage === 'home' 
+                ? 'bg-[#5f6f52]/10 text-[#5f6f52]' 
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <Home className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Home & Overview</span>
+          </button>
+
+          <button
+            onClick={() => setPublicPage('workspaces')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              publicPage === 'workspaces' 
+                ? 'bg-[#5f6f52]/10 text-[#5f6f52]' 
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5 text-amber-700" />
+            <span>Choose Workspace</span>
+          </button>
+
+          <button
+            onClick={() => setPublicPage('showcase')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              publicPage === 'showcase' 
+                ? 'bg-[#5f6f52]/10 text-[#5f6f52]' 
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5 text-amber-600" />
+            <span className="hidden md:inline">OER Showcase</span>
+          </button>
+
+          <button
+            onClick={() => setPublicPage('login')}
+            className={`px-4 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-1.5 ${
+              publicPage === 'login' 
+                ? 'bg-[#5f6f52] text-white shadow-xs' 
+                : 'bg-slate-900 text-white hover:bg-slate-800'
+            }`}
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            <span>Portal Sign In</span>
+          </button>
+        </div>
+      </nav>
+
+      {/* PUBLIC PAGE CONTENT ROUTING */}
+      {publicPage === 'home' && (
+        <LandingPage
+          onChooseWorkspace={() => setPublicPage('workspaces')}
+          onOpenAuth={(selectedRole) => {
+            if (selectedRole) setRole(selectedRole);
+            setPublicPage('login');
+          }}
+          onNavigateToShowcase={() => setPublicPage('showcase')}
+          onOpenDemoSandbox={() => handleDemoLogin('Teacher')}
+        />
+      )}
+
+      {publicPage === 'workspaces' && (
+        <WorkspaceSelection
+          onSelectRole={(selectedRole) => {
+            setRole(selectedRole);
+            setPublicPage('login');
+          }}
+          onBackToHome={() => setPublicPage('home')}
+        />
+      )}
+
+      {publicPage === 'showcase' && (
+        <CurriculumShowcasePage
+          onOpenAuth={(selectedRole) => {
+            if (selectedRole) setRole(selectedRole);
+            setPublicPage('login');
+          }}
+          onNavigateToHome={() => setPublicPage('home')}
+        />
+      )}
+
+      {publicPage === 'login' && (
+        <div className="flex-1 bg-gradient-to-br from-[#06151a] via-[#0b222a] to-[#040e13] flex flex-col items-center justify-center p-4 md:p-6 relative overflow-hidden">
+          
+          {/* Rich Dynamic Academic & Geometric Background Pattern */}
+          <AuthBackgroundPattern 
+            currentPattern={selectedPattern}
+            onPatternChange={handlePatternChange}
+            showFloatingBadges={showFloatingBadges}
+            onToggleBadges={handleToggleBadges}
+          />
+
+          {/* Main Glassmorphic Auth Card */}
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            className="w-full max-w-md bg-white/70 backdrop-blur-2xl border border-white/70 shadow-[0_30px_70px_-15px_rgba(0,0,0,0.5)] rounded-[32px] overflow-hidden p-7 md:p-9 space-y-6 relative z-10 my-auto"
+          >
         {/* Entrance Shimmer Beam Overlay */}
         <motion.div
           initial={{ x: '-100%', opacity: 0 }}
@@ -551,10 +667,17 @@ export default function AuthScreen() {
                     <div>
                       <h4 className="font-extrabold text-amber-950 text-[13px]">Network Connection Error</h4>
                       <p className="mt-1 text-amber-900/90 leading-relaxed font-semibold">
-                        Unable to reach authentication services. Please check your internet connection and try again.
+                        Unable to reach authentication services. You can continue using EduNexus in Sandbox Mode without internet authentication.
                       </p>
                     </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDemoLogin(role || 'Teacher')}
+                    className="w-full py-2 bg-amber-700 hover:bg-amber-800 text-white font-extrabold rounded-xl transition shadow-xs cursor-pointer text-center text-[11px]"
+                  >
+                    Enter Sandbox Mode ({role || 'Teacher'})
+                  </button>
                 </div>
               ) : (
                 <div className="bg-red-50 border border-red-100 text-red-900 rounded-xl p-3 flex gap-2 text-xs">
@@ -714,8 +837,9 @@ export default function AuthScreen() {
           </motion.button>
         </form>
         </motion.div>
-
       </motion.div>
+    </div>
+  )}
 
       {/* Google Role Selector Modal */}
       <AnimatePresence>

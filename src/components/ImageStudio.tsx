@@ -53,6 +53,7 @@ const SUGGESTED_PROMPTS = [
 
 export default function ImageStudio() {
   const { profile } = useAuth();
+  const isAdmin = profile?.role === 'Administrator';
   
   // Tab: 'create' or 'edit'
   const [activeMode, setActiveMode] = useState<'create' | 'edit'>('create');
@@ -90,6 +91,9 @@ export default function ImageStudio() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
+  // Generation progress state
+  const [generationProgress, setGenerationProgress] = useState<number>(0);
+
   // Rotation messages for the loading screen
   const loadingMessages = [
     'Initializing Gemini Image Synthesis engine...',
@@ -101,13 +105,26 @@ export default function ImageStudio() {
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
+    let progressTimer: NodeJS.Timeout;
     if (isGenerating) {
       setGenerationStep(0);
+      setGenerationProgress(5);
       timer = setInterval(() => {
         setGenerationStep(prev => (prev + 1) % loadingMessages.length);
-      }, 3000);
+      }, 2500);
+      progressTimer = setInterval(() => {
+        setGenerationProgress(prev => {
+          if (prev >= 96) return 96;
+          return Math.min(prev + Math.floor(Math.random() * 4) + 2, 96);
+        });
+      }, 350);
+    } else {
+      setGenerationProgress(0);
     }
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      clearInterval(progressTimer);
+    };
   }, [isGenerating]);
 
   // Handle base image upload (conversion to base64)
@@ -290,7 +307,7 @@ export default function ImageStudio() {
             <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">Creative Image Studio</h1>
           </div>
           <p className="text-xs text-slate-500 mt-1 max-w-2xl leading-relaxed">
-            Harness the power of <strong>gemini-3.1-flash-image</strong> to create beautiful visual aids, textbooks illustrations, and step-by-step custom diagrams directly inside your portal.
+            Harness the power of {isAdmin ? <strong>gemini-3.1-flash-image / emgen</strong> : <strong>AI Visual Synthesis</strong>} to create beautiful visual aids, textbook illustrations, and step-by-step custom diagrams directly inside your portal.
           </p>
         </div>
 
@@ -473,26 +490,47 @@ export default function ImageStudio() {
             </div>
           </div>
 
-          {/* Model Selection */}
-          <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider">
-              AI Generation Engine Model
-            </label>
-            <select
-              value={selectedModel}
-              onChange={(e) => {
-                setSelectedModel(e.target.value);
-                if (e.target.value === 'gemini-3.1-flash-lite-image' || e.target.value === 'nano banana') {
-                  // Lite / Nano Banana does not support large sizes
-                  setImageSize('1K');
-                }
-              }}
-              className="w-full p-2.5 border border-slate-200 focus:border-[#5f6f52] rounded-xl text-xs outline-none bg-white font-medium text-slate-700"
-            >
-              <option value="gemini-3.1-flash-image">emgen / gemini-3.1-flash-image (High Quality / Premium)</option>
-              <option value="gemini-3.1-flash-lite-image">nano banana / gemini-3.1-flash-lite-image (Rapid Generation)</option>
-            </select>
-          </div>
+          {/* Model Selection (Admin Toggle / Non-Admin Fallback Badge) */}
+          {isAdmin ? (
+            <div className="space-y-2 p-3 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/50">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-amber-900 dark:text-amber-200 uppercase tracking-wider">
+                  AI Generation Engine Mode (Admin Only)
+                </label>
+                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100">
+                  Admin Control
+                </span>
+              </div>
+              <select
+                value={selectedModel}
+                onChange={(e) => {
+                  setSelectedModel(e.target.value);
+                  if (e.target.value === 'gemini-3.1-flash-lite-image' || e.target.value === 'nano banana' || e.target.value === 'nanobanana_only') {
+                    // Lite / Nano Banana does not support large sizes
+                    setImageSize('1K');
+                  }
+                }}
+                className="w-full p-2.5 border border-amber-300 dark:border-amber-700 rounded-xl text-xs outline-none bg-white dark:bg-slate-900 font-bold text-slate-800 dark:text-slate-100 cursor-pointer"
+              >
+                <option value="emgen_fallback_nanobanana">🍌 Nano Banana as Fallback for Emgen (Recommended / Dual-Engine)</option>
+                <option value="gemini-3.1-flash-image">🎨 Use Emgen Only (High Quality)</option>
+                <option value="gemini-3.1-flash-lite-image">🍌 Use Nano Banana Only (Rapid)</option>
+              </select>
+            </div>
+          ) : (
+            <div className="p-3 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-800/50 flex items-center justify-between text-xs text-emerald-900 dark:text-emerald-200 font-medium">
+              <div className="flex items-center gap-2">
+                <span className="text-base">⚡</span>
+                <div>
+                  <span className="font-bold block text-slate-800 dark:text-slate-100">Active Engine: Emgen (High Quality)</span>
+                  <span className="text-[10px] text-emerald-700 dark:text-emerald-300 block">Nano Banana configured as automatic fallback if required</span>
+                </div>
+              </div>
+              <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/80 rounded-full text-emerald-800 dark:text-emerald-200">
+                Auto Fallback ON
+              </span>
+            </div>
+          )}
 
           {/* Size & Aspect Ratio Grid */}
           <div className="grid grid-cols-2 gap-4">
@@ -533,16 +571,22 @@ export default function ImageStudio() {
             </div>
           </div>
 
-          {/* Action Trigger Button */}
+          {/* Action Trigger Button with Real-time Progress Bar */}
           <button
             onClick={handleGenerateOrEdit}
             disabled={isGenerating}
-            className="w-full bg-[#5f6f52] hover:bg-[#4b5840] disabled:bg-slate-200 text-white p-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs disabled:cursor-not-allowed"
+            className="w-full bg-[#5f6f52] hover:bg-[#4b5840] disabled:bg-slate-300 text-white p-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs disabled:cursor-not-allowed relative overflow-hidden group"
           >
             {isGenerating ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Weaving Visuals...</span>
+                <div
+                  className="absolute left-0 top-0 bottom-0 bg-[#4b5840]/70 transition-all duration-300 ease-out"
+                  style={{ width: `${generationProgress}%` }}
+                />
+                <div className="relative z-10 flex items-center justify-center gap-2 w-full">
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                  <span>Weaving Visuals ({Math.round(generationProgress)}%)...</span>
+                </div>
               </>
             ) : (
               <>
@@ -561,26 +605,69 @@ export default function ImageStudio() {
             
             <AnimatePresence mode="wait">
               {isGenerating ? (
-                // LOADING STATE
+                // LOADING STATE WITH CIRCULAR RING & PERCENTAGE BAR
                 <motion.div
                   key="loading"
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  className="flex flex-col items-center text-center max-w-sm space-y-4"
+                  className="flex flex-col items-center text-center max-w-md w-full p-6 bg-white/90 backdrop-blur-md rounded-2xl border border-slate-200/80 shadow-lg space-y-5"
                 >
-                  <div className="relative">
-                    <div className="w-16 h-16 rounded-full border-4 border-[#5f6f52]/10 border-t-[#5f6f52] animate-spin"></div>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Sparkles className="w-6 h-6 text-[#5f6f52] animate-pulse" />
+                  {/* Circular Progress Ring */}
+                  <div className="relative w-28 h-28 flex items-center justify-center">
+                    <svg className="w-full h-full transform -rotate-90">
+                      {/* Outer track */}
+                      <circle
+                        cx="56"
+                        cy="56"
+                        r="46"
+                        className="text-slate-150 stroke-current"
+                        strokeWidth="7"
+                        fill="transparent"
+                      />
+                      {/* Progress ring fill */}
+                      <circle
+                        cx="56"
+                        cy="56"
+                        r="46"
+                        className="text-[#5f6f52] stroke-current transition-all duration-300 ease-out"
+                        strokeWidth="7"
+                        strokeDasharray={289}
+                        strokeDashoffset={289 - (289 * generationProgress) / 100}
+                        strokeLinecap="round"
+                        fill="transparent"
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                      <span className="text-xl font-extrabold text-[#5f6f52] font-mono tracking-tight">
+                        {Math.round(generationProgress)}%
+                      </span>
+                      <Sparkles className="w-4 h-4 text-amber-500 animate-pulse mt-0.5" />
                     </div>
                   </div>
                   
-                  <div className="space-y-1.5">
-                    <h3 className="text-sm font-bold text-slate-700">Synthesizing Creative Artwork</h3>
-                    <p className="text-[11px] text-[#5f6f52] font-semibold animate-pulse h-4">
-                      {loadingMessages[generationStep]}
-                    </p>
+                  {/* Message & Progress Bar */}
+                  <div className="w-full space-y-3">
+                    <div className="space-y-1">
+                      <h3 className="text-sm font-bold text-slate-800">Synthesizing Creative Artwork</h3>
+                      <p className="text-xs text-[#5f6f52] font-semibold animate-pulse h-5">
+                        {loadingMessages[generationStep]}
+                      </p>
+                    </div>
+
+                    {/* Linear Percentage Progress Bar */}
+                    <div className="w-full space-y-1.5 pt-1">
+                      <div className="flex justify-between items-center text-[10px] font-bold text-slate-500">
+                        <span>Stage {generationStep + 1} of {loadingMessages.length}</span>
+                        <span className="font-mono">{Math.round(generationProgress)}% Completed</span>
+                      </div>
+                      <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200/60 shadow-inner">
+                        <div
+                          className="h-full bg-gradient-to-r from-[#5f6f52] via-emerald-500 to-amber-500 rounded-full transition-all duration-300 shadow-xs"
+                          style={{ width: `${generationProgress}%` }}
+                        />
+                      </div>
+                    </div>
                   </div>
                 </motion.div>
               ) : outputImageUrl ? (

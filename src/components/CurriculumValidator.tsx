@@ -92,7 +92,7 @@ export default function CurriculumValidator({
 }: CurriculumValidatorProps) {
   const { aiLanguage } = useLanguage();
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [validatorLang, setValidatorLang] = useState<'en' | 'sw'>(aiLanguage || 'en');
+  const [validatorLang, setValidatorLang] = useState<'en' | 'sw'>((aiLanguage as 'en' | 'sw') || 'en');
   const [isValidating, setIsValidating] = useState(false);
   const [isAligning, setIsAligning] = useState(false);
   const [alignSloganIdx, setAlignSloganIdx] = useState(0);

@@ -58,6 +58,7 @@ import {
   Link,
   Code,
   MessageSquare,
+  Wand2,
   MessageCircle,
   Send,
   HelpCircle,
@@ -149,9 +150,7 @@ import {
   scheduleOnGoogleCalendar,
   createGoogleSlidesDeck,
   sendMaterialViaGmail,
-  createAssessmentGoogleForm,
-  backupDocumentToDrive,
-  triggerAutoBackupIfEnabled
+  createAssessmentGoogleForm
 } from '../lib/googleWorkspace';
 import { useAccessibility, VOICE_PROFILES, VoiceProfile } from '../context/AccessibilityContext';
 
@@ -264,6 +263,8 @@ export default function DocumentViewer({
   const [editedTitle, setEditedTitle] = useState(document.title);
   const [showHighlightPopover, setShowHighlightPopover] = useState(false);
   const [isQuickStudyMode, setIsQuickStudyMode] = useState(false);
+  const [isSimplifyingSentence, setIsSimplifyingSentence] = useState(false);
+  const [isSimplifyingParagraph, setIsSimplifyingParagraph] = useState(false);
 
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     return localStorage.getItem('document_dark_mode') === 'true';
@@ -1187,7 +1188,7 @@ Example JSON output format:
   const [isDiagramGeneratorOpen, setIsDiagramGeneratorOpen] = useState(false);
   const [isToolbarImageModalOpen, setIsToolbarImageModalOpen] = useState(false);
   const [toolbarImagePrompt, setToolbarImagePrompt] = useState('');
-  const [toolbarImageModel, setToolbarImageModel] = useState('nano banana');
+  const [toolbarImageModel, setToolbarImageModel] = useState('emgen_fallback_nanobanana');
   const [isGeneratingToolbarImage, setIsGeneratingToolbarImage] = useState(false);
   const [toolbarImageError, setToolbarImageError] = useState<string | null>(null);
   const [toolbarImageTab, setToolbarImageTab] = useState<'create' | 'gallery'>('create');
@@ -2518,9 +2519,6 @@ Example JSON output format:
         // Save to Firestore 'documents' with image chunking support
         const savedDocWithChunks = await saveDocumentWithImageChunks(finalDoc.id, finalDoc);
 
-        // Trigger automated backup to Google Drive if enabled
-        triggerAutoBackupIfEnabled(savedDocWithChunks);
-
         // Create an initial version in the versions collection
         const initialVersionId = `v-1-${Date.now()}`;
         const initialVersion = {
@@ -2680,7 +2678,24 @@ Example JSON output format:
   const [reactions, setReactions] = useState<ParagraphReaction[]>([]);
   const [isReactionsSidebarOpen, setIsReactionsSidebarOpen] = useState(false);
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(false);
+  const [isFocusMode, setIsFocusMode] = useState(false);
   const [isMobileMetadataOpen, setIsMobileMetadataOpen] = useState(false);
+
+  const toggleFocusMode = useCallback(() => {
+    setIsFocusMode((prev) => {
+      const nextFocus = !prev;
+      setIsRightSidebarCollapsed(nextFocus);
+      if (nextFocus) {
+        setIsCommentsOpen(false);
+        setIsAnnotationsOpen(false);
+        setIsReactionsSidebarOpen(false);
+        setIsVersionsSidebarOpen(false);
+        setIsParentChatOpen(false);
+        setIsSocraticSidebarOpen(false);
+      }
+      return nextFocus;
+    });
+  }, []);
 
   // Lesson Pacing Timer/Countdown states
   const [timerDuration, setTimerDuration] = useState<number>(300); // default 5 minutes
@@ -3680,25 +3695,6 @@ Example JSON output format:
     }
   };
 
-  const handleBackupToDrive = async () => {
-    setIsWorkspaceLoading(true);
-    setWorkspaceSuccessMessage(null);
-    setWorkspaceErrorMessage(null);
-    try {
-      const res = await backupDocumentToDrive(document);
-      if (res.status === 'updated') {
-        setWorkspaceSuccessMessage(`Document "${document.title}" backup updated successfully in your "EduNexus" folder!`);
-      } else {
-        setWorkspaceSuccessMessage(`Document "${document.title}" backed up successfully in your "EduNexus" folder!`);
-      }
-      window.open(res.url, '_blank');
-    } catch (err: any) {
-      setWorkspaceErrorMessage(err.message || 'Failed to sync/backup to Google Drive.');
-    } finally {
-      setIsWorkspaceLoading(false);
-    }
-  };
-
   const handleCreateSlides = async () => {
     setIsWorkspaceLoading(true);
     setWorkspaceSuccessMessage(null);
@@ -4323,6 +4319,118 @@ ${profile?.displayName || 'Classroom Teacher'}
     window.document.body.appendChild(element);
     element.click();
     window.document.body.removeChild(element);
+  };
+
+  const handleDownloadWord = () => {
+    try {
+      const title = editedTitle || document.title || 'Document';
+      let htmlContent = baseContent || '';
+
+      // Clean Markdown to HTML tags for Microsoft Word formatting
+      htmlContent = htmlContent
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/^### (.*$)/gim, '<h3 style="color:#5f6f52; font-size:13pt; margin-top:12pt; margin-bottom:6pt; font-weight:bold;">$1</h3>')
+        .replace(/^## (.*$)/gim, '<h2 style="color:#2c3e1e; font-size:15pt; margin-top:14pt; margin-bottom:8pt; border-bottom:1px solid #e5e1da; padding-bottom:4pt; font-weight:bold;">$1</h2>')
+        .replace(/^# (.*$)/gim, '<h1 style="color:#5f6f52; font-size:18pt; margin-top:16pt; margin-bottom:10pt; font-weight:bold;">$1</h1>')
+        .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/^\> (.*$)/gim, '<blockquote style="background:#fdfbf7; border-left:4px solid #5f6f52; padding:8pt 12pt; margin:10pt 0; color:#4a5568; font-style:italic;">$1</blockquote>')
+        .replace(/^---$/gim, '<hr style="border:0; border-top:1px solid #cbd5e1; margin:14pt 0;" />')
+        .replace(/^\s*[\-\*]\s+(.*$)/gim, '<li style="margin-bottom:4pt;">$1</li>')
+        .replace(/(<li.*<\/li>\n?)+/g, '<ul style="margin-bottom:10pt; padding-left:20pt;">$&</ul>')
+        .split('\n')
+        .map(line => {
+          const trimmed = line.trim();
+          if (!trimmed) return '';
+          if (trimmed.startsWith('<h') || trimmed.startsWith('<ul') || trimmed.startsWith('<li') || trimmed.startsWith('<blockquote') || trimmed.startsWith('<hr')) {
+            return line;
+          }
+          return `<p style="margin-bottom:10pt; line-height:1.5; font-size:11pt; color:#334155;">${line}</p>`;
+        })
+        .join('\n');
+
+      const wordDocHtml = `
+        <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+        <head>
+          <meta charset='utf-8'>
+          <title>${title}</title>
+          <!--[if gte mso 9]>
+          <xml>
+            <w:WordDocument>
+              <w:View>Print</w:View>
+              <w:Zoom>100</w:Zoom>
+              <w:DoNotOptimizeForBrowser/>
+            </w:WordDocument>
+          </xml>
+          <![endif]-->
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 1.0in 1.0in 1.0in 1.0in;
+            }
+            body {
+              font-family: 'Calibri', 'Arial', sans-serif;
+              font-size: 11pt;
+              line-height: 1.5;
+              color: #1e293b;
+              background-color: #ffffff;
+            }
+            .header-banner {
+              border-bottom: 2px solid #5f6f52;
+              padding-bottom: 10pt;
+              margin-bottom: 16pt;
+            }
+            .title-text {
+              font-size: 20pt;
+              font-weight: bold;
+              color: #2c3e1e;
+              margin: 0 0 6pt 0;
+            }
+            .meta-box {
+              background-color: #f8fafc;
+              border: 1px solid #e2e8f0;
+              padding: 8pt 12pt;
+              border-radius: 4pt;
+              font-size: 9.5pt;
+              color: #475569;
+              margin-bottom: 16pt;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header-banner">
+            <div class="title-text">${title}</div>
+            <div class="meta-box">
+              <strong>Subject:</strong> ${document.subject || 'General'} &nbsp;|&nbsp;
+              <strong>Topic:</strong> ${document.topic || 'General'} &nbsp;|&nbsp;
+              <strong>Class Level:</strong> ${document.classLevel || 'General'} &nbsp;|&nbsp;
+              <strong>Document Type:</strong> ${document.docType || 'Lesson Material'}
+            </div>
+          </div>
+          <div>
+            ${htmlContent}
+          </div>
+        </body>
+        </html>
+      `;
+
+      const blob = new Blob(['\uFEFF' + wordDocHtml], { type: 'application/msword;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const element = window.document.createElement('a');
+      element.href = url;
+      element.download = `${title.toLowerCase().replace(/[^a-z0-9]/gi, '-')}-${selectedDifferentiatedView}.doc`;
+      window.document.body.appendChild(element);
+      element.click();
+      window.document.body.removeChild(element);
+      URL.revokeObjectURL(url);
+      setWorkspaceSuccessMessage?.('Downloaded Word document (.doc)!');
+    } catch (err) {
+      console.error('Error downloading Word document:', err);
+      alert('Failed to generate Word document. Please try again.');
+    }
   };
 
   const handleDownloadCSV = () => {
@@ -6007,19 +6115,6 @@ ${profile?.displayName || 'Classroom Teacher'}
                 </button>
 
                 <button
-                  onClick={handleBackupToDrive}
-                  disabled={isWorkspaceLoading}
-                  className="w-full bg-emerald-50 border border-emerald-200 text-emerald-800 hover:bg-emerald-100 rounded-xl py-2 px-3 text-xs font-semibold transition flex items-center gap-2 disabled:opacity-60"
-                >
-                  {isWorkspaceLoading ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
-                  ) : (
-                    <CloudUpload className="w-4 h-4 text-emerald-600" />
-                  )}
-                  Sync & Backup to Google Drive
-                </button>
-
-                <button
                   onClick={() => setIsCalendarModalOpen(true)}
                   disabled={isWorkspaceLoading}
                   className="w-full bg-blue-50 border border-blue-200 text-blue-800 hover:bg-blue-100 rounded-xl py-2 px-3 text-xs font-semibold transition flex items-center gap-2 disabled:opacity-60"
@@ -6098,7 +6193,7 @@ ${profile?.displayName || 'Classroom Teacher'}
   };
 
   return (
-    <div className="max-w-4xl mx-auto py-4 space-y-6 print-full-width relative">
+    <div className="max-w-4xl mx-auto py-4 space-y-6 print-full-width relative document-viewer-workspace module-workspace">
       {/* Fixed Top Reading Progress Bar & Quick Jump Navigation */}
       <div className="fixed top-0 left-0 right-0 z-50 no-print">
         {/* Progress Bar Line */}
@@ -6753,8 +6848,8 @@ ${profile?.displayName || 'Classroom Teacher'}
             <button
               type="button"
               onClick={() => setIsDownloadDropdownOpen(!isDownloadDropdownOpen)}
-              className="flex items-center gap-1.5 bg-white border border-[#e5e1da] text-[#5f6f52] hover:bg-slate-50 px-4 py-2 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
-              title="Download document in different formats"
+              className="flex items-center gap-1.5 bg-white dark:bg-slate-800 border border-[#e5e1da] dark:border-slate-700 text-[#5f6f52] dark:text-emerald-400 hover:bg-slate-50 dark:hover:bg-slate-700/60 px-4 py-2 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+              title="Download document in different formats (PDF, Word, Markdown, etc.)"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Download</span>
@@ -6767,73 +6862,99 @@ ${profile?.displayName || 'Classroom Teacher'}
                   className="fixed inset-0 z-40" 
                   onClick={() => setIsDownloadDropdownOpen(false)}
                 />
-                <div className="absolute right-0 mt-2 w-52 bg-white border border-slate-200 rounded-xl shadow-lg py-2 z-50 animate-fadeIn">
-                  <div className="px-3.5 py-1 border-b border-slate-100 mb-1">
-                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Select Export Format</p>
+                <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl py-2 z-50 animate-fadeIn">
+                  <div className="px-3.5 py-1.5 border-b border-slate-100 dark:border-slate-700/60 mb-1">
+                    <p className="text-[9px] font-extrabold text-slate-400 dark:text-slate-400 uppercase tracking-widest">Select Export Format</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleDownloadPNG();
-                      setIsDownloadDropdownOpen(false);
-                    }}
-                    className="w-full text-left px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition border-b border-slate-50"
-                  >
-                    <div className="w-6 h-6 rounded bg-indigo-50 flex items-center justify-center text-indigo-600">
-                      <Image className="w-3.5 h-3.5" />
-                    </div>
-                    <div>
-                      <p className="leading-tight">PNG Image (1-Page A4)</p>
-                      <p className="text-[9px] text-slate-400 font-medium">Single-page A4 document image</p>
-                    </div>
-                  </button>
+                  
+                  {/* PDF Document */}
                   <button
                     type="button"
                     onClick={() => {
                       handleDownloadPDF();
                       setIsDownloadDropdownOpen(false);
                     }}
-                    className="w-full text-left px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition"
+                    className="w-full text-left px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-700/60 flex items-center gap-3 transition"
                   >
-                    <div className="w-6 h-6 rounded bg-red-50 flex items-center justify-center text-red-500">
-                      <FileText className="w-3.5 h-3.5" />
+                    <div className="w-7 h-7 rounded-lg bg-red-50 dark:bg-red-950/60 border border-red-100 dark:border-red-800/60 flex items-center justify-center text-red-500 dark:text-red-400 shrink-0">
+                      <FileText className="w-4 h-4" />
                     </div>
                     <div>
-                      <p className="leading-tight">PDF Document</p>
-                      <p className="text-[9px] text-slate-400 font-medium">Beautifully formatted A4 file</p>
+                      <p className="leading-tight font-extrabold text-slate-900 dark:text-slate-100">PDF Document (.pdf)</p>
+                      <p className="text-[9.5px] text-slate-400 dark:text-slate-400 font-medium mt-0.5">Formatted A4 print-ready PDF</p>
                     </div>
                   </button>
+
+                  {/* Microsoft Word (.doc) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleDownloadWord();
+                      setIsDownloadDropdownOpen(false);
+                    }}
+                    className="w-full text-left px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-700/60 flex items-center gap-3 transition"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-800/60 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                      <FileText className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="leading-tight font-extrabold text-slate-900 dark:text-slate-100">Microsoft Word (.doc)</p>
+                      <p className="text-[9.5px] text-slate-400 dark:text-slate-400 font-medium mt-0.5">Editable document for Word/Pages</p>
+                    </div>
+                  </button>
+
+                  {/* Markdown Source (.md) */}
                   <button
                     type="button"
                     onClick={() => {
                       handleDownloadMarkdown();
                       setIsDownloadDropdownOpen(false);
                     }}
-                    className="w-full text-left px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition"
+                    className="w-full text-left px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-700/60 flex items-center gap-3 transition"
                   >
-                    <div className="w-6 h-6 rounded bg-emerald-50 flex items-center justify-center text-emerald-600">
-                      <Download className="w-3.5 h-3.5" />
+                    <div className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-100 dark:border-emerald-800/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                      <Download className="w-4 h-4" />
                     </div>
                     <div>
-                      <p className="leading-tight">Markdown Source</p>
-                      <p className="text-[9px] text-slate-400 font-medium">Raw .md format for other tools</p>
+                      <p className="leading-tight font-extrabold text-slate-900 dark:text-slate-100">Markdown Source (.md)</p>
+                      <p className="text-[9.5px] text-slate-400 dark:text-slate-400 font-medium mt-0.5">Raw markdown file for code editors</p>
                     </div>
                   </button>
+
+                  {/* PNG Image */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleDownloadPNG();
+                      setIsDownloadDropdownOpen(false);
+                    }}
+                    className="w-full text-left px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-700/60 flex items-center gap-3 transition border-t border-slate-100 dark:border-slate-700/60"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-800/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+                      <Image className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="leading-tight font-extrabold text-slate-900 dark:text-slate-100">PNG Image (1-Page A4)</p>
+                      <p className="text-[9.5px] text-slate-400 dark:text-slate-400 font-medium mt-0.5">Single-page visual image snapshot</p>
+                    </div>
+                  </button>
+
+                  {/* CSV Metadata */}
                   <button
                     type="button"
                     onClick={() => {
                       handleDownloadCSV();
                       setIsDownloadDropdownOpen(false);
                     }}
-                    className="w-full text-left px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition border-t border-slate-50"
+                    className="w-full text-left px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-700/60 flex items-center gap-3 transition"
                     title="Export structured document data and metadata as CSV"
                   >
-                    <div className="w-6 h-6 rounded bg-amber-50 flex items-center justify-center text-amber-600">
-                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                    <div className="w-7 h-7 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-100 dark:border-amber-800/60 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
+                      <FileSpreadsheet className="w-4 h-4" />
                     </div>
                     <div>
-                      <p className="leading-tight">CSV Spreadsheet</p>
-                      <p className="text-[9px] text-slate-400 font-medium">Metadata for grading & school software</p>
+                      <p className="leading-tight font-extrabold text-slate-900 dark:text-slate-100">CSV Spreadsheet (.csv)</p>
+                      <p className="text-[9.5px] text-slate-400 dark:text-slate-400 font-medium mt-0.5">Structured data for LMS & grading</p>
                     </div>
                   </button>
                 </div>
@@ -6951,6 +7072,19 @@ ${profile?.displayName || 'Classroom Teacher'}
           >
             <BookOpen className="w-3.5 h-3.5 text-amber-100" />
             <span>{isQuickStudyMode ? 'Exit Quick Study' : 'Quick Study 📖'}</span>
+          </button>
+
+          <button
+            onClick={toggleFocusMode}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-extrabold shadow-sm transition border cursor-pointer no-print ${
+              isFocusMode
+                ? 'bg-emerald-600 text-white border-emerald-700 ring-2 ring-emerald-500/30'
+                : 'bg-slate-900 hover:bg-slate-800 text-white border-slate-700 shadow-xs'
+            }`}
+            title={isFocusMode ? "Exit Focus Mode: Restores sidebars and navigation menus" : "Activate Focus Mode: Collapses sidebars and navigation menus for a distraction-free writing environment"}
+          >
+            {isFocusMode ? <Minimize2 className="w-3.5 h-3.5 text-emerald-200" /> : <Maximize2 className="w-3.5 h-3.5 text-emerald-400" />}
+            <span>{isFocusMode ? 'Exit Focus Mode' : 'Focus Mode 🎯'}</span>
           </button>
 
           <button
@@ -7469,6 +7603,19 @@ ${profile?.displayName || 'Classroom Teacher'}
               >
                 <BookOpen className="w-3.5 h-3.5 text-amber-600" />
                 <span>Quick Study</span>
+              </button>
+
+              <button
+                onClick={toggleFocusMode}
+                className={`px-3 py-1 rounded-lg text-xs font-extrabold transition flex items-center gap-1 cursor-pointer border ${
+                  isFocusMode
+                    ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm'
+                    : 'bg-slate-900 text-white border-slate-800 hover:bg-slate-800'
+                }`}
+                title={isFocusMode ? "Exit Focus Mode" : "Activate Focus Mode: Collapse sidebars for distraction-free writing & reading"}
+              >
+                {isFocusMode ? <Minimize2 className="w-3.5 h-3.5 text-emerald-200" /> : <Maximize2 className="w-3.5 h-3.5 text-emerald-400" />}
+                <span>{isFocusMode ? "Focusing 🎯" : "Focus Mode"}</span>
               </button>
 
               <button
@@ -8002,6 +8149,111 @@ ${profile?.displayName || 'Classroom Teacher'}
                     )}
                     <span>{isCheckingSpelling ? 'Checking...' : 'Check Spelling'}</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!textareaRef.current) return;
+                      const start = textareaRef.current.selectionStart;
+                      const end = textareaRef.current.selectionEnd;
+                      const selectedText = editedContent.substring(start, end).trim();
+
+                      if (!selectedText) {
+                        alert("Please highlight/select a sentence or phrase in the editor text first before clicking 'Simplify Sentence'.");
+                        return;
+                      }
+
+                      setIsSimplifyingSentence(true);
+                      try {
+                        const response = await fetch('/api/simplify-sentence', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ text: selectedText, targetLevel: 'simple' })
+                        });
+                        const data = await response.json();
+                        if (data && data.simplifiedText) {
+                          const updated = editedContent.substring(0, start) + data.simplifiedText + editedContent.substring(end);
+                          setEditedContent(updated);
+                        } else {
+                          alert(data.error || 'Failed to simplify sentence.');
+                        }
+                      } catch (err: any) {
+                        console.error(err);
+                        alert('Error simplifying sentence: ' + (err.message || err));
+                      } finally {
+                        setIsSimplifyingSentence(false);
+                      }
+                    }}
+                    disabled={isSimplifyingSentence || isSimplifyingParagraph}
+                    className="p-1.5 text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition cursor-pointer flex items-center gap-1.5 text-xs font-bold bg-purple-50/50 border border-purple-100 ml-1.5 shadow-sm disabled:opacity-50"
+                    title="Rephrase highlighted selection to a simpler reading complexity level using Gemini API"
+                  >
+                    {isSimplifyingSentence ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                    )}
+                    <span>{isSimplifyingSentence ? 'Simplifying...' : 'Simplify Sentence'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!textareaRef.current) return;
+                      let start = textareaRef.current.selectionStart;
+                      let end = textareaRef.current.selectionEnd;
+
+                      if (start === end || (end - start < 3)) {
+                        let pStart = editedContent.lastIndexOf('\n\n', start);
+                        pStart = pStart === -1 ? 0 : pStart + 2;
+                        let pEnd = editedContent.indexOf('\n\n', end);
+                        pEnd = pEnd === -1 ? editedContent.length : pEnd;
+
+                        start = pStart;
+                        end = pEnd;
+
+                        textareaRef.current.setSelectionRange(start, end);
+                      }
+
+                      const batchText = editedContent.substring(start, end).trim();
+
+                      if (!batchText) {
+                        alert("Please place your cursor inside a paragraph or select lines to simplify.");
+                        return;
+                      }
+
+                      setIsSimplifyingParagraph(true);
+                      try {
+                        const response = await fetch('/api/simplify-sentence', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ text: batchText, targetLevel: 'simple', isParagraphBatch: true })
+                        });
+                        const data = await response.json();
+                        if (data && data.simplifiedText) {
+                          const updated = editedContent.substring(0, start) + data.simplifiedText + editedContent.substring(end);
+                          setEditedContent(updated);
+                        } else {
+                          alert(data.error || 'Failed to simplify paragraph.');
+                        }
+                      } catch (err: any) {
+                        console.error(err);
+                        alert('Error simplifying paragraph: ' + (err.message || err));
+                      } finally {
+                        setIsSimplifyingParagraph(false);
+                      }
+                    }}
+                    disabled={isSimplifyingSentence || isSimplifyingParagraph}
+                    className="p-1.5 text-indigo-700 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition cursor-pointer flex items-center gap-1.5 text-xs font-bold bg-indigo-50/60 border border-indigo-100 ml-1 shadow-sm disabled:opacity-50"
+                    title="Batch simplify entire highlighted paragraph(s) or surrounding lines at once using Gemini API"
+                  >
+                    {isSimplifyingParagraph ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                    ) : (
+                      <Wand2 className="w-3.5 h-3.5 text-indigo-600" />
+                    )}
+                    <span>{isSimplifyingParagraph ? 'Simplifying Batch...' : 'Simplify Entire Paragraph'}</span>
+                  </button>
                   
                   <div className="ml-auto flex items-center gap-2 px-2 select-none">
                     {syncStatus && (
@@ -8325,8 +8577,8 @@ ${profile?.displayName || 'Classroom Teacher'}
                                 <span className="truncate">{h.text}</span>
                               </a>
                               <span className="print-toc-leader flex-1 border-b border-dotted border-slate-300 mx-2"></span>
-                              <a href={`#${h.id}`} className="print-toc-page-num text-slate-600 font-mono text-[11px] shrink-0">
-                                {/* In physical printing, CSS target-counter calculates page number */}
+                              <a href={`#${h.id}`} className="print-toc-page-num text-slate-700 dark:text-slate-200 font-mono text-[11px] font-bold shrink-0">
+                                Page {h.pageNumber || 1}
                               </a>
                             </li>
                           ))}
@@ -11190,20 +11442,35 @@ ${profile?.displayName || 'Classroom Teacher'}
                   </p>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700 block">
-                    AI Generation Engine
-                  </label>
-                  <select
-                    value={toolbarImageModel}
-                    onChange={(e) => setToolbarImageModel(e.target.value)}
-                    disabled={isGeneratingToolbarImage}
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 outline-none focus:border-[#5f6f52] transition cursor-pointer disabled:bg-slate-50 disabled:text-slate-400"
-                  >
-                    <option value="nano banana">🍌 Nano Banana (Rapid, Lightweight)</option>
-                    <option value="emgen">🎨 Emgen (High Resolution, Ultra-detailed)</option>
-                  </select>
-                </div>
+                {profile?.role === 'Administrator' ? (
+                  <div className="space-y-1.5 p-3 rounded-xl bg-amber-50/60 border border-amber-200">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-amber-900 block">
+                        AI Generation Engine Strategy (Admin Only)
+                      </label>
+                      <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-200 text-amber-900">
+                        Admin
+                      </span>
+                    </div>
+                    <select
+                      value={toolbarImageModel}
+                      onChange={(e) => setToolbarImageModel(e.target.value)}
+                      disabled={isGeneratingToolbarImage}
+                      className="w-full bg-white border border-amber-300 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-[#5f6f52] transition cursor-pointer disabled:bg-slate-50 disabled:text-slate-400 font-bold"
+                    >
+                      <option value="emgen_fallback_nanobanana">🍌 Nano Banana as Fallback for Emgen (Recommended / Dual-Engine)</option>
+                      <option value="emgen">🎨 Use Emgen Only (High Quality)</option>
+                      <option value="nano banana">🍌 Use Nano Banana Only (Rapid)</option>
+                    </select>
+                  </div>
+                ) : (
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-xl text-xs font-medium flex items-center justify-between">
+                    <span className="font-bold">⚡ Engine: Emgen (High Quality)</span>
+                    <span className="text-[10px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-bold">
+                      Nano Banana Fallback Active
+                    </span>
+                  </div>
+                )}
 
                 {toolbarImageError && (
                   <div className="p-3 bg-red-50 border border-red-100 text-red-600 rounded-xl text-xs flex items-start gap-2">

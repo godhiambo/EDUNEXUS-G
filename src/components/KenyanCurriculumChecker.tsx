@@ -73,7 +73,7 @@ export default function KenyanCurriculumChecker({
 }: KenyanCurriculumCheckerProps) {
   const { aiLanguage } = useLanguage();
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [checkerLanguage, setCheckerLanguage] = useState<'en' | 'sw'>(aiLanguage || 'en');
+  const [checkerLanguage, setCheckerLanguage] = useState<'en' | 'sw'>((aiLanguage as 'en' | 'sw') || 'en');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [report, setReport] = useState<ComplianceReport | null>(null);

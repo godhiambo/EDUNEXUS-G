@@ -25,6 +25,22 @@
       },
       "required": ["idx", "data", "total"]
     },
+    "generatedMedia": {
+      "title": "Generated Media Record",
+      "description": "Metadata for AI images and videos generated across EduNexus studios and chat assistants.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "prompt": { "type": "string" },
+        "mediaType": { "type": "string", "enum": ["image", "video"] },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "storageUrl": { "type": "string" },
+        "conversationId": { "type": "string" },
+        "generatorUsed": { "type": "string", "enum": ["Emergen", "Nano Banana", "Veo", "Gemini Omni"] }
+      },
+      "required": ["id", "prompt", "mediaType", "timestamp", "storageUrl"]
+    },
     "document": {
       "title": "Pedagogical Document",
       "description": "A lesson plan, notes, worksheet, or other teacher-admin document.",
@@ -476,9 +492,92 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "routeId", "isTeacherLedModeActive", "currentStopIndex"]
+    },
+    "whatsappMessage": {
+      "title": "WhatsApp Message Record",
+      "description": "Stored WhatsApp incoming and outgoing messages integrated with Gemini AI Tutor and Firestore user profiles.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "messageId": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "userId": { "type": "string" },
+        "userDisplayName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "direction": { "type": "string", "enum": ["incoming", "outgoing"] },
+        "role": { "type": "string", "enum": ["user", "assistant", "system"] },
+        "text": { "type": "string" },
+        "mediaType": { "type": "string" },
+        "mediaUrl": { "type": "string" },
+        "fileName": { "type": "string" },
+        "source": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "phoneNumber", "text", "direction", "timestamp"]
+    },
+    "whatsappConversation": {
+      "title": "WhatsApp Conversation Session",
+      "description": "WhatsApp session metadata and context tracking per user phone number.",
+      "type": "object",
+      "properties": {
+        "phoneNumber": { "type": "string" },
+        "userId": { "type": "string" },
+        "userDisplayName": { "type": "string" },
+        "lastMessageText": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "messageCount": { "type": "integer" },
+        "activeTopic": { "type": "string" }
+      },
+      "required": ["phoneNumber", "lastMessageAt"]
+    },
+    "whatsappLink": {
+      "title": "WhatsApp Phone Number Account Link",
+      "description": "Mapping linking a WhatsApp phone number to an authenticated EduNexus Firebase User profile.",
+      "type": "object",
+      "properties": {
+        "phoneNumber": { "type": "string" },
+        "userId": { "type": "string" },
+        "userDisplayName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userRole": { "type": "string" },
+        "linkedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["phoneNumber", "userId", "linkedAt"]
+    },
+    "whatsappBroadcast": {
+      "title": "WhatsApp Broadcast Announcement / Homework",
+      "description": "Teacher broadcast message, assignment or homework sent to students/parents via WhatsApp Cloud API.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teacherUid": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "type": { "type": "string", "enum": ["homework", "announcement", "reminder"] },
+        "targetAudience": { "type": "string" },
+        "content": { "type": "string" },
+        "sentAt": { "type": "string", "format": "date-time" },
+        "recipientCount": { "type": "integer" }
+      },
+      "required": ["id", "teacherUid", "type", "content", "sentAt"]
     }
   },
   "firestore": {
+    "/whatsapp_messages/{messageId}": {
+      "schema": "whatsappMessage",
+      "description": "Persistent record of all incoming and outgoing WhatsApp messages for EduNexus students, teachers, and AI Tutor."
+    },
+    "/whatsapp_conversations/{phoneNumber}": {
+      "schema": "whatsappConversation",
+      "description": "Conversation thread summary and context per WhatsApp phone number."
+    },
+    "/whatsapp_links/{phoneNumber}": {
+      "schema": "whatsappLink",
+      "description": "Explicit linking between WhatsApp phone numbers and EduNexus accounts."
+    },
+    "/whatsapp_broadcasts/{broadcastId}": {
+      "schema": "whatsappBroadcast",
+      "description": "Teacher homework and announcement broadcasts dispatched over WhatsApp."
+    },
     "/tutorSessions/{sessionId}": {
       "schema": "tutorSession",
       "description": "Store interactive Socratic AI tutor chat sessions for scrolling through and resuming previous conversations."
@@ -570,6 +669,10 @@
     "/fieldTripSessions/{sessionId}": {
       "schema": "fieldTripSession",
       "description": "Live teacher-led virtual field trip session state for real-time student location synchronization and navigation locking."
+    },
+    "/generated_media/{mediaId}": {
+      "schema": "generatedMedia",
+      "description": "Log of image and video media generated across EduNexus studios and chat assistants."
     }
   }
 }

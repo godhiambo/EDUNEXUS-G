@@ -383,5 +383,74 @@ Topsoil contains crucial nutrients for growing crops. Methods to prevent soil er
 3. Mulching to preserve moisture and prevent wind wash.`
       }
     ]
+  },
+  {
+    id: 'book-wikibooks-physics',
+    title: 'Wikibooks High School Physics Handbook (WikiLibrary)',
+    author: 'Wikibooks Community & WikiLibrary',
+    category: 'STEM & Textbooks',
+    subject: 'Physics',
+    gradeLevel: 'Secondary (Grade 9-12)',
+    coverBg: 'from-blue-700 via-indigo-800 to-slate-900',
+    coverEmoji: '⚛️',
+    summary: 'A community-authored open physics textbook from the WikiLibrary project covering kinematics, Newton\'s laws of motion, thermodynamics, electromagnetism, optics, and modern atomic theory.',
+    language: 'English',
+    pageCount: 340,
+    downloadFormats: ['EPUB', 'PDF', 'Web Reader'],
+    license: 'CC BY-SA 4.0 (Wikimedia WikiLibrary)',
+    externalUrl: 'https://en.wikibooks.org/wiki/High_School_Physics',
+    chapters: [
+      {
+        title: 'Section 1: Kinematics & Motion',
+        content: `Kinematics is the branch of classical mechanics that describes the motion of points, bodies (objects), and systems of bodies without considering the forces that cause them to move.
+
+Key Kinematic Quantities:
+- Displacement (s): Vector length from initial to final position.
+- Velocity (v): Rate of change of displacement over time (v = ds/dt).
+- Acceleration (a): Rate of change of velocity over time (a = dv/dt).
+
+Fundamental Equations of Constant Acceleration:
+1. v = u + at
+2. s = ut + 0.5 * a * t^2
+3. v^2 = u^2 + 2as`
+      },
+      {
+        title: 'Section 2: Forces & Newton\'s Laws',
+        content: `Force is an interaction that, when unopposed, will change the motion of an object.
+
+Newton's Three Laws of Motion:
+1. First Law (Inertia): An object remains at rest or continues at constant velocity unless acted upon by a net external force.
+2. Second Law (F = ma): The acceleration of an object is directly proportional to the net force and inversely proportional to its mass.
+3. Third Law (Action & Reaction): When one body exerts a force on a second body, the second body simultaneously exerts a force equal in magnitude and opposite in direction on the first body.`
+      }
+    ]
+  },
+  {
+    id: 'book-wikibooks-world-history',
+    title: 'Wikibooks World History Encyclopedia (WikiLibrary)',
+    author: 'WikiLibrary Open Humanities Contributors',
+    category: 'History & Social Sciences',
+    subject: 'World History',
+    gradeLevel: 'Secondary & Higher Ed',
+    coverBg: 'from-amber-700 via-yellow-800 to-stone-900',
+    coverEmoji: '🌍',
+    summary: 'Comprehensive open-license global history textbook from the WikiLibrary ecosystem covering ancient civilizations, trade routes, the Enlightenment, industrialization, and modern global diplomacy.',
+    language: 'English',
+    pageCount: 520,
+    downloadFormats: ['EPUB', 'PDF', 'Web Reader'],
+    license: 'CC BY-SA 4.0 (Wikimedia WikiLibrary)',
+    externalUrl: 'https://en.wikibooks.org/wiki/World_History',
+    chapters: [
+      {
+        title: 'Chapter 1: Early Human Civilizations & River Valleys',
+        content: `Early human civilizations arose near major river systems that provided fertile agricultural land, reliable water supplies, and natural transportation corridors.
+
+Major River Valley Civilizations:
+1. Mesopotamia (Tigris and Euphrates Rivers): Cuneiform writing, Code of Hammurabi, ziggurats.
+2. Ancient Egypt (Nile River): Hieroglyphics, monumental architecture, solar calendar.
+3. Indus Valley (Indus River): Urban planning, grid layouts, standardized weights and measures.
+4. Early China (Yellow & Yangtze Rivers): Silk production, oracle bones, dynastic mandates.`
+      }
+    ]
   }
 ];

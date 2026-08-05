@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAccessibility } from '../context/AccessibilityContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -76,7 +76,11 @@ export default function VoiceNavigation({
 
   const [isListening, setIsListening] = useState(false);
   const [handsFreeMode, setHandsFreeMode] = useState<boolean>(() => {
-    return localStorage.getItem('voice_nav_hands_free') === 'true';
+    try {
+      return localStorage.getItem('voice_nav_hands_free') === 'true';
+    } catch {
+      return false;
+    }
   });
   const [speechSupported, setSpeechSupported] = useState(false);
   const [transcript, setTranscript] = useState('');

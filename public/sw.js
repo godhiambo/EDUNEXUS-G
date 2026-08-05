@@ -1,10 +1,16 @@
-const CACHE_NAME = 'edunexus-pwa-v4';
+const CACHE_NAME = 'edunexus-pwa-v5';
 const CURRICULUM_CACHE_NAME = 'edunexus-curriculum-docs-v1';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/icon.svg'
+  '/icon.svg',
+  '/pwa-192x192.png',
+  '/pwa-512x512.png',
+  '/maskable-icon-512x512.png',
+  '/apple-touch-icon.png',
+  '/favicon-32x32.png',
+  '/favicon.png'
 ];
 
 // Install Event - Pre-cache core app shell assets
