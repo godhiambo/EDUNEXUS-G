@@ -100,7 +100,7 @@ export default function AISystemAnalyzer() {
     const stages = [
       { progress: 25, text: 'Parsing Express server routes and middleware stack...' },
       { progress: 45, text: 'Auditing Firestore collection schemas & Security Rules...' },
-      { progress: 65, text: 'Evaluating Multi-Engine Gemini AI Cascade & Quota Fallbacks...' },
+      { progress: 65, text: 'Evaluating Multi-Engine EduNexus AI Cascade & Quota Fallbacks...' },
       { progress: 85, text: 'Analyzing UI/UX React Components & Accessibility (WCAG 2.1)...' },
       { progress: 100, text: 'Scan complete! System specification and audit logs refreshed.' }
     ];
@@ -193,7 +193,7 @@ export default function AISystemAnalyzer() {
     { id: 'architecture', title: 'Architecture Analysis', icon: <Layers className="w-5 h-5 text-indigo-600" />, badge: 'Optimal', badgeColor: 'bg-indigo-100 text-indigo-800', description: 'Full-stack client-server topology, Cloud Run specs, and Vite bundling.', score: 96 },
     { id: 'modules', title: 'Module Analysis', icon: <Cpu className="w-5 h-5 text-cyan-600" />, badge: '16 Active', badgeColor: 'bg-cyan-100 text-cyan-800', description: 'Deep audit of 16 core feature modules and data flows.', score: 97 },
     { id: 'roles', title: 'User Role RBAC', icon: <Users className="w-5 h-5 text-purple-600" />, badge: '7 Roles', badgeColor: 'bg-purple-100 text-purple-800', description: 'Access control permissions matrix for Students, Teachers, Parents, and Admins.', score: 99 },
-    { id: 'ai-systems', title: 'AI Systems & Cascade', icon: <Bot className="w-5 h-5 text-amber-600" />, badge: 'Multi-Engine', badgeColor: 'bg-amber-100 text-amber-800', description: 'Gemini 3.5 Flash, Emergen, Nano Banana, Veo 2.0, and Omni model fallbacks.', score: 95 },
+    { id: 'ai-systems', title: 'AI Systems & Cascade', icon: <Bot className="w-5 h-5 text-amber-600" />, badge: 'Multi-Engine', badgeColor: 'bg-amber-100 text-amber-800', description: 'EduNexus Primary AI, Image Engine, Cinema Video Engine, and dual-model fallbacks.', score: 95 },
     { id: 'whatsapp', title: 'WhatsApp Integration', icon: <MessageSquare className="w-5 h-5 text-emerald-600" />, badge: 'Cloud API', badgeColor: 'bg-emerald-100 text-emerald-800', description: 'Meta Graph API webhook verification, media caching, and broadcast engine.', score: 94 },
     { id: 'database', title: 'Database Analysis', icon: <Database className="w-5 h-5 text-blue-600" />, badge: 'Firestore', badgeColor: 'bg-blue-100 text-blue-800', description: 'Collection schemas, security rules, indexes, and real-time listeners.', score: 97 },
     { id: 'api-docs', title: 'API Documentation', icon: <Code className="w-5 h-5 text-teal-600" />, badge: '28 Endpoints', badgeColor: 'bg-teal-100 text-teal-800', description: 'Express endpoints, methods, auth, query params, and JSON schemas.', score: 98 },
@@ -410,7 +410,7 @@ export default function AISystemAnalyzer() {
               <h3 className="font-bold text-base text-white">Live AI System Diagnostic Prompt</h3>
             </div>
             <p className="text-xs text-slate-300">
-              Ask Gemini to inspect any module, analyze specific codebase logic, optimize Firestore queries, or audit security rules in real-time.
+              Ask EduNexus AI to inspect any module, analyze specific codebase logic, optimize Firestore queries, or audit security rules in real-time.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3">
@@ -470,7 +470,7 @@ export default function AISystemAnalyzer() {
 │  Port: 0.0.0.0:3000 | Bundle: dist/server.cjs (esbuild CJS compilation)                 │
 │                                                                                         │
 │  ├── Document Normalizer & Parser Services (pdf-parse, mammoth)                         │
-│  ├── Multi-Engine AI Cascade Dispatcher (Gemini 3.5 Flash, Emergen, Nano Banana, Veo)   │
+│  ├── Multi-Engine AI Cascade Dispatcher (Primary, Secondary, Cinema & Image Engines)   │
 │  ├── Media Caching Service (/api/media/serve/:mediaId)                                  │
 │  ├── WhatsApp Cloud API Gateway (Webhook verification & outgoing payload generator)     │
 │  └── Telemetry & Quota Health Tracker (GeminiQuotaTracker RPM/TPM monitor)             │
@@ -525,8 +525,8 @@ export default function AISystemAnalyzer() {
             {[
               { name: 'AI Socratic Tutor', path: '/src/components/AITutor.tsx', desc: '1:1 interactive mentoring with scaffolding, concept mapping, and misconception diagnosis.', db: '/tutorSessions', api: '/api/chat/socratic-tutor' },
               { name: 'Teacher Assistant & Lesson Studio', path: '/src/components/DocumentCreator.tsx', desc: 'Automated lesson plans, scheme of work, assessment rubrics, and differentiated worksheets.', db: '/documents', api: '/api/generate' },
-              { name: 'Image Studio (Emergen & Nano Banana)', path: '/src/components/ImageStudio.tsx', desc: 'Multi-engine text-to-image generator producing classroom posters and scientific diagrams.', db: '/generated_media', api: '/api/generate-or-edit-image' },
-              { name: 'Video Studio (Veo 2.0 & Omni)', path: '/src/components/VideoStudio.tsx', desc: 'Text-to-video generation engine producing 5s 16:9 animations for STEM experiments.', db: '/generated_media', api: '/api/generate-ai-video' },
+              { name: 'Image Studio (Dual-Engine AI)', path: '/src/components/ImageStudio.tsx', desc: 'Multi-engine text-to-image generator producing classroom posters and scientific diagrams.', db: '/generated_media', api: '/api/generate-or-edit-image' },
+              { name: 'Video Studio (Cinema & Flash AI)', path: '/src/components/VideoStudio.tsx', desc: 'Text-to-video generation engine producing 5s 16:9 animations for STEM experiments.', db: '/generated_media', api: '/api/generate-ai-video' },
               { name: 'WhatsApp Cloud API Gateway', path: '/src/components/WhatsAppDashboardWidget.tsx', desc: 'Two-way webhook engine processing text/voice/media into AI responses over WhatsApp.', db: '/whatsapp_messages', api: '/api/whatsapp/webhook' },
               { name: 'Parent-Teacher Communication Portal', path: '/src/components/ParentTeacherPortal.tsx', desc: 'Shared progress briefs, student milestone alerts, and parent-friendly summaries.', db: '/users', api: '/api/generate-parent-brief' },
               { name: 'Admin Telemetry & Quota Monitor', path: '/src/components/AdminPanel.tsx', desc: 'Live system load monitor, RPM/TPM quota health gauges, and user RBAC controls.', db: '/admin-notifications', api: '/api/gemini-quota' },
@@ -620,7 +620,7 @@ export default function AISystemAnalyzer() {
             <div>
               <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
                 <Bot className="w-5 h-5 text-amber-600" />
-                <span>Multi-Engine Gemini AI Cascade Strategy</span>
+                <span>Multi-Engine AI Cascade Strategy</span>
               </h2>
               <p className="text-xs text-slate-500">Automated fallbacks on 429/503 rate limits using @google/genai SDK.</p>
             </div>
@@ -681,8 +681,8 @@ export default function AISystemAnalyzer() {
             {[
               { method: 'POST', endpoint: '/api/generate', desc: 'General AI generation proxy with multi-tier fallback cascade.' },
               { method: 'POST', endpoint: '/api/chat/socratic-tutor', desc: 'Socratic dialog chat with scaffolding and concept mapping.' },
-              { method: 'POST', endpoint: '/api/generate-or-edit-image', desc: 'Text-to-image engine using Emergen or Nano Banana.' },
-              { method: 'POST', endpoint: '/api/generate-ai-video', desc: 'Text-to-video studio utilizing Google Veo 2.0.' },
+              { method: 'POST', endpoint: '/api/generate-or-edit-image', desc: 'Text-to-image engine using dual generative AI models.' },
+              { method: 'POST', endpoint: '/api/generate-ai-video', desc: 'Text-to-video studio utilizing high-definition cinema AI.' },
               { method: 'GET', endpoint: '/api/gemini-quota', desc: 'Returns live RPM, TPM, and quota exhaustion risk levels.' },
               { method: 'GET', endpoint: '/api/whatsapp/webhook', desc: 'Meta Graph API webhook challenge verification.' },
               { method: 'POST', endpoint: '/api/whatsapp/webhook', desc: 'Processes incoming WhatsApp messages and media.' },
@@ -723,7 +723,7 @@ export default function AISystemAnalyzer() {
           <div className="space-y-4">
             {[
               { priority: 'High', title: 'Redis Distributed Cache for Media Data URLs', impact: 'Reduces Cloud Run memory usage by 40% under peak WhatsApp broadcasts.', effort: '1-2 Days', category: 'Infrastructure' },
-              { priority: 'Medium', title: 'Firestore Vector Search for Semantic Lesson Retrieval', impact: 'Enables instant duplicate detection across 10,000+ teacher schemes of work.', effort: '3-4 Days', category: 'Database' },
+              { priority: 'Medium', title: 'Firestore Vector Search for Semantic Lesson Retrieval', impact: 'Enables instant duplicate detection across all teacher schemes of work.', effort: '3-4 Days', category: 'Database' },
               { priority: 'Low', title: 'WebSockets Live API Voice Streaming for Socratic Tutor', impact: 'Adds natural conversational voice dialog to mobile tutor experience.', effort: '2 Days', category: 'AI Experience' }
             ].map((item, idx) => (
               <div key={idx} className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">

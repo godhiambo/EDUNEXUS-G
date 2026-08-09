@@ -6,6 +6,8 @@ import {
   SUBJECT_OPTIONS,
   GRADE_OPTIONS_CBC,
   GRADE_OPTIONS_STANDARD,
+  getGradeOptionsForCurriculum,
+  ALL_CURRICULA_METADATA,
   GenerationParams,
   DocumentDraft,
   PromptTemplate,
@@ -222,6 +224,7 @@ const BUILT_IN_TEMPLATES: {
   generateParental?: boolean;
   generateDiagram?: boolean;
   diagramType?: 'flowchart' | 'concept-map';
+  lessonLayout?: string;
 }[] = [
   {
     id: 'builtin-lesson-plan',
@@ -300,6 +303,48 @@ const BUILT_IN_TEMPLATES: {
     generateVocabulary: true,
     generateDifferentiated: true,
     generateParental: true
+  },
+  {
+    id: 'builtin-phenomenon-based',
+    templateName: 'Phenomenon-Based Learning (PhenoBL) Plan',
+    description: 'Starts with a captivating real-world phenomenon or environmental mystery to drive cross-curricular inquiry and problem solving.',
+    docType: 'lesson-plan',
+    curriculum: 'cbc',
+    extraPrompt: 'Structure the lesson plan following Nordic Phenomenon-Based Learning (PhenoBL): 1. PHENOMENON HOOK & MYSTERY QUESTION (An authentic real-world observation or environmental anomaly); 2. MULTI-DISCIPLINARY INQUIRY MAP (Connecting Science, Social Studies, Math, and Ethics); 3. COLLABORATIVE TEAM INVESTIGATION (Student-led research tasks); 4. INTERDISCIPLINARY DIALOGUE & ACTION PLAN.',
+    explainLikeMasterTeacher: true,
+    askMentor: false,
+    generateVocabulary: true,
+    generateDifferentiated: true,
+    generateParental: true,
+    lessonLayout: 'phenomenon-based'
+  },
+  {
+    id: 'builtin-design-thinking',
+    templateName: 'Design Thinking Challenge Blueprint',
+    description: 'Guided 5-phase Stanford d.school model: Empathize, Define, Ideate, Prototype, and Test for engineering and social innovation.',
+    docType: 'project-based-guide',
+    curriculum: 'cbc',
+    extraPrompt: 'Structure this unit as a Design Thinking Challenge (5 Phases): 1. EMPATHIZE & USER INTERVIEWS (Understanding user needs and context); 2. DEFINE THE PROBLEM ("How Might We..." challenge statement); 3. BRAINSTORM & IDEATE (Generating rapid solutions without judgment); 4. RAPID PROTOTYPING (Low-fidelity physical/digital models using local materials); 5. TESTING & FEEDBACK LOOPS.',
+    explainLikeMasterTeacher: true,
+    askMentor: true,
+    generateVocabulary: true,
+    generateDifferentiated: true,
+    generateParental: true,
+    lessonLayout: 'design-thinking'
+  },
+  {
+    id: 'builtin-socratic-seminar',
+    templateName: 'Socratic Seminar & Dialogue Guide',
+    description: 'Structured student-led critical dialogue using 6 levels of Socratic questioning, textual evidence, and collaborative reflection.',
+    docType: 'lesson-plan',
+    curriculum: 'cbc',
+    extraPrompt: 'Structure as a Socratic Seminar Guide: 1. OPENING SOCRATIC QUESTION (Thought-provoking, non-binary worldview prompt); 2. TEXTUAL & CASE EVIDENCE ANALYSIS (Rule: every point must reference specific lines or data); 3. 6-LEVEL SOCRATIC QUESTION BANK (Clarification, Assumptions, Evidence, Perspectives, Trade-offs, Meta-questions); 4. SYNTHESIS & REFLECTIVE EXIT SLIP.',
+    explainLikeMasterTeacher: true,
+    askMentor: false,
+    generateVocabulary: true,
+    generateDifferentiated: true,
+    generateParental: false,
+    lessonLayout: 'socratic-seminar'
   }
 ];
 
@@ -730,6 +775,71 @@ const LAYOUT_TEMPLATES_DATA = {
 ## 4. INTERDISCIPLINARY DIALOGUE (10 mins)
 * Join two groups together (e.g., Biology group meets History group).
 * Students teach each other how yeast biological reactions enabled ancient civilizations to feed larger urban populations.`
+  },
+  'design-thinking': {
+    title: 'Design Thinking Challenge (Stanford d.school)',
+    subtitle: '5-Phase Design Model',
+    colorClass: 'from-amber-500/10 to-orange-500/5 border-amber-200 text-amber-800',
+    iconColor: 'text-amber-600',
+    badgeColor: 'bg-amber-100 text-amber-800',
+    bestFor: 'STEM, Engineering, Innovation, Product Design, Social Entrepreneurship, and User-Centered Problem Solving.',
+    description: 'A human-centered problem-solving framework where students Empathize with users, Define problem statements, Ideate creative solutions, Prototype physical or digital models, and Test with real feedback.',
+    stages: [
+      { name: '1. Empathize & User Inquiry', duration: '10 mins', desc: 'Understand real user pain points, needs, and environmental context through interviews or roleplay.' },
+      { name: '2. Define Problem (HMW)', duration: '5 mins', desc: 'Craft a clear "How Might We..." challenge statement focusing on the user need.' },
+      { name: '3. Ideate & Brainstorm', duration: '10 mins', desc: 'Rapid ideation generating multiple creative concepts without initial critique.' },
+      { name: '4. Prototype Solution', duration: '10 mins', desc: 'Build low-fidelity rapid physical/digital prototypes using simple classroom materials.' },
+      { name: '5. Test & User Feedback', duration: '5 mins', desc: 'Test prototypes with peer users, collect structured feedback, and iterate.' }
+    ],
+    sampleSnippet: `# LESSON PLAN: DESIGN THINKING CHALLENGE - ECO-FRIENDLY PACKAGING
+
+## 1. EMPATHIZE (10 mins)
+* **Target User:** Local market vendors producing single-use plastic waste.
+* Conduct rapid partner interviews: *"What makes plastic packaging convenient yet harmful?"*
+
+## 2. DEFINE (5 mins)
+* **How Might We Statement:** *"How might we design a cheap, biodegradable food wrap using agricultural crop waste that protects food freshness?"*
+
+## 3. IDEATE (10 mins)
+* Crazy 8s Brainstorming: Sketch 8 quick packaging ideas in 5 minutes.
+* Cluster into categories: Banana Fiber Mesh, Cassava Starch Film, Beeswax Cloth.
+
+## 4. PROTOTYPE (10 mins)
+* Construct physical packaging prototypes using banana leaves, sisal twine, and paper templates.
+
+## 5. TEST & ITERATE (5 mins)
+* Peer Testing: Evaluate water-resistance, durability, and cost-effectiveness of each prototype.`
+  },
+  'socratic-seminar': {
+    title: 'Socratic Seminar & Critical Dialogue Guide',
+    subtitle: 'Inquiry & Critical Discussion',
+    colorClass: 'from-[#5f6f52]/10 to-emerald-500/5 border-[#5f6f52]/30 text-[#5f6f52]',
+    iconColor: 'text-[#5f6f52]',
+    badgeColor: 'bg-[#5f6f52]/20 text-slate-800',
+    bestFor: 'Ethics, History, Literature, Philosophical Inquiry, Social Studies, and Debating Complex Societal Issues.',
+    description: 'A formal student-led discussion focused on open-ended Socratic questions, textual evidence, active listening, and collective inquiry rather than adversarial debate.',
+    stages: [
+      { name: '1. Opening Question (Worldview)', duration: '5 mins', desc: 'Pose a provocative, non-binary opening question to launch dialogue.' },
+      { name: '2. Textual & Case Analysis', duration: '15 mins', desc: 'Examine primary texts or case studies, citing specific line numbers or evidence.' },
+      { name: '3. Multi-Level Socratic Interrogation', duration: '15 mins', desc: 'Explore assumptions, counter-evidence, trade-offs, and ethical implications.' },
+      { name: '4. Synthesis & Reflection', duration: '5 mins', desc: 'Summarize insights gained, evaluate dialogue quality, and reflect on mindset shifts.' }
+    ],
+    sampleSnippet: `# SOCRATIC SEMINAR GUIDE: ETHICS OF AUTOMATION & THE FUTURE OF WORK
+
+## 1. OPENING SOCRATIC QUESTION (5 mins)
+* *"If automated machines increase industrial output while reducing manual labor jobs, is technology primarily a force for human liberation or socio-economic displacement?"*
+
+## 2. TEXTUAL EVIDENCE & CASE ANALYSIS (15 mins)
+* Students analyze excerpts from economic history texts and modern technology reports.
+* Rule: Every claim made during seminar must reference line numbers or empirical data.
+
+## 3. MULTI-LEVEL SOCRATIC INTERROGATION (15 mins)
+* **Assumptions:** What assumptions are we making about human dignity and labor?
+* **Evidence:** What historical data shows how previous industrial revolutions created new work sectors?
+* **Perspectives:** How would a displaced factory worker vs an urban software developer answer this?
+
+## 4. SYNTHESIS & REFLECTION (5 mins)
+* Students write a 3-sentence exit slip capturing the most profound counter-argument they heard today.`
   }
 };
 
@@ -738,8 +848,8 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
   const { activeLearnerProfile, learnerProfiles, setActiveLearnerProfile } = useAccessibility();
   const [curriculum, setCurriculum] = useState<CurriculumType>('cbc');
   const [docType, setDocType] = useState<DocumentType>('lesson-notes');
-  const [lessonLayout, setLessonLayout] = useState<'default' | '5e-model' | 'direct-instruction' | 'inquiry-based' | 'communicative' | 'audio-lingual' | 'task-based' | 'clil' | 'flipped-classroom' | 'project-based' | 'game-based' | 'phenomenon-based'>('default');
-  const [previewLayout, setPreviewLayout] = useState<'default' | '5e-model' | 'direct-instruction' | 'inquiry-based' | 'communicative' | 'audio-lingual' | 'task-based' | 'clil' | 'flipped-classroom' | 'project-based' | 'game-based' | 'phenomenon-based' | null>(null);
+  const [lessonLayout, setLessonLayout] = useState<'default' | '5e-model' | 'direct-instruction' | 'inquiry-based' | 'communicative' | 'audio-lingual' | 'task-based' | 'clil' | 'flipped-classroom' | 'project-based' | 'game-based' | 'phenomenon-based' | 'design-thinking' | 'socratic-seminar'>('default');
+  const [previewLayout, setPreviewLayout] = useState<'default' | '5e-model' | 'direct-instruction' | 'inquiry-based' | 'communicative' | 'audio-lingual' | 'task-based' | 'clil' | 'flipped-classroom' | 'project-based' | 'game-based' | 'phenomenon-based' | 'design-thinking' | 'socratic-seminar' | null>(null);
   const [subject, setSubject] = useState('');
   const [customSubject, setCustomSubject] = useState('');
   const [classLevel, setClassLevel] = useState('');
@@ -1224,7 +1334,15 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
   
   const [tipIndex, setTipIndex] = useState(0);
 
-  const { profile, systemPolicies } = useAuth();
+  const { profile, systemPolicies, updateUserProfile } = useAuth();
+
+  // Auto-sync active curriculum with user profile preference
+  useEffect(() => {
+    const prefCurr = profile?.primaryCurriculum || profile?.curriculum || profile?.whatsappSettings?.curriculum;
+    if (prefCurr && ['cbc', 'kcse', 'cambridge_primary', 'igcse', 'a_level', 'ib', 'standard'].includes(prefCurr)) {
+      setCurriculum(prefCurr as CurriculumType);
+    }
+  }, [profile?.primaryCurriculum, profile?.curriculum, profile?.whatsappSettings?.curriculum]);
   const [drafts, setDrafts] = useState<DocumentDraft[]>([]);
   const [selectedDraftId, setSelectedDraftId] = useState<string>('');
   const [draftNameInput, setDraftNameInput] = useState<string>('');
@@ -1857,8 +1975,8 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
 
   // Handle grade defaults on curriculum switch
   useEffect(() => {
-    const defaultGrades = curriculum === 'cbc' ? GRADE_OPTIONS_CBC : GRADE_OPTIONS_STANDARD;
-    setClassLevel(defaultGrades[3] || ''); // Default to Grade 1
+    const defaultGrades = getGradeOptionsForCurriculum(curriculum);
+    setClassLevel(defaultGrades[0] || '');
   }, [curriculum]);
 
   // Handle CBC lessons allocation and scheduling defaults automatically
@@ -2521,34 +2639,50 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
 
           <div className="p-6 space-y-6">
             {/* 1. Framework & Document Type */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-5">
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Curriculum Framework</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setCurriculum('cbc')}
-                    className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition ${
-                      curriculum === 'cbc'
-                        ? 'border-emerald-500 bg-emerald-50/50 text-emerald-800 font-semibold shadow-sm'
-                        : 'border-slate-200 hover:border-slate-300 text-slate-600'
-                    }`}
-                  >
-                    <span className="text-sm font-bold">Kenyan CBC</span>
-                    <span className="text-[10px] text-slate-400 mt-0.5">Competency Based</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCurriculum('standard')}
-                    className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition ${
-                      curriculum === 'standard'
-                        ? 'border-emerald-500 bg-emerald-50/50 text-emerald-800 font-semibold shadow-sm'
-                        : 'border-slate-200 hover:border-slate-300 text-slate-600'
-                    }`}
-                  >
-                    <span className="text-sm font-bold">Standard Syllabus</span>
-                    <span className="text-[10px] text-slate-400 mt-0.5">Traditional Outcomes</span>
-                  </button>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-2.5">
+                  <label className="block text-sm font-bold text-slate-800">Curriculum Framework</label>
+                  <span className="text-xs text-slate-500 font-medium">EduNexus formats lesson plans & schemes specifically for each curriculum</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
+                  {ALL_CURRICULA_METADATA.map((item) => {
+                    const isSelected = curriculum === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          const nextCurr = item.id as CurriculumType;
+                          setCurriculum(nextCurr);
+                          if (updateUserProfile) {
+                            updateUserProfile({
+                              primaryCurriculum: nextCurr,
+                              curriculum: nextCurr
+                            });
+                          }
+                        }}
+                        className={`flex flex-col items-center justify-between p-3 rounded-xl border text-center transition cursor-pointer ${
+                          isSelected
+                            ? 'border-emerald-600 bg-emerald-50/90 text-emerald-950 font-semibold shadow-xs ring-2 ring-emerald-500/20'
+                            : 'border-slate-200 hover:border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="text-base">{item.flag}</span>
+                          <span className="text-xs font-bold leading-tight">{item.shortLabel}</span>
+                        </div>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                          isSelected ? 'bg-emerald-200 text-emerald-900' : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {item.badge}
+                        </span>
+                        <span className="text-[10px] text-slate-500 mt-1 line-clamp-2 leading-tight">
+                          {item.region}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -2822,7 +2956,7 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
                   <Settings className="w-5 h-5 text-teal-600 animate-spin" style={{ animationDuration: '6s' }} />
                   <div>
                     <h4 className="text-sm font-bold text-teal-800">Pre-defined Lesson Structure Layout Template</h4>
-                    <p className="text-[11px] text-slate-500">Select a structural framework to guide Gemini in generating the lesson stages, flow, and instructional experiences.</p>
+                    <p className="text-[11px] text-slate-500">Select a structural framework to guide EduNexus AI in generating the lesson stages, flow, and instructional experiences.</p>
                   </div>
                 </div>
 
@@ -3390,7 +3524,7 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
                     <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
                       ⚡ Dual Engine
                     </span>
-                    <span>Note images generated using Emgen with automatic Nano Banana fallback</span>
+                    <span>Note images generated using EduNexus AI with automatic dual-engine fallback</span>
                   </div>
                 )}
               </div>
@@ -3446,13 +3580,9 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
                   className="w-full bg-white border border-slate-250 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-emerald-500 transition"
                   required
                 >
-                  {curriculum === 'cbc'
-                    ? GRADE_OPTIONS_CBC.map((gr) => (
-                        <option key={gr} value={gr}>{gr}</option>
-                      ))
-                    : GRADE_OPTIONS_STANDARD.map((gr) => (
-                        <option key={gr} value={gr}>{gr}</option>
-                      ))}
+                  {getGradeOptionsForCurriculum(curriculum).map((gr) => (
+                    <option key={gr} value={gr}>{gr}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -4836,7 +4966,7 @@ export default function DocumentCreator({ onBack, onGenerate, isGenerating, init
                     Real-Time Search Grounding (Live Fact & Standards Verification)
                   </label>
                   <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                    Connects Gemini directly to Google Search during document generation to pull current educational standards (such as Kenyan KICD CBC strands, NGSS, Cambridge, Common Core, IB), real-world statistics, and verifiable facts, appending verified web references directly to your document.
+                    Connects EduNexus AI directly to Google Search during document generation to pull current educational standards (such as Kenyan KICD CBC strands, NGSS, Cambridge, Common Core, IB), real-world statistics, and verifiable facts, appending verified web references directly to your document.
                   </p>
                 </div>
               </div>

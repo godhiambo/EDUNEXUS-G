@@ -111,7 +111,9 @@ import {
   Sun,
   Compass,
   PenTool,
-  Target
+  Target,
+  ShieldCheck,
+  RefreshCw
 } from 'lucide-react';
 import ConversationalPodcastModal from './ConversationalPodcastModal';
 import ARHologramReaderModal from './ARHologramReaderModal';
@@ -128,6 +130,7 @@ import DocumentVersionWidget from './DocumentVersionWidget';
 import PrintPreview from './PrintPreview';
 import InteractiveQuizBuilder from './InteractiveQuizBuilder';
 import Whiteboard from './Whiteboard';
+import { broadcastDocumentSession, stopDocumentBroadcastSession, subscribeToDocumentBroadcast, DocumentBroadcastData } from '../services/documentBroadcastService';
 import CurriculumStandardsMapper from './CurriculumStandardsMapper';
 import KenyanCurriculumChecker from './KenyanCurriculumChecker';
 import CurriculumValidator from './CurriculumValidator';
@@ -137,9 +140,9 @@ import ReadingLevelAnalyzer from './ReadingLevelAnalyzer';
 import { findRequirements } from '../data/kenyanCurriculumStandards';
 import { VersionDiffViewer } from './VersionDiffViewer';
 import { calculateReadability } from '../utils/readability';
-import { doc, setDoc, updateDoc, deleteDoc, collection, query, where, onSnapshot, orderBy, getDocs, addDoc, collection as firestoreCollection, onSnapshot as firestoreOnSnapshot, query as firestoreQuery, orderBy as firestoreOrderBy, addDoc as firestoreAddDoc, updateDoc as firestoreUpdateDoc, doc as firestoreDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, deleteDoc, collection, query, where, onSnapshot, orderBy, getDocs, addDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, cleanUndefined, handleFirestoreError, OperationType, compressObject, decompressObject, saveDocumentWithImageChunks, db as chatDb, handleFirestoreError as chatHandleError, OperationType as ChatOpType, cleanUndefined as chatCleanUndefined } from '../firebase';
+import { db, storage, cleanUndefined, handleFirestoreError, OperationType, compressObject, decompressObject, saveDocumentWithImageChunks } from '../firebase';
 import {
   getGoogleWorkspaceToken,
   getGoogleWorkspaceUser,
@@ -265,6 +268,91 @@ export default function DocumentViewer({
   const [isQuickStudyMode, setIsQuickStudyMode] = useState(false);
   const [isSimplifyingSentence, setIsSimplifyingSentence] = useState(false);
   const [isSimplifyingParagraph, setIsSimplifyingParagraph] = useState(false);
+
+  // Live Teacher Document Broadcast state & subscription
+  const [isBroadcasting, setIsBroadcasting] = useState(false);
+  const [spotlightInput, setSpotlightInput] = useState('');
+  const [showSpotlightModal, setShowSpotlightModal] = useState(false);
+  const [liveBroadcastNotice, setLiveBroadcastNotice] = useState<string | null>(null);
+  const [activeBroadcastSession, setActiveBroadcastSession] = useState<DocumentBroadcastData | null>(null);
+
+  useEffect(() => {
+    const unsub = subscribeToDocumentBroadcast('global_active_broadcast', (broadcastData) => {
+      setActiveBroadcastSession(broadcastData);
+      if (broadcastData && broadcastData.isBroadcasting && broadcastData.documentId === document.id) {
+        setIsBroadcasting(true);
+        if (isStudent && broadcastData.documentContent && broadcastData.documentContent !== editedContent) {
+          setEditedContent(broadcastData.documentContent);
+          setLiveBroadcastNotice(`Updated in real-time by ${broadcastData.teacherName || 'Teacher'}`);
+          setTimeout(() => setLiveBroadcastNotice(null), 3500);
+        }
+      } else if (broadcastData && broadcastData.documentId === document.id && !broadcastData.isBroadcasting) {
+        setIsBroadcasting(false);
+      }
+    });
+    return () => unsub();
+  }, [document.id, isStudent, editedContent]);
+
+  const handleToggleBroadcast = async () => {
+    if (isBroadcasting) {
+      await stopDocumentBroadcastSession('global_active_broadcast', profile?.uid || 'teacher');
+      setIsBroadcasting(false);
+      setLiveBroadcastNotice('Live broadcast session ended.');
+      setTimeout(() => setLiveBroadcastNotice(null), 3000);
+    } else {
+      await broadcastDocumentSession({
+        sessionId: 'global_active_broadcast',
+        documentId: document.id,
+        documentTitle: editedTitle || document.title,
+        documentContent: editedContent || document.content,
+        documentSubject: document.subject,
+        documentClassLevel: document.classLevel,
+        teacherUid: profile?.uid || 'teacher-host',
+        teacherName: profile?.displayName || 'Educator',
+        isBroadcasting: true,
+        spotlightNote: spotlightInput || null,
+      });
+      setIsBroadcasting(true);
+      setLiveBroadcastNotice('📣 Live Document Broadcast active! Connected students receive your document in real-time.');
+      setTimeout(() => setLiveBroadcastNotice(null), 4000);
+    }
+  };
+
+  const handleSendSpotlightNote = async () => {
+    if (!spotlightInput.trim()) return;
+    await broadcastDocumentSession({
+      sessionId: 'global_active_broadcast',
+      documentId: document.id,
+      documentTitle: editedTitle || document.title,
+      documentContent: editedContent || document.content,
+      documentSubject: document.subject,
+      documentClassLevel: document.classLevel,
+      teacherUid: profile?.uid || 'teacher-host',
+      teacherName: profile?.displayName || 'Educator',
+      isBroadcasting: true,
+      spotlightNote: spotlightInput,
+    });
+    setShowSpotlightModal(false);
+    setLiveBroadcastNotice(`Spotlight note sent to students: "${spotlightInput}"`);
+    setTimeout(() => setLiveBroadcastNotice(null), 3500);
+  };
+
+  const handleSyncEditsToStudents = async () => {
+    await broadcastDocumentSession({
+      sessionId: 'global_active_broadcast',
+      documentId: document.id,
+      documentTitle: editedTitle || document.title,
+      documentContent: editedContent,
+      documentSubject: document.subject,
+      documentClassLevel: document.classLevel,
+      teacherUid: profile?.uid || 'teacher-host',
+      teacherName: profile?.displayName || 'Educator',
+      isBroadcasting: true,
+      spotlightNote: spotlightInput || null,
+    });
+    setLiveBroadcastNotice('Pushed latest document edits live to all student screens!');
+    setTimeout(() => setLiveBroadcastNotice(null), 3500);
+  };
 
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     return localStorage.getItem('document_dark_mode') === 'true';
@@ -1207,6 +1295,7 @@ Example JSON output format:
   const [qrCopied, setQrCopied] = useState(false);
   const [qrColor, setQrColor] = useState('10b981');
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
+  const [isSyncDetailsModalOpen, setIsSyncDetailsModalOpen] = useState(false);
   const [summaryText, setSummaryText] = useState('');
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -3512,6 +3601,7 @@ Example JSON output format:
   // Collaborative cursor/presence tracking
   const lastCursorUpdateRef = useRef<number>(0);
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
+  const activeEditors = useMemo(() => activeSessions.filter(s => s.isEditing), [activeSessions]);
 
   const updateCursorInFirestore = async (x: number | null, y: number | null) => {
     if (!profile || !document.id) return;
@@ -3967,7 +4057,7 @@ Example JSON output format:
       }
     } catch (err) {
       console.error(err);
-      alert('Failed to generate diagram using Gemini. Please verify your API key / limits.');
+      alert('Failed to generate diagram using AI Engine. Please verify your connection / limits.');
     } finally {
       setGeneratingPlaceholders(prev => ({ ...prev, [placeholder]: false }));
     }
@@ -4062,11 +4152,11 @@ Example JSON output format:
         setIsToolbarImageModalOpen(false);
         setToolbarImagePrompt('');
       } else {
-        setToolbarImageError('Failed to retrieve image URL from Gemini response.');
+        setToolbarImageError('Failed to retrieve image URL from AI Engine response.');
       }
     } catch (err: any) {
       console.error(err);
-      setToolbarImageError(err.message || 'Error generating image. Verify your Gemini configuration.');
+      setToolbarImageError(err.message || 'Error generating image. Verify your AI service configuration.');
     } finally {
       setIsGeneratingToolbarImage(false);
     }
@@ -6185,7 +6275,7 @@ ${profile?.displayName || 'Classroom Teacher'}
             <Sparkles className="w-3.5 h-3.5 text-[#5f6f52]" /> Pedagogy Guidelines
           </h4>
           <p className="text-xs text-[#5f6f52]/85 leading-relaxed">
-            This document is generated by the Gemini model with a low temperature settings to align tightly with high-quality teaching structures. Use the **Code Editor** to customize sections or add personalized classroom worksheets before printing.
+            This document is generated by EduNexus AI with fine-tuned pedagogical parameters to align tightly with high-quality teaching structures. Use the **Code Editor** to customize sections or add personalized classroom worksheets before printing.
           </p>
         </div>
       </div>
@@ -6728,6 +6818,48 @@ ${profile?.displayName || 'Classroom Teacher'}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Teacher Live Broadcast Control Button */}
+          {!isStudent && (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={handleToggleBroadcast}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer ${
+                  isBroadcasting
+                    ? 'bg-rose-600 hover:bg-rose-700 text-white ring-2 ring-rose-400 animate-pulse'
+                    : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
+                }`}
+                title={isBroadcasting ? 'Stop broadcasting this document to students' : 'Broadcast this document live to all connected students in real-time'}
+              >
+                <Radio className={`w-3.5 h-3.5 ${isBroadcasting ? 'text-white' : 'text-rose-600'}`} />
+                <span>{isBroadcasting ? '🔴 Live Broadcasting' : 'Broadcast to Class'}</span>
+              </button>
+
+              {isBroadcasting && (
+                <>
+                  <button
+                    onClick={() => setShowSpotlightModal(true)}
+                    className="flex items-center gap-1 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 px-2.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+                    title="Send a spotlight note / callout banner to student screens"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Spotlight Note</span>
+                  </button>
+
+                  {isEditing && (
+                    <button
+                      onClick={handleSyncEditsToStudents}
+                      className="flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-900 px-2.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+                      title="Push your live edits to all student screens immediately"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Push Edits Live</span>
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           {!isStudent && (
             isEditing ? (
               <button
@@ -6746,36 +6878,50 @@ ${profile?.displayName || 'Classroom Teacher'}
             )
           )}
 
-          {/* Subtle Firestore Sync Status / Last Saved Indicator */}
+          {/* Real-Time Firestore Sync State & Co-Editing Indicator */}
           {!isStudent && (
-            <div 
+            <button 
+              type="button"
               id="firestore-sync-indicator"
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-medium border select-none transition-all duration-300 ${
+              onClick={() => setIsSyncDetailsModalOpen(true)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-medium border select-none transition-all duration-300 cursor-pointer shadow-xs ${
                 syncStatus === 'syncing'
-                  ? 'bg-amber-50/70 border-amber-200 text-amber-700'
+                  ? 'bg-amber-500/15 border-amber-400/50 text-amber-800 dark:text-amber-200 animate-pulse'
                   : syncStatus === 'error'
-                  ? 'bg-red-50/70 border-red-200 text-red-700'
-                  : 'bg-emerald-50/30 border-emerald-100/70 text-slate-500'
+                  ? 'bg-rose-500/15 border-rose-400/50 text-rose-800 dark:text-rose-200'
+                  : activeEditors.length > 0
+                  ? 'bg-amber-500/20 border-amber-400 text-amber-900 dark:text-amber-200 ring-2 ring-amber-400/30 font-bold'
+                  : 'bg-emerald-500/10 border-emerald-300/60 dark:border-emerald-700/50 text-slate-700 dark:text-slate-300 hover:bg-emerald-500/20'
               }`}
-              title="Real-time document sync status with Firestore cloud database"
+              title="Click to view real-time Firestore sync status and active co-teachers"
             >
               {syncStatus === 'syncing' ? (
                 <>
-                  <Loader2 className="w-3.5 h-3.5 text-amber-600 animate-spin" />
-                  <span>Syncing...</span>
+                  <Loader2 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 animate-spin" />
+                  <span className="font-semibold">Syncing to Cloud...</span>
                 </>
               ) : syncStatus === 'error' ? (
                 <>
-                  <XCircle className="w-3.5 h-3.5 text-red-600" />
+                  <XCircle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
                   <span className="font-semibold">Sync Error</span>
+                </>
+              ) : activeEditors.length > 0 ? (
+                <>
+                  <span className="relative flex h-2.5 w-2.5 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                  </span>
+                  <span className="font-bold text-amber-900 dark:text-amber-200">
+                    ✍️ Co-Editing ({activeEditors.length} {activeEditors.length === 1 ? 'Teacher' : 'Teachers'})
+                  </span>
                 </>
               ) : (
                 <>
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Last Saved: <span className="font-semibold text-slate-600">{lastSavedSyncTime}</span></span>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>In Sync <span className="text-slate-400 dark:text-slate-500">({lastSavedSyncTime})</span></span>
                 </>
               )}
-            </div>
+            </button>
           )}
 
           <button
@@ -7406,6 +7552,112 @@ ${profile?.displayName || 'Classroom Teacher'}
       </div>
       )}
 
+      {/* Real-time Document Broadcast Status Banner */}
+      {isBroadcasting && !isStudent && (
+        <div className="bg-gradient-to-r from-rose-900 via-red-900 to-rose-900 text-white px-5 py-3 rounded-2xl shadow-md border border-rose-700/80 flex flex-wrap items-center justify-between gap-3 text-xs no-print animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-3 w-3 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+            </span>
+            <span className="font-extrabold uppercase tracking-wider text-rose-200 text-[11px]">
+              🔴 Live Broadcast Active
+            </span>
+            <span className="text-slate-200 hidden sm:inline">
+              Broadcasting to all connected student screens in real-time.
+            </span>
+            {activeBroadcastSession?.spotlightNote && (
+              <span className="bg-amber-400/20 text-amber-200 px-2.5 py-0.5 rounded-full font-bold border border-amber-400/30">
+                📣 Note: {activeBroadcastSession.spotlightNote}
+              </span>
+            )}
+          </div>
+          {liveBroadcastNotice && (
+            <span className="text-emerald-300 font-bold bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-800">
+              {liveBroadcastNotice}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Real-time Document Broadcast Banner for Connected Students */}
+      {isStudent && activeBroadcastSession && activeBroadcastSession.isBroadcasting && activeBroadcastSession.documentId === document.id && (
+        <div className="bg-gradient-to-r from-emerald-950 via-teal-900 to-emerald-950 text-white px-5 py-3 rounded-2xl shadow-lg border border-emerald-600/80 flex flex-wrap items-center justify-between gap-3 text-xs no-print animate-fadeIn">
+          <div className="flex items-center gap-3">
+            <span className="flex h-3 w-3 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-400"></span>
+            </span>
+            <div>
+              <span className="font-black text-emerald-300 uppercase tracking-wider text-[10px] block">
+                🔴 LIVE TEACHER BROADCAST
+              </span>
+              <span className="font-bold text-white text-xs sm:text-sm">
+                Following live session by {activeBroadcastSession.teacherName || 'Teacher'}
+              </span>
+            </div>
+          </div>
+          {activeBroadcastSession.spotlightNote && (
+            <div className="bg-amber-400/20 text-amber-100 px-3 py-1.5 rounded-xl border border-amber-400/30 font-semibold max-w-md">
+              📣 <span className="font-extrabold">Teacher Note:</span> {activeBroadcastSession.spotlightNote}
+            </div>
+          )}
+          {liveBroadcastNotice && (
+            <span className="text-emerald-300 font-bold bg-emerald-900/60 px-2.5 py-1 rounded-lg border border-emerald-700">
+              {liveBroadcastNotice}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Broadcast Spotlight Note Modal */}
+      {showSpotlightModal && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-100 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-rose-600 font-bold text-base">
+                <Radio className="w-5 h-5 text-rose-600 animate-pulse" />
+                <span>Broadcast Spotlight Note</span>
+              </div>
+              <button
+                onClick={() => setShowSpotlightModal(false)}
+                className="p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              Send a live announcement, task instruction, or callout banner to all connected student screens.
+            </p>
+
+            <textarea
+              value={spotlightInput}
+              onChange={(e) => setSpotlightInput(e.target.value)}
+              placeholder="e.g. Pay close attention to Section 2 - Photosynthesis equation!"
+              rows={3}
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-sans text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+            />
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowSpotlightModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendSpotlightNote}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-md transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Broadcast Note</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {saved && (
         <div className="bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-xl p-3 text-xs font-semibold flex items-center gap-2 animate-fadeIn no-print">
           <Check className="w-4 h-4" /> Your changes have been successfully saved to your pedagogical library!
@@ -7926,6 +8178,44 @@ ${profile?.displayName || 'Classroom Teacher'}
               />
             ) : isEditing ? (
               <div className="space-y-4 h-full flex flex-col">
+                {/* Active Co-Editing Conflict Protection Guard Banner */}
+                {activeEditors.length > 0 && (
+                  <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 flex flex-wrap items-center justify-between gap-3 shadow-sm animate-fadeIn">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0 relative">
+                        <Edit2 className="w-4 h-4 animate-pulse" />
+                        <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                        </span>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-[11px] font-black uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                            Real-Time Collaboration Guard Active
+                          </p>
+                          <span className="px-2 py-0.5 text-[9px] font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 rounded-full">
+                            {activeEditors.length} Co-{activeEditors.length === 1 ? 'Editor' : 'Editors'} Active
+                          </span>
+                        </div>
+                        <p className="text-xs font-medium text-slate-700 dark:text-slate-300 mt-0.5">
+                          <strong>{activeEditors.map(e => e.displayName || e.email).join(', ')}</strong> {activeEditors.length === 1 ? 'is' : 'are'} currently editing this curriculum document in real time.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsSyncDetailsModalOpen(true)}
+                        className="text-[10px] font-mono px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-900 dark:text-amber-200 font-bold flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Firestore Conflict Shield On
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <input
                   type="text"
                   value={editedTitle}
@@ -8114,7 +8404,7 @@ ${profile?.displayName || 'Classroom Teacher'}
                     type="button"
                     onClick={() => setIsToolbarImageModalOpen(true)}
                     className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer flex items-center gap-1.5 text-xs font-bold bg-emerald-50/50 border border-emerald-100 shadow-sm"
-                    title="Generate AI educational diagram or illustration with Gemini"
+                    title="Generate AI educational diagram or illustration"
                   >
                     <Palette className="w-3.5 h-3.5 text-emerald-600" />
                     <span>AI Image</span>
@@ -8186,7 +8476,7 @@ ${profile?.displayName || 'Classroom Teacher'}
                     }}
                     disabled={isSimplifyingSentence || isSimplifyingParagraph}
                     className="p-1.5 text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition cursor-pointer flex items-center gap-1.5 text-xs font-bold bg-purple-50/50 border border-purple-100 ml-1.5 shadow-sm disabled:opacity-50"
-                    title="Rephrase highlighted selection to a simpler reading complexity level using Gemini API"
+                    title="Rephrase highlighted selection to a simpler reading complexity level using AI Engine"
                   >
                     {isSimplifyingSentence ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600" />
@@ -8245,7 +8535,7 @@ ${profile?.displayName || 'Classroom Teacher'}
                     }}
                     disabled={isSimplifyingSentence || isSimplifyingParagraph}
                     className="p-1.5 text-indigo-700 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition cursor-pointer flex items-center gap-1.5 text-xs font-bold bg-indigo-50/60 border border-indigo-100 ml-1 shadow-sm disabled:opacity-50"
-                    title="Batch simplify entire highlighted paragraph(s) or surrounding lines at once using Gemini API"
+                    title="Batch simplify entire highlighted paragraph(s) or surrounding lines at once using AI Engine"
                   >
                     {isSimplifyingParagraph ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
@@ -9021,7 +9311,7 @@ ${profile?.displayName || 'Classroom Teacher'}
                       )}
                       <span>
                         {isGeneratingDifferentiated 
-                          ? 'Differentiating with Gemini AI...' 
+                          ? 'Differentiating with EduNexus AI...' 
                           : `Generate ${selectedDifferentiatedView === 'detailed' ? 'Detailed Notes' : selectedDifferentiatedView === 'advanced' ? 'Advanced' : 'Support'} Version`}
                       </span>
                     </button>
@@ -11458,16 +11748,16 @@ ${profile?.displayName || 'Classroom Teacher'}
                       disabled={isGeneratingToolbarImage}
                       className="w-full bg-white border border-amber-300 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-[#5f6f52] transition cursor-pointer disabled:bg-slate-50 disabled:text-slate-400 font-bold"
                     >
-                      <option value="emgen_fallback_nanobanana">🍌 Nano Banana as Fallback for Emgen (Recommended / Dual-Engine)</option>
-                      <option value="emgen">🎨 Use Emgen Only (High Quality)</option>
-                      <option value="nano banana">🍌 Use Nano Banana Only (Rapid)</option>
+                      <option value="emgen_fallback_nanobanana">⚡ Auto Dual-Engine Mode (Recommended)</option>
+                      <option value="emgen">🎨 High-Quality Studio Mode</option>
+                      <option value="nano banana">⚡ Ultra-Fast Studio Mode</option>
                     </select>
                   </div>
                 ) : (
                   <div className="p-2.5 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-xl text-xs font-medium flex items-center justify-between">
-                    <span className="font-bold">⚡ Engine: Emgen (High Quality)</span>
+                    <span className="font-bold">⚡ Engine: High-Quality Studio</span>
                     <span className="text-[10px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-bold">
-                      Nano Banana Fallback Active
+                      Secondary Fallback Active
                     </span>
                   </div>
                 )}
@@ -12603,7 +12893,7 @@ ${profile?.displayName || 'Classroom Teacher'}
                   3-Bullet Lesson Summary
                 </h3>
                 <p className="text-xs text-slate-400 mt-1 font-medium">
-                  Generated by Gemini 3.5 Flash for high-level pedagogical review
+                  Generated by EduNexus AI for high-level pedagogical review
                 </p>
               </div>
               <button 
@@ -12621,7 +12911,7 @@ ${profile?.displayName || 'Classroom Teacher'}
                   <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mb-4" />
                   <h4 className="text-sm font-bold text-slate-700">Analyzing Educational Material</h4>
                   <p className="text-xs text-slate-400 mt-1 max-w-md leading-relaxed font-medium">
-                    Gemini is processing the content structure and learning objectives to compile a professional 3-bullet point executive summary...
+                    EduNexus AI is processing the content structure and learning objectives to compile a professional 3-bullet point executive summary...
                   </p>
                 </div>
               ) : summaryError ? (
@@ -12698,6 +12988,176 @@ ${profile?.displayName || 'Classroom Teacher'}
         </div>
       )}
 
+      {/* Real-time Firestore Sync & Collaborative Co-Editing Matrix Modal */}
+      {isSyncDetailsModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden animate-fadeIn flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between bg-emerald-50/50 dark:bg-emerald-950/20">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                  <RefreshCw className={`w-5 h-5 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                    Real-Time Firestore Sync & Collaboration
+                    <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300 rounded-full border border-emerald-200 dark:border-emerald-700">
+                      Live Cloud DB
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
+                    Conflict protection matrix and active faculty co-editing status
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setIsSyncDetailsModalOpen(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6 overflow-y-auto">
+              {/* Sync Status Highlights */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 flex flex-col gap-1">
+                  <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Sync Status</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {syncStatus === 'syncing' ? (
+                      <>
+                        <Loader2 className="w-4 h-4 text-amber-500 animate-spin" />
+                        <span className="text-xs font-bold text-amber-700 dark:text-amber-400">Syncing Edits...</span>
+                      </>
+                    ) : syncStatus === 'error' ? (
+                      <>
+                        <XCircle className="w-4 h-4 text-rose-500" />
+                        <span className="text-xs font-bold text-rose-700 dark:text-rose-400">Sync Error</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                        <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">Connected & Synced</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 flex flex-col gap-1">
+                  <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Last Saved To Cloud</p>
+                  <p className="text-xs font-bold text-slate-700 dark:text-slate-200 mt-1">
+                    {lastSavedSyncTime || 'Just now'}
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 flex flex-col gap-1">
+                  <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Active Faculty</p>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                      {activeSessions.length + 1} Online ({activeEditors.length + (isEditing ? 1 : 0)} Editing)
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Active Teachers List */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                  <span>Currently Connected Faculty ({activeSessions.length + 1})</span>
+                  <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">Firestore Active Sessions</span>
+                </h4>
+
+                <div className="space-y-2">
+                  {/* Current User */}
+                  <div className="p-3 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/60 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-emerald-500 text-white font-black text-xs flex items-center justify-center shadow-xs">
+                        {profile?.displayName ? profile.displayName.charAt(0).toUpperCase() : 'ME'}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                            {profile?.displayName || profile?.email || 'You'}
+                          </p>
+                          <span className="px-2 py-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 rounded-full">
+                            You
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">{profile?.email}</p>
+                      </div>
+                    </div>
+                    <span className={`px-2.5 py-1 text-[10px] font-extrabold rounded-xl border ${
+                      isEditing 
+                        ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700' 
+                        : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
+                    }`}>
+                      {isEditing ? '✍️ Actively Editing' : '👁️ Viewing Document'}
+                    </span>
+                  </div>
+
+                  {/* Other Connected Teachers */}
+                  {activeSessions.length === 0 ? (
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-dashed border-slate-200 dark:border-slate-700 text-center">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                        No other teachers are currently viewing this document. Your edits will sync directly to Firestore.
+                      </p>
+                    </div>
+                  ) : (
+                    activeSessions.map((sess) => (
+                      <div key={`sync-sess-${sess.id}`} className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-slate-700 text-white font-black text-xs flex items-center justify-center">
+                            {sess.displayName ? sess.displayName.charAt(0).toUpperCase() : '?'}
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                              {sess.displayName || sess.email || 'Teacher Colleague'}
+                            </p>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400">{sess.email || sess.role || 'Faculty Member'}</p>
+                          </div>
+                        </div>
+                        <span className={`px-2.5 py-1 text-[10px] font-extrabold rounded-xl border ${
+                          sess.isEditing 
+                            ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700 animate-pulse' 
+                            : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600'
+                        }`}>
+                          {sess.isEditing ? '✍️ Actively Editing' : '👁️ Viewing Document'}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Conflict Prevention Shield Notice */}
+              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-200 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  <p className="text-xs font-bold uppercase tracking-wider">
+                    Firestore Conflict Protection
+                  </p>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  When multiple teachers open or edit the same curriculum document, EduNexus continuously updates document state in Firestore and streams edits in real time to prevent content conflicts and accidental overwrites.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsSyncDetailsModalOpen(false)}
+                className="px-5 py-2.5 rounded-xl bg-slate-800 text-white font-bold text-xs hover:bg-slate-700 transition cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Readability & Complexity Suggestions Modal */}
       {isReadabilitySuggestionsModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -12739,7 +13199,7 @@ ${profile?.displayName || 'Classroom Teacher'}
                   }`} />
                   <h4 className="text-sm font-bold text-slate-700">Analyzing Document Readability</h4>
                   <p className="text-xs text-slate-400 mt-1 max-w-md leading-relaxed font-medium">
-                    Gemini is auditing your document sentences, syllable density, and grammatical structures to formulate precise {readabilityTargetAction === 'simplify' ? 'simplification' : 'elevation'} strategies...
+                    EduNexus AI is auditing your document sentences, syllable density, and grammatical structures to formulate precise {readabilityTargetAction === 'simplify' ? 'simplification' : 'elevation'} strategies...
                   </p>
                 </div>
               ) : readabilitySuggestionsError ? (
@@ -13564,7 +14024,7 @@ ${profile?.displayName || 'Classroom Teacher'}
                   <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
                   <p className="text-xs font-bold text-slate-600">Generating Advanced Conceptual Question</p>
                   <p className="text-[10px] text-slate-400 max-w-xs leading-normal">
-                    Gemini Socratic Engine is synthesizing a deep high-order cognitive query based on the lesson plan...
+                    EduNexus Socratic Engine is synthesizing a deep high-order cognitive query based on the lesson plan...
                   </p>
                 </div>
               ) : activeChallenge ? (
@@ -13733,10 +14193,10 @@ function DocumentParentChatPanel({
   useEffect(() => {
     if (!profile || !targetPartner) return;
 
-    const msgCol = firestoreCollection(chatDb, 'parent_teacher_messages');
-    const q = firestoreQuery(msgCol, firestoreOrderBy('createdAt', 'asc'));
+    const msgCol = collection(db, 'parent_teacher_messages');
+    const q = query(msgCol, orderBy('createdAt', 'asc'));
 
-    const unsubscribe = firestoreOnSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(q, (snapshot) => {
       const list: ChatMsg[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as ChatMsg;
@@ -13770,8 +14230,8 @@ function DocumentParentChatPanel({
     const unread = messages.filter(m => m.senderUid === targetPartner.uid && m.recipientUid === profile.uid && !m.read);
     unread.forEach(async (msg) => {
       try {
-        const msgRef = firestoreDoc(chatDb, 'parent_teacher_messages', msg.id);
-        await firestoreUpdateDoc(msgRef, { read: true });
+        const msgRef = doc(db, 'parent_teacher_messages', msg.id);
+        await updateDoc(msgRef, { read: true });
       } catch (err) {}
     });
   }, [messages, profile, targetPartner]);
@@ -13796,11 +14256,11 @@ function DocumentParentChatPanel({
     };
 
     try {
-      const msgCol = firestoreCollection(chatDb, 'parent_teacher_messages');
-      await firestoreAddDoc(msgCol, chatCleanUndefined(msgData));
+      const msgCol = collection(db, 'parent_teacher_messages');
+      await addDoc(msgCol, cleanUndefined(msgData));
       setText('');
     } catch (err) {
-      chatHandleError(err, ChatOpType.CREATE, 'parent_teacher_messages');
+      handleFirestoreError(err, OperationType.CREATE, 'parent_teacher_messages');
     }
   };
 

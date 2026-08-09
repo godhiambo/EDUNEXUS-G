@@ -61,8 +61,10 @@ import {
   Info,
   HelpCircle,
   Sun,
-  Moon
+  Moon,
+  Radio
 } from 'lucide-react';
+import { broadcastDocumentSession } from '../services/documentBroadcastService';
 import { db } from '../firebase';
 import { QRMappingService } from '../services/qrMappingService';
 import { ScannedStationPortalModal } from './ScannedStationPortalModal';
@@ -303,6 +305,7 @@ interface DashboardProps {
   onOpenVideoStudio?: () => void;
   onOpenQRMapping?: () => void;
   onOpenAdminPlaybook?: () => void;
+  onOpenMagicStudio?: () => void;
   userRole?: string;
   notifications?: AppNotification[];
   setNotifications?: React.Dispatch<React.SetStateAction<AppNotification[]>>;
@@ -324,6 +327,7 @@ export default function Dashboard({
   onOpenVideoStudio,
   onOpenQRMapping,
   onOpenAdminPlaybook,
+  onOpenMagicStudio,
   userRole,
   notifications = [],
   setNotifications,
@@ -1461,7 +1465,7 @@ export default function Dashboard({
     return documents.filter((d) => d.curriculum === 'standard').length;
   }, [documents]);
 
-  const isAdmin = profile?.role === 'Administrator' || userRole === 'Administrator';
+  const isAdmin = profile?.role === 'Administrator' || userRole === 'Administrator' || profile?.role === 'developer';
 
   // Calculate Document Usage frequency by subject over last 30 days for Admin
   const adminChartData = useMemo(() => {
@@ -1614,7 +1618,7 @@ export default function Dashboard({
             <span>Quick Scan QR</span>
           </button>
 
-          {onOpenAdminPlaybook && (
+          {isAdmin && onOpenAdminPlaybook && (
             <button
               onClick={onOpenAdminPlaybook}
               className="px-4 py-2.5 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 shadow-sm transition cursor-pointer flex items-center gap-2 active:scale-95"
@@ -1687,9 +1691,32 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* QUICK ACTION CARDS (7 Cards Grid) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-4">
+      {/* QUICK ACTION CARDS (8 Cards Grid) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 sm:gap-4">
         
+        {/* Card 0: Lower Primary Magic Objects */}
+        <div 
+          onClick={onOpenMagicStudio}
+          className="bg-gradient-to-br from-amber-500/10 via-rose-500/10 to-purple-500/10 hover:from-amber-500/20 hover:to-purple-500/20 border border-amber-300/80 hover:border-amber-400 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-md flex flex-col justify-between group space-y-3 relative overflow-hidden"
+        >
+          <div className="flex items-center justify-between">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
+              <Sparkles className="w-5 h-5 text-yellow-300 animate-spin" />
+            </div>
+            <span className="px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 rounded-full shadow-2xs">
+              Lower School
+            </span>
+          </div>
+          <div>
+            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white group-hover:text-purple-700 transition">
+              Magic Objects ✨
+            </h3>
+            <p className="text-[10px] text-slate-600 dark:text-slate-300 leading-tight mt-1 font-semibold">
+              Click objects to generate • Zero prompt typing!
+            </p>
+          </div>
+        </div>
+
         {/* Card 1: Create Lesson Plan */}
         <div 
           onClick={onCreateNew}
@@ -1932,21 +1959,23 @@ export default function Dashboard({
           </div>
         </div>
 
-        {/* Class Overview Stats */}
+        {/* Workspace & Curriculum Overview Stats */}
         <div className="bg-white rounded-3xl border border-slate-200/80 p-5 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="font-extrabold text-sm text-slate-900">Class Overview</h3>
-            <span className="text-xs font-bold text-slate-500">This week →</span>
+            <h3 className="font-extrabold text-sm text-slate-900">Workspace & Curriculum Overview</h3>
+            <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+              Pre-Launch Active
+            </span>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center shrink-0">
-                <Users className="w-4.5 h-4.5" />
+                <FileText className="w-4.5 h-4.5" />
               </div>
               <div>
-                <span className="text-lg font-black text-slate-900">42</span>
-                <p className="text-[10px] font-medium text-slate-500">Students</p>
+                <span className="text-lg font-black text-slate-900">{totalDocs}</span>
+                <p className="text-[10px] font-medium text-slate-500">Saved Documents</p>
               </div>
             </div>
 
@@ -1955,28 +1984,28 @@ export default function Dashboard({
                 <BookOpen className="w-4.5 h-4.5" />
               </div>
               <div>
-                <span className="text-lg font-black text-slate-900">8</span>
-                <p className="text-[10px] font-medium text-slate-500">Lessons</p>
+                <span className="text-lg font-black text-slate-900">{plansCount}</span>
+                <p className="text-[10px] font-medium text-slate-500">Lesson Plans</p>
               </div>
             </div>
 
             <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-teal-500/10 text-teal-600 flex items-center justify-center shrink-0">
-                <TrendingUp className="w-4.5 h-4.5" />
+                <CheckCircle2 className="w-4.5 h-4.5" />
               </div>
               <div>
-                <span className="text-lg font-black text-slate-900">91%</span>
-                <p className="text-[10px] font-medium text-slate-500">Completion Rate</p>
+                <span className="text-lg font-black text-slate-900">{cbcCount}</span>
+                <p className="text-[10px] font-medium text-slate-500">CBC Schemes</p>
               </div>
             </div>
 
             <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center shrink-0">
-                <ClipboardCheck className="w-4.5 h-4.5" />
+                <Sparkles className="w-4.5 h-4.5" />
               </div>
               <div>
-                <span className="text-lg font-black text-slate-900">15</span>
-                <p className="text-[10px] font-medium text-slate-500">Assignments</p>
+                <span className="text-lg font-black text-slate-900">100%</span>
+                <p className="text-[10px] font-medium text-slate-500">Launch Ready</p>
               </div>
             </div>
           </div>
@@ -3822,10 +3851,37 @@ export default function Dashboard({
                                     )}
                                   </div>
                                   
-                                  <button className="flex items-center gap-1.5 bg-[#5f6f52]/5 text-[#5f6f52] hover:bg-[#5f6f52] hover:text-white px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all duration-300">
-                                    <span>Open</span>
-                                    <ExternalLink className="w-3 h-3" />
-                                  </button>
+                                  <div className="flex items-center gap-1.5">
+                                    {userRole !== 'Student' && (
+                                      <button
+                                        type="button"
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          await broadcastDocumentSession({
+                                            sessionId: 'global_active_broadcast',
+                                            documentId: doc.id,
+                                            documentTitle: doc.title,
+                                            documentContent: doc.content,
+                                            documentSubject: doc.subject,
+                                            documentClassLevel: doc.classLevel,
+                                            teacherUid: 'teacher-host',
+                                            teacherName: 'Educator',
+                                            isBroadcasting: true,
+                                          });
+                                          onOpenDoc(doc);
+                                        }}
+                                        className="flex items-center gap-1 bg-rose-50 text-rose-700 hover:bg-rose-600 hover:text-white border border-rose-200 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all duration-300 cursor-pointer"
+                                        title="Broadcast live to all connected students"
+                                      >
+                                        <Radio className="w-3 h-3" />
+                                        <span>Broadcast</span>
+                                      </button>
+                                    )}
+                                    <button className="flex items-center gap-1.5 bg-[#5f6f52]/5 text-[#5f6f52] hover:bg-[#5f6f52] hover:text-white px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all duration-300">
+                                      <span>Open</span>
+                                      <ExternalLink className="w-3 h-3" />
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             );

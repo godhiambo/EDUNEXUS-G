@@ -65,6 +65,8 @@ import {
   Edit3,
   Film,
   Maximize2,
+  Minimize2,
+  Volume1,
   Camera,
   StickyNote,
   Heart,
@@ -76,6 +78,7 @@ import {
   UserCheck,
   Cast,
   ArrowRight,
+  HelpCircle,
   ShieldAlert,
   Play,
   Pause
@@ -134,7 +137,69 @@ const MainStageVideoPlayer: React.FC<{
   const [showCaptions, setShowCaptions] = useState<boolean>(true);
   const [showTranscript, setShowTranscript] = useState<boolean>(false);
 
+  // Custom Player Overlay Refs & States
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [volume, setVolume] = useState<number>(0.85);
+  const [showVolumeSlider, setShowVolumeSlider] = useState<boolean>(false);
+
   const durationSeconds = 240; // 04:00
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!playerContainerRef.current) return;
+    if (!document.fullscreenElement) {
+      if (playerContainerRef.current.requestFullscreen) {
+        playerContainerRef.current.requestFullscreen();
+      } else if ((playerContainerRef.current as any).webkitRequestFullscreen) {
+        (playerContainerRef.current as any).webkitRequestFullscreen();
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      } else if ((document as any).webkitExitFullscreen) {
+        (document as any).webkitExitFullscreen();
+      }
+    }
+  };
+
+  const handleVolumeChange = (newVol: number) => {
+    setVolume(newVol);
+    if (newVol === 0) {
+      setIsMuted(true);
+    } else {
+      setIsMuted(false);
+    }
+    if (videoRef.current) {
+      videoRef.current.volume = newVol;
+      videoRef.current.muted = newVol === 0;
+    }
+  };
+
+  const toggleMute = () => {
+    if (isMuted) {
+      setIsMuted(false);
+      const restoreVol = volume === 0 ? 0.8 : volume;
+      setVolume(restoreVol);
+      if (videoRef.current) {
+        videoRef.current.volume = restoreVol;
+        videoRef.current.muted = false;
+      }
+    } else {
+      setIsMuted(true);
+      if (videoRef.current) {
+        videoRef.current.muted = true;
+      }
+    }
+  };
 
   useEffect(() => {
     let interval: any = null;
@@ -184,8 +249,10 @@ const MainStageVideoPlayer: React.FC<{
     ? rawUrl.replace('watch?v=', 'embed/')
     : rawUrl;
 
+  const isDirectVideo = rawUrl.endsWith('.mp4') || rawUrl.endsWith('.webm') || rawUrl.startsWith('blob:');
+
   return (
-    <div className="w-full h-full bg-slate-950 text-white flex flex-col justify-between relative overflow-hidden select-none">
+    <div ref={playerContainerRef} className="w-full h-full bg-slate-950 text-white flex flex-col justify-between relative overflow-hidden select-none group/studioplayer">
       {/* Header Bar */}
       <div className="bg-slate-900/95 border-b border-white/10 px-4 py-2.5 flex items-center justify-between text-xs shrink-0 z-10 backdrop-blur-md">
         <div className="flex items-center gap-2">
@@ -201,20 +268,79 @@ const MainStageVideoPlayer: React.FC<{
             📍 {currentStop.locationName}
           </span>
           <span className="text-emerald-400 hidden sm:inline font-bold">1080p HD</span>
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            className="p-1.5 rounded bg-slate-800 hover:bg-amber-400 hover:text-slate-950 text-amber-300 transition cursor-pointer border border-white/10"
+            title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen Mode'}
+          >
+            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
         </div>
       </div>
 
       {/* Main Video Viewport & Overlay Controls Container */}
       <div className="flex-1 w-full h-full bg-black relative flex flex-col justify-between overflow-hidden">
-        {/* Video Iframe */}
+        {/* Video Frame or Direct HTML5 Video */}
         <div className="absolute inset-0 z-0">
-          <iframe
-            title={`NatGeo Video Tour - ${currentStop.locationName}`}
-            src={embedUrl}
-            className="w-full h-full border-none opacity-95"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-          />
+          {isDirectVideo ? (
+            <video
+              ref={videoRef}
+              src={rawUrl}
+              className="w-full h-full object-cover"
+              playsInline
+              loop
+              onTimeUpdate={() => {
+                if (videoRef.current) {
+                  const cur = videoRef.current.currentTime;
+                  const dur = videoRef.current.duration || durationSeconds;
+                  setCurrentTime(cur);
+                  setProgress((cur / dur) * 100);
+                }
+              }}
+            />
+          ) : (
+            <iframe
+              title={`NatGeo Video Tour - ${currentStop.locationName}`}
+              src={embedUrl}
+              className="w-full h-full border-none opacity-95"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          )}
+        </div>
+
+        {/* Play/Pause Canvas Click Overlay */}
+        <div
+          onClick={() => {
+            const nextPlaying = !isPlaying;
+            setIsPlaying(nextPlaying);
+            if (videoRef.current) {
+              if (nextPlaying) videoRef.current.play();
+              else videoRef.current.pause();
+            }
+          }}
+          className="absolute inset-0 z-[1] cursor-pointer bg-slate-950/10 hover:bg-slate-950/20 transition flex items-center justify-center"
+        >
+          {/* Central Big Play/Pause Toggle Indicator */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              const nextPlaying = !isPlaying;
+              setIsPlaying(nextPlaying);
+              if (videoRef.current) {
+                if (nextPlaying) videoRef.current.play();
+                else videoRef.current.pause();
+              }
+            }}
+            className={`w-16 h-16 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-950 flex items-center justify-center shadow-2xl transition transform border-2 border-slate-950 cursor-pointer ${
+              !isPlaying ? 'scale-100 opacity-100' : 'scale-75 opacity-0 group-hover/studioplayer:opacity-90 group-hover/studioplayer:scale-100'
+            }`}
+            title={isPlaying ? 'Pause Video' : 'Play Video'}
+          >
+            {isPlaying ? <Pause className="w-8 h-8 fill-slate-950" /> : <Play className="w-8 h-8 fill-slate-950 ml-1" />}
+          </button>
         </div>
 
         {/* Top Watermark Badge Overlay */}
@@ -255,11 +381,18 @@ const MainStageVideoPlayer: React.FC<{
 
           {/* Controls Action Row */}
           <div className="flex items-center justify-between text-white text-xs">
-            {/* Left Controls: Play, Mute, Volume, Elapsed Time */}
+            {/* Left Controls: Play, Mute + Volume Slider, Elapsed Time */}
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => setIsPlaying(!isPlaying)}
+                onClick={() => {
+                  const nextPlaying = !isPlaying;
+                  setIsPlaying(nextPlaying);
+                  if (videoRef.current) {
+                    if (nextPlaying) videoRef.current.play();
+                    else videoRef.current.pause();
+                  }
+                }}
                 className="p-1.5 rounded-xl bg-amber-400 text-slate-950 hover:bg-amber-300 transition cursor-pointer font-extrabold flex items-center gap-1 shadow-md"
                 title={isPlaying ? 'Pause' : 'Play'}
               >
@@ -267,21 +400,51 @@ const MainStageVideoPlayer: React.FC<{
                 <span className="text-[11px] font-bold px-1">{isPlaying ? 'PAUSE' : 'PLAY'}</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => setIsMuted(!isMuted)}
-                className="p-1.5 rounded-lg bg-slate-900 border border-white/10 hover:border-amber-400 text-slate-200 transition cursor-pointer"
-                title={isMuted ? 'Unmute Sound' : 'Mute Sound'}
-              >
-                {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-amber-300" />}
-              </button>
+              {/* Interactive Volume Button & Slider Tooltip */}
+              <div className="relative flex items-center" onMouseLeave={() => setShowVolumeSlider(false)}>
+                <button
+                  type="button"
+                  onClick={toggleMute}
+                  onMouseEnter={() => setShowVolumeSlider(true)}
+                  className="p-1.5 rounded-lg bg-slate-900 border border-white/10 hover:border-amber-400 text-slate-200 transition cursor-pointer flex items-center gap-1.5"
+                  title={isMuted ? 'Unmute Sound' : `Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+                >
+                  {isMuted || volume === 0 ? (
+                    <VolumeX className="w-4 h-4 text-rose-400" />
+                  ) : volume < 0.5 ? (
+                    <Volume1 className="w-4 h-4 text-amber-300" />
+                  ) : (
+                    <Volume2 className="w-4 h-4 text-amber-300" />
+                  )}
+                  <span className="text-[11px] font-mono text-slate-300 hidden sm:inline">
+                    {Math.round((isMuted ? 0 : volume) * 100)}%
+                  </span>
+                </button>
+
+                {showVolumeSlider && (
+                  <div className="absolute bottom-full left-0 mb-2 p-2.5 rounded-xl bg-slate-900 border border-amber-400/40 shadow-2xl flex items-center gap-2 z-30 animate-in fade-in slide-in-from-bottom-2">
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={isMuted ? 0 : volume}
+                      onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                      className="w-20 accent-amber-400 h-1.5 rounded-lg bg-slate-800 cursor-pointer"
+                    />
+                    <span className="text-[10px] font-mono font-bold text-amber-300 shrink-0">
+                      {Math.round((isMuted ? 0 : volume) * 100)}%
+                    </span>
+                  </div>
+                )}
+              </div>
 
               <span className="font-mono text-xs text-amber-300 bg-slate-900/90 px-2.5 py-1 rounded-lg border border-white/10">
                 {formatTime(currentTime)} / {formatTime(durationSeconds)}
               </span>
             </div>
 
-            {/* Right Controls: Playback Speed, CC Toggle, Transcript */}
+            {/* Right Controls: Playback Speed, CC Toggle, Transcript, Fullscreen */}
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -312,6 +475,15 @@ const MainStageVideoPlayer: React.FC<{
                 title="Open Educational Transcript"
               >
                 <span>📜 Transcript</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                className="p-1.5 rounded-lg bg-slate-900 border border-white/10 hover:border-amber-400 text-slate-200 transition cursor-pointer"
+                title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+              >
+                {isFullscreen ? <Minimize2 className="w-4 h-4 text-amber-300" /> : <Maximize2 className="w-4 h-4 text-amber-300" />}
               </button>
             </div>
           </div>
@@ -382,6 +554,9 @@ export const VirtualFieldTripStudio: React.FC<VirtualFieldTripStudioProps> = ({
   // Active Map View Mode
   const [activeViewerTab, setActiveViewerTab] = useState<'map' | 'streetview' | 'panorama' | 'video'>('map');
   const [mapType, setMapType] = useState<'roadmap' | 'satellite' | 'hybrid'>('satellite');
+
+  // Active Right Sidebar Tab Mode (Guide & Tasks | Media & Route | Educator Notes)
+  const [activeRightTab, setActiveRightTab] = useState<'guide' | 'media' | 'notes'>('guide');
 
   // Audio Read-Aloud state
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
@@ -2416,213 +2591,217 @@ DIFFERENTIATION STRATEGIES:
       <header className={`border-b px-4 sm:px-6 py-3 sticky top-0 z-30 transition-colors ${
         isHighContrast ? 'bg-zinc-950 border-zinc-800' : 'bg-white/95 border-[#e5e1da] backdrop-blur-md shadow-2xs'
       }`}>
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="max-w-7xl mx-auto space-y-3">
           
-          {/* Title & Route Selector */}
-          <div className="flex items-center gap-3">
-            <div className={`p-2.5 rounded-2xl shrink-0 ${isHighContrast ? 'bg-white text-black' : 'bg-[#5f6f52]/10 text-[#5f6f52]'}`}>
-              <Compass className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                  Virtual Field Trip & Excursion Studio
-                </span>
-                <span className="text-xs text-slate-500 font-bold flex items-center gap-1">
-                  <Flame className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Streak: {studentProgress.streakCount || 1} Days</span>
-                </span>
-                
-                {/* Learning XP Student Profile Badge */}
-                <button
-                  onClick={() => setIsProfileModalOpen(true)}
-                  className="text-xs text-amber-950 font-extrabold flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-amber-200 via-amber-300 to-amber-200 border border-amber-400 shadow-2xs hover:scale-105 transition cursor-pointer"
-                  title="Click to view Student XP Profile & Milestone Achievements"
-                >
-                  <Zap className="w-3.5 h-3.5 text-amber-700 fill-amber-500 animate-pulse" />
-                  <span>{studentProfile.totalXP} XP</span>
-                  <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded-md bg-amber-900/10 text-amber-900 border border-amber-400/30">
-                    Lvl {studentProfile.level}
-                  </span>
-                </button>
+          {/* Top Row: Title, Route Selector, Stats & Quick Actions */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            
+            {/* Title, Badge & Route Selector */}
+            <div className="flex items-center gap-3">
+              <div className={`p-2.5 rounded-2xl shrink-0 ${isHighContrast ? 'bg-white text-black' : 'bg-[#5f6f52]/10 text-[#5f6f52]'}`}>
+                <Compass className="w-6 h-6" />
               </div>
-              <h1 className="text-lg sm:text-xl font-serif font-bold text-slate-900 leading-tight flex items-center gap-2">
-                <span>{activeTrip.title}</span>
-              </h1>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                    Virtual Field Trip & Excursion Studio
+                  </span>
+                  <span className="text-xs text-slate-500 font-bold flex items-center gap-1">
+                    <Flame className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Streak: {studentProgress.streakCount || 1} Days</span>
+                  </span>
+                  
+                  {/* Learning XP Student Profile Badge */}
+                  <button
+                    onClick={() => setIsProfileModalOpen(true)}
+                    className="text-xs text-amber-950 font-extrabold flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-gradient-to-r from-amber-200 via-amber-300 to-amber-200 border border-amber-400 shadow-2xs hover:scale-105 transition cursor-pointer"
+                    title="Click to view Student XP Profile & Milestone Achievements"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-700 fill-amber-500 animate-pulse" />
+                    <span>{studentProfile.totalXP} XP</span>
+                    <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded-md bg-amber-900/10 text-amber-900 border border-amber-400/30">
+                      Lvl {studentProfile.level}
+                    </span>
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className="text-lg sm:text-xl font-serif font-bold text-slate-900 leading-tight">
+                    {activeTrip.title}
+                  </h1>
+
+                  {/* Route Selector Dropdown */}
+                  <select
+                    value={activeTrip.id}
+                    onChange={e => {
+                      const selected = fieldTrips.find(t => t.id === e.target.value);
+                      if (selected) handleSelectTrip(selected);
+                    }}
+                    className="px-3 py-1 text-xs font-bold bg-slate-50 border border-[#e5e1da] rounded-xl focus:ring-2 focus:ring-[#5f6f52] focus:outline-none cursor-pointer"
+                    aria-label="Select Virtual Field Trip Route"
+                  >
+                    {fieldTrips.map(trip => (
+                      <option key={trip.id} value={trip.id}>
+                        {trip.country}: {trip.title} ({trip.stops.length} Stops)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Actions & Accessibility Group */}
+            <div className="flex items-center gap-2 flex-wrap justify-start lg:justify-end">
+              {/* Share Trip Button */}
+              <button
+                onClick={() => setIsShareModalOpen(true)}
+                className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-xs"
+                title="Share this Virtual Field Trip deep-link with students or educators"
+              >
+                <Share2 className="w-4 h-4 text-slate-950" />
+                <span>Share Trip</span>
+              </button>
+
+              {/* Accessibility Quick Controls */}
+              <button
+                onClick={() => setUseDyslexicFont(!useDyslexicFont)}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition border cursor-pointer flex items-center gap-1.5 focus:ring-2 focus:ring-[#5f6f52] focus:outline-none ${
+                  useDyslexicFont ? 'bg-amber-200 text-amber-950 border-amber-400' : 'bg-white border-slate-200 text-slate-700'
+                }`}
+                title="Toggle Dyslexic-Friendly Typography"
+              >
+                <Type className="w-4 h-4" />
+                <span className="hidden sm:inline">Dyslexic Font</span>
+              </button>
+
+              <button
+                onClick={() => setIsHighContrast(!isHighContrast)}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition border cursor-pointer flex items-center gap-1.5 focus:ring-2 focus:ring-[#5f6f52] focus:outline-none ${
+                  isHighContrast ? 'bg-amber-400 text-black border-amber-500' : 'bg-white border-slate-200 text-slate-700'
+                }`}
+                title="Toggle High Contrast Theme"
+              >
+                {isHighContrast ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </button>
             </div>
           </div>
 
-          {/* Quick Action Toolbar */}
-          <div className="flex items-center gap-2 flex-wrap justify-end">
-            
-            {/* Offline Status Badge */}
-            {!isOnline ? (
-              <div className="px-3 py-1.5 rounded-xl bg-rose-100 text-rose-900 border border-rose-300 flex items-center gap-1.5 text-xs font-extrabold animate-pulse">
-                <WifiOff className="w-4 h-4 text-rose-600" />
-                <span>Offline Mode • Cached Trip</span>
-              </div>
-            ) : (
+          {/* Sub-Header Toolbar: Grouped Tool Controls */}
+          <div className="flex items-center justify-between gap-2 overflow-x-auto pt-1 border-t border-slate-200/80 scrollbar-none text-xs">
+            {/* Group 1: Core Field Trip Tools */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider hidden sm:inline">Tools:</span>
+              
               <button
-                onClick={handleCacheCurrentTrip}
-                className="min-h-[44px] px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 focus:ring-2 focus:ring-emerald-600 focus:outline-none shadow-xs"
-                title="Pre-load and cache complete excursion data for offline use"
+                onClick={handleGenerateLessonPlan}
+                className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 text-xs font-extrabold rounded-xl transition cursor-pointer flex items-center gap-1.5"
+                title="Generate CBC-aligned Educator Lesson Plan"
               >
-                <HardDrive className="w-4 h-4 text-emerald-300" />
-                <span className="hidden xl:inline">Pre-load Offline</span>
+                <FileText className="w-3.5 h-3.5 text-indigo-700" />
+                <span>Lesson Plan</span>
               </button>
-            )}
 
-            {/* Route Selector Dropdown */}
-            <select
-              value={activeTrip.id}
-              onChange={e => {
-                const selected = fieldTrips.find(t => t.id === e.target.value);
-                if (selected) handleSelectTrip(selected);
-              }}
-              className="min-h-[44px] px-3 py-2 text-xs font-bold bg-white border border-[#e5e1da] rounded-xl focus:ring-2 focus:ring-[#5f6f52] focus:outline-none cursor-pointer"
-              aria-label="Select Virtual Field Trip Route"
-            >
-              {fieldTrips.map(trip => (
-                <option key={trip.id} value={trip.id}>
-                  {trip.country}: {trip.title} ({trip.stops.length} Stops)
-                </option>
-              ))}
-            </select>
+              <button
+                onClick={() => handleOpenJournal()}
+                className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 text-xs font-extrabold rounded-xl transition cursor-pointer flex items-center gap-1.5"
+                title="Open Socratic Travel Journal (+150 XP)"
+              >
+                <BookOpen className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Socratic Journal</span>
+              </button>
 
-            {/* Teacher Builder Modal Button */}
-            <button
-              onClick={() => setIsBuilderOpen(true)}
-              className="min-h-[44px] px-3.5 py-2 bg-[#5f6f52] hover:bg-[#4d5a42] text-white text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 focus:ring-2 focus:ring-[#5f6f52] focus:outline-none"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">AI Trip Builder</span>
-            </button>
+              <button
+                onClick={handleOpenRateModal}
+                className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-950 font-extrabold text-xs rounded-xl transition cursor-pointer flex items-center gap-1 border border-amber-300"
+                title="Rate this Virtual Field Trip"
+              >
+                <Star className="w-3.5 h-3.5 text-amber-600 fill-amber-400" />
+                <span>{studentProgress.tripRating ? `Rated ${studentProgress.tripRating.stars}★` : 'Rate'}</span>
+              </button>
+            </div>
 
-            {/* QR Code Entry Point Button */}
-            <button
-              onClick={() => setIsQrModalOpen(true)}
-              className="min-h-[44px] px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 focus:ring-2 focus:ring-slate-800 focus:outline-none"
-              title="Generate Dynamic QR Code for Classroom Tabletop Scanner"
-            >
-              <QrCode className="w-4 h-4 text-amber-400" />
-              <span className="hidden sm:inline">Dynamic QR</span>
-            </button>
+            {/* Group 2: Live Tour & Class Sync Controls */}
+            <div className="flex items-center gap-1.5 shrink-0 px-2 border-x border-slate-200">
+              <button
+                onClick={() => handleToggleTeacherLedMode(!isTeacherLedModeActive)}
+                className={`px-3 py-1.5 font-extrabold text-xs rounded-xl transition cursor-pointer flex items-center gap-1.5 border ${
+                  isTeacherLedModeActive
+                    ? 'bg-rose-600 text-white border-rose-500 animate-pulse'
+                    : 'bg-indigo-900/90 hover:bg-indigo-950 text-indigo-100 border-indigo-700'
+                }`}
+                title="Toggle Teacher-Led Mode (Broadcast view to students)"
+              >
+                <Radio className="w-3.5 h-3.5" />
+                <span>Teacher-Led Mode</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono font-black ${
+                  isTeacherLedModeActive ? 'bg-white text-rose-700' : 'bg-indigo-800 text-indigo-200'
+                }`}>
+                  {isTeacherLedModeActive ? 'LIVE' : 'OFF'}
+                </span>
+              </button>
 
-            {/* Share Trip Button */}
-            <button
-              onClick={() => setIsShareModalOpen(true)}
-              className="min-h-[44px] px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold rounded-xl transition cursor-pointer flex items-center gap-1.5 focus:ring-2 focus:ring-amber-400 focus:outline-none shadow-xs"
-              title="Share this Virtual Field Trip deep-link with students or educators"
-            >
-              <Share2 className="w-4 h-4 text-slate-950" />
-              <span>Share Trip</span>
-            </button>
+              <button
+                onClick={() => {
+                  const nextState = !isAutoFollowActive;
+                  setIsAutoFollowActive(nextState);
+                  const msg = nextState
+                    ? '✨ Auto-Follow Mode Activated! Camera will automatically pan to the next milestone on task completion.'
+                    : '⏸️ Auto-Follow Mode Paused.';
+                  setAutoFollowToast(msg);
+                  setTimeout(() => setAutoFollowToast(null), 3500);
+                }}
+                className={`px-3 py-1.5 font-extrabold text-xs rounded-xl transition cursor-pointer flex items-center gap-1.5 border ${
+                  isAutoFollowActive
+                    ? 'bg-amber-400 text-slate-950 border-amber-300'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-600'
+                }`}
+                title="Toggle Auto-Follow Camera Mode"
+              >
+                <Compass className="w-3.5 h-3.5" />
+                <span>Auto-Follow</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono font-black ${
+                  isAutoFollowActive ? 'bg-slate-950 text-amber-300' : 'bg-slate-700 text-slate-400'
+                }`}>
+                  {isAutoFollowActive ? 'ON' : 'OFF'}
+                </span>
+              </button>
+            </div>
 
-            {/* AI Lesson Plan Generator Button */}
-            <button
-              onClick={handleGenerateLessonPlan}
-              className="min-h-[44px] px-3.5 py-2 bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-extrabold rounded-xl transition cursor-pointer flex items-center gap-1.5 focus:ring-2 focus:ring-indigo-600 focus:outline-none shadow-xs"
-              title="Generate CBC-aligned Educator Lesson Plan for this Virtual Field Trip"
-            >
-              <FileText className="w-4 h-4 text-indigo-200" />
-              <span>Lesson Plan</span>
-            </button>
+            {/* Group 3: Educator & Studio Features */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => setIsBuilderOpen(true)}
+                className="px-3 py-1.5 bg-[#5f6f52] hover:bg-[#4d5a42] text-white text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>AI Trip Builder</span>
+              </button>
 
-            {/* Socratic Journal Button */}
-            <button
-              onClick={() => handleOpenJournal()}
-              className="min-h-[44px] px-3.5 py-2 bg-gradient-to-r from-emerald-800 to-teal-800 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-extrabold rounded-xl transition cursor-pointer flex items-center gap-1.5 focus:ring-2 focus:ring-emerald-600 focus:outline-none shadow-xs"
-              title="Open your Socratic Travel Journal to record observations and inquiry notes (+150 XP)"
-            >
-              <BookOpen className="w-4 h-4 text-emerald-200" />
-              <span>Socratic Journal</span>
-            </button>
+              <button
+                onClick={() => setIsQrModalOpen(true)}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1"
+                title="Generate Dynamic QR Code for Classroom Tabletop Scanner"
+              >
+                <QrCode className="w-3.5 h-3.5 text-amber-400" />
+                <span>Dynamic QR</span>
+              </button>
 
-            {/* Rate Trip Button */}
-            <button
-              onClick={handleOpenRateModal}
-              className="min-h-[44px] px-3.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-950 font-extrabold text-xs rounded-xl transition cursor-pointer flex items-center gap-1.5 border border-amber-300 shadow-2xs"
-              title="Rate this Virtual Field Trip and share tour feedback"
-            >
-              <Star className="w-4 h-4 text-amber-600 fill-amber-400" />
-              <span>{studentProgress.tripRating ? `Rated ${studentProgress.tripRating.stars}★` : 'Rate Trip'}</span>
-            </button>
-
-            {/* Teacher-Led Live Tour Mode Toggle Button */}
-            <button
-              onClick={() => handleToggleTeacherLedMode(!isTeacherLedModeActive)}
-              className={`min-h-[44px] px-3.5 py-2 font-extrabold text-xs rounded-xl transition cursor-pointer flex items-center gap-2 border shadow-xs ${
-                isTeacherLedModeActive
-                  ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-500 shadow-rose-900/40 animate-pulse'
-                  : 'bg-indigo-900/90 hover:bg-indigo-950 text-indigo-100 border-indigo-700'
-              }`}
-              title={
-                isTeacherLedModeActive
-                  ? 'Deactivate Teacher-Led Mode (Restore free student navigation)'
-                  : 'Activate Teacher-Led Mode (Lock student navigation & broadcast your active milestone)'
-              }
-            >
-              <Radio className={`w-4 h-4 ${isTeacherLedModeActive ? 'text-white' : 'text-indigo-300'}`} />
-              <span>{isTeacherLedModeActive ? 'Teacher-Led: ON' : 'Teacher-Led Mode'}</span>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black ${
-                isTeacherLedModeActive ? 'bg-white text-rose-700' : 'bg-indigo-800 text-indigo-200'
-              }`}>
-                {isTeacherLedModeActive ? 'LIVE' : 'OFF'}
-              </span>
-            </button>
-
-            {/* Auto-Follow Camera Mode Toggle Button */}
-            <button
-              onClick={() => {
-                const nextState = !isAutoFollowActive;
-                setIsAutoFollowActive(nextState);
-                const msg = nextState
-                  ? '✨ Auto-Follow Mode Activated! Camera will automatically pan to the next milestone on task completion.'
-                  : '⏸️ Auto-Follow Mode Paused.';
-                setAutoFollowToast(msg);
-                setTimeout(() => setAutoFollowToast(null), 3500);
-              }}
-              className={`min-h-[44px] px-3.5 py-2 font-extrabold text-xs rounded-xl transition cursor-pointer flex items-center gap-2 border shadow-xs ${
-                isAutoFollowActive
-                  ? 'bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-500 hover:from-amber-600 hover:to-emerald-600 text-slate-950 border-amber-300 shadow-amber-900/20'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-600'
-              }`}
-              title={
-                isAutoFollowActive
-                  ? 'Deactivate Auto-Follow Mode'
-                  : 'Activate Auto-Follow Mode (Automatically triggers smooth camera transition to next milestone on task completion)'
-              }
-            >
-              <Compass className={`w-4 h-4 ${isAutoFollowActive ? 'text-slate-950 animate-spin-slow' : 'text-slate-400'}`} />
-              <span>{isAutoFollowActive ? 'Auto-Follow: ON' : 'Auto-Follow'}</span>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black ${
-                isAutoFollowActive ? 'bg-slate-950 text-amber-300' : 'bg-slate-700 text-slate-400'
-              }`}>
-                {isAutoFollowActive ? 'ACTIVE' : 'OFF'}
-              </span>
-            </button>
-
-            {/* Accessibility Quick Controls */}
-            <button
-              onClick={() => setUseDyslexicFont(!useDyslexicFont)}
-              className={`min-h-[44px] px-3 py-2 rounded-xl text-xs font-bold transition border cursor-pointer flex items-center gap-1.5 focus:ring-2 focus:ring-[#5f6f52] focus:outline-none ${
-                useDyslexicFont ? 'bg-amber-200 text-amber-950 border-amber-400' : 'bg-white border-slate-200 text-slate-700'
-              }`}
-              title="Toggle Dyslexic-Friendly Comic Neue Typography"
-            >
-              <Type className="w-4 h-4" />
-              <span className="hidden lg:inline">Dyslexic Font</span>
-            </button>
-
-            <button
-              onClick={() => setIsHighContrast(!isHighContrast)}
-              className={`min-h-[44px] px-3 py-2 rounded-xl text-xs font-bold transition border cursor-pointer flex items-center gap-1.5 focus:ring-2 focus:ring-[#5f6f52] focus:outline-none ${
-                isHighContrast ? 'bg-amber-400 text-black border-amber-500' : 'bg-white border-slate-200 text-slate-700'
-              }`}
-              title="Toggle High Contrast Theme"
-            >
-              {isHighContrast ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
+              {!isOnline ? (
+                <div className="px-2.5 py-1 rounded-xl bg-rose-100 text-rose-900 border border-rose-300 flex items-center gap-1 text-xs font-extrabold animate-pulse">
+                  <WifiOff className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Offline</span>
+                </div>
+              ) : (
+                <button
+                  onClick={handleCacheCurrentTrip}
+                  className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1"
+                  title="Pre-load and cache excursion data for offline use"
+                >
+                  <HardDrive className="w-3.5 h-3.5 text-emerald-300" />
+                  <span>Pre-load Offline</span>
+                </button>
+              )}
+            </div>
           </div>
 
         </div>
@@ -3012,7 +3191,7 @@ DIFFERENTIATION STRATEGIES:
         {/* ================= LEFT PANE: Interactive Map & Media Explorer (7 cols = ~60% on desktop) ================= */}
         <section className="lg:col-span-7 flex flex-col gap-4">
           
-          <div className={`rounded-3xl border shadow-lg overflow-hidden flex flex-col h-[520px] sm:h-[620px] transition-colors relative ${
+          <div className={`rounded-3xl border shadow-lg overflow-hidden flex flex-col h-[580px] sm:h-[680px] transition-colors relative ${
             isHighContrast ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-[#e5e1da]'
           }`}>
             
@@ -4022,79 +4201,6 @@ DIFFERENTIATION STRATEGIES:
                 )}
               </AnimatePresence>
 
-              {/* Smart Jump Floating Map Overlay Bar (Top-Left of Viewer) */}
-              <div className="absolute top-3 left-3 z-20 flex items-center gap-1.5 bg-slate-950/85 backdrop-blur-md border border-amber-500/40 p-1.5 rounded-2xl shadow-xl max-w-[calc(100%-210px)] overflow-x-auto scrollbar-none">
-                <div className="flex items-center gap-1 px-2 py-1 text-amber-400 font-extrabold text-[11px] shrink-0 border-r border-white/15">
-                  <Zap className="w-3.5 h-3.5 fill-amber-400 animate-pulse" />
-                  <span className="hidden sm:inline uppercase tracking-wider text-[10px]">Smart Jump:</span>
-                </div>
-                <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
-                  {activeTrip.stops.map((stop, idx) => {
-                    const isCurrent = idx === currentStopIndex;
-                    const isFuture = idx > currentStopIndex;
-
-                    return (
-                      <button
-                        key={`smart-jump-bar-stop-${idx}`}
-                        type="button"
-                        onClick={() => handleSmartJumpToStop(idx)}
-                        className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer shrink-0 flex items-center gap-1 border ${
-                          isCurrent
-                            ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md scale-105'
-                            : isFuture
-                            ? 'bg-slate-900/90 text-amber-300 border-amber-400/40 hover:bg-amber-400 hover:text-slate-950'
-                            : 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500 hover:text-slate-950'
-                        }`}
-                        title={`Smart Jump to Stop #${stop.stopNumber}: ${stop.locationName}`}
-                      >
-                        <span>{isCurrent ? '🎯' : isFuture ? '🚀' : '✓'}</span>
-                        <span>#{stop.stopNumber}</span>
-                        <span className="hidden md:inline max-w-[90px] truncate">{stop.locationName}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Interactive On-Map Milestone Nodes Ribbon Overlay */}
-              {activeViewerTab === 'map' && (
-                <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 pointer-events-none hidden sm:flex items-center gap-2 bg-slate-950/80 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-amber-400/30 shadow-2xl">
-                  <span className="text-[10px] font-extrabold uppercase text-amber-400 tracking-wider flex items-center gap-1 shrink-0">
-                    <Zap className="w-3 h-3 fill-amber-400" /> Milestones:
-                  </span>
-                  <div className="flex items-center gap-1.5 pointer-events-auto">
-                    {activeTrip.stops.map((stop, idx) => {
-                      const isCurrent = idx === currentStopIndex;
-                      const isFuture = idx > currentStopIndex;
-
-                      return (
-                        <button
-                          key={`map-milestone-node-${idx}`}
-                          type="button"
-                          onClick={() => handleSmartJumpToStop(idx)}
-                          className={`group relative flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold transition transform hover:scale-110 cursor-pointer shadow-lg border ${
-                            isCurrent
-                              ? 'bg-amber-400 text-slate-950 border-amber-300 ring-2 ring-amber-400/50 font-extrabold'
-                              : isFuture
-                              ? 'bg-slate-900 text-amber-300 border-amber-400/50 hover:bg-amber-400 hover:text-slate-950'
-                              : 'bg-emerald-950 text-emerald-300 border-emerald-400/40 hover:bg-emerald-500 hover:text-slate-950'
-                          }`}
-                          title={`Smart Jump to Stop #${stop.stopNumber}: ${stop.locationName}`}
-                        >
-                          <span>{isCurrent ? '🎯' : isFuture ? '🚩' : '🏁'}</span>
-                          <span>Stop #{stop.stopNumber}</span>
-                          {isFuture && (
-                            <span className="text-[9px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono group-hover:bg-slate-950 group-hover:text-amber-400 font-extrabold">
-                              Jump
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
               {activeViewerTab === 'video' ? (
                 /* NatGeo 4K Video Tour & Science Expedition Player Stage */
                 <MainStageVideoPlayer currentStop={currentStop} />
@@ -4232,30 +4338,57 @@ DIFFERENTIATION STRATEGIES:
               </div>
             </div>
 
-            {/* Quick Socratic Prompt Chips */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px]">
-              <span className="text-[10px] font-bold text-slate-400 uppercase shrink-0">Ask Guide:</span>
-              <button
-                type="button"
-                onClick={() => setStudentInput("What key observations can I make about this location's design?")}
-                className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0 font-medium transition cursor-pointer"
-              >
-                🔍 What should I observe here?
-              </button>
-              <button
-                type="button"
-                onClick={() => setStudentInput("Why is this place geographically or historically significant?")}
-                className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0 font-medium transition cursor-pointer"
-              >
-                🏛️ Historical significance?
-              </button>
-              <button
-                type="button"
-                onClick={() => setStudentInput("How does this facility or landmark function in real life?")}
-                className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0 font-medium transition cursor-pointer"
-              >
-                ⚙️ How does it function?
-              </button>
+            {/* Quick Socratic Prompt Chips categorized by Questioning Level */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                <span>Socratic Inquiry Levels:</span>
+                <span className="text-indigo-600 font-bold">6-Tier Questioning Framework 🧠</span>
+              </div>
+
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setStudentInput("[Clarification] What specific physical features, materials, or spatial arrangements do you observe here?")}
+                  className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 shrink-0 font-extrabold transition cursor-pointer flex items-center gap-1"
+                >
+                  <span>1. Clarification & Observation</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStudentInput("[Assumptions] What unstated assumptions are we making about why this landmark was built in this exact spot?")}
+                  className="px-2.5 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 shrink-0 font-extrabold transition cursor-pointer flex items-center gap-1"
+                >
+                  <span>2. Uncovering Assumptions</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStudentInput("[Evidence] What physical, geographical, or historical evidence supports your explanation of this stop?")}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 shrink-0 font-extrabold transition cursor-pointer flex items-center gap-1"
+                >
+                  <span>3. Evidence & Reasoning</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStudentInput("[Perspectives] How might a local resident vs an outside visitor view the purpose of this location?")}
+                  className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 shrink-0 font-extrabold transition cursor-pointer flex items-center gap-1"
+                >
+                  <span>4. Multiple Perspectives</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStudentInput("[Trade-offs] What are the environmental or societal trade-offs associated with maintaining this site?")}
+                  className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-900 border border-rose-200 shrink-0 font-extrabold transition cursor-pointer flex items-center gap-1"
+                >
+                  <span>5. Implications & Trade-offs</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStudentInput("[Meta-Inquiry] Why is asking questions about this location crucial to our overall unit topic?")}
+                  className="px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-200 shrink-0 font-extrabold transition cursor-pointer flex items-center gap-1"
+                >
+                  <span>6. Meta-Inquiry</span>
+                </button>
+              </div>
             </div>
 
             {/* Chat Messages */}
@@ -4382,12 +4515,54 @@ DIFFERENTIATION STRATEGIES:
 
 
         {/* ================= RIGHT PANE: Interactive Reader & Guide (5 cols = ~40% on desktop) ================= */}
-        <section className="lg:col-span-5 flex flex-col gap-6">
+        <section className="lg:col-span-5 flex flex-col gap-4">
           
-          <div className={`rounded-3xl border p-5 sm:p-6 shadow-lg flex flex-col justify-between space-y-6 transition-colors ${
+          <div className={`rounded-3xl border p-4 sm:p-5 shadow-lg flex flex-col justify-between space-y-5 transition-colors ${
             isHighContrast ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-[#e5e1da]'
           }`}>
             
+            {/* Right Sidebar Segmented Navigation Tab Switcher */}
+            <div className="flex items-center p-1 bg-slate-100 rounded-2xl border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setActiveRightTab('guide')}
+                className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  activeRightTab === 'guide'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5 text-[#5f6f52]" />
+                <span>Guide & Tasks</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveRightTab('media')}
+                className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  activeRightTab === 'media'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Camera className="w-3.5 h-3.5 text-amber-600" />
+                <span>Media & Route</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveRightTab('notes')}
+                className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  activeRightTab === 'notes'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <GraduationCap className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Educator Notes</span>
+              </button>
+            </div>
+
             {/* Header / Read Aloud Bar & Camera AR Launch */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 flex-wrap gap-2">
               <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#5f6f52] bg-[#5f6f52]/10 px-3 py-1 rounded-full border border-[#5f6f52]/20 flex items-center gap-1.5">
@@ -4425,6 +4600,65 @@ DIFFERENTIATION STRATEGIES:
               <h2 className={`text-xl font-serif font-bold text-slate-900 leading-snug ${useDyslexicFont ? 'font-sans tracking-wide leading-relaxed' : ''}`}>
                 {currentStop.title}
               </h2>
+
+              {/* Phenomenon-Based Inquiry Hook Card */}
+              <div className="bg-gradient-to-br from-indigo-900 via-slate-900 to-purple-950 text-white rounded-2xl p-4 border border-indigo-400/40 shadow-md space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-indigo-500/30 text-indigo-300 rounded-xl border border-indigo-400/40">
+                      <Sparkles className="w-4 h-4 animate-pulse text-indigo-300" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-300 block">
+                        Phenomenon-Based Inquiry Hook
+                      </span>
+                      <h3 className="text-xs font-serif font-bold text-white">
+                        {currentStop.phenomenonHook?.title || `The Real-World Mystery of ${currentStop.title}`}
+                      </h3>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-200 border border-purple-400/30 text-[10px] font-mono font-bold">
+                    PhenoBL Hook 🧪
+                  </span>
+                </div>
+
+                <div className="p-3 bg-white/5 border border-white/10 rounded-xl space-y-2">
+                  <p className="text-xs font-bold text-amber-300 flex items-start gap-1.5 leading-snug">
+                    <HelpCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span>"{currentStop.phenomenonHook?.mysteryQuestion || `What observable physical, structural, or ecological anomaly makes ${currentStop.locationName} unique?`}"</span>
+                  </p>
+
+                  {currentStop.phenomenonHook?.observableFacts && currentStop.phenomenonHook.observableFacts.length > 0 && (
+                    <ul className="space-y-1 pt-1.5 border-t border-white/10 text-[11px] text-slate-300">
+                      {currentStop.phenomenonHook.observableFacts.map((fact, fIdx) => (
+                        <li key={fIdx} className="flex items-start gap-1.5">
+                          <span className="text-indigo-400 font-bold">•</span>
+                          <span>{fact}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <span className="text-[10px] text-slate-300 font-medium truncate max-w-[240px] sm:max-w-xs">
+                    💡 Challenge: {currentStop.phenomenonHook?.inquiryChallenge || 'Formulate a hypothesis with your team and test it with the AI Guide.'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const mystery = currentStop.phenomenonHook?.mysteryQuestion || `Tell me about the real-world phenomenon at ${currentStop.title}`;
+                      setStudentInput(`[PhenoBL Inquiry] ${mystery}`);
+                      handleSendSocraticMessage(new Event('submit') as any);
+                    }}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs rounded-xl transition cursor-pointer flex items-center gap-1 shrink-0 shadow-xs border border-indigo-400 min-h-[36px]"
+                    title="Ask the AI Local Tour Guide to guide your investigation into this phenomenon"
+                  >
+                    <Compass className="w-3.5 h-3.5" />
+                    <span>Investigate</span>
+                  </button>
+                </div>
+              </div>
 
               <p className={`text-sm text-slate-800 leading-relaxed font-medium ${useDyslexicFont ? 'font-sans text-base leading-loose tracking-wide' : ''}`}>
                 {currentStop.readingPassage}

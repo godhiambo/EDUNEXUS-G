@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   X,
@@ -28,8 +28,10 @@ import {
   Play,
   Pause,
   Volume2,
+  Volume1,
   VolumeX,
   Maximize2,
+  Minimize2,
   Film,
   RotateCcw,
   Eye,
@@ -466,6 +468,68 @@ export const DestinationCardItem: React.FC<{
   const [showCaptions, setShowCaptions] = useState<boolean>(true);
   const [showTranscript, setShowTranscript] = useState<boolean>(false);
 
+  // Custom HTML5 Video Player Overlay Refs & State
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [volume, setVolume] = useState<number>(0.85);
+  const [showVolumeSlider, setShowVolumeSlider] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!playerContainerRef.current) return;
+    if (!document.fullscreenElement) {
+      if (playerContainerRef.current.requestFullscreen) {
+        playerContainerRef.current.requestFullscreen();
+      } else if ((playerContainerRef.current as any).webkitRequestFullscreen) {
+        (playerContainerRef.current as any).webkitRequestFullscreen();
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      } else if ((document as any).webkitExitFullscreen) {
+        (document as any).webkitExitFullscreen();
+      }
+    }
+  };
+
+  const handleVolumeChange = (newVol: number) => {
+    setVolume(newVol);
+    if (newVol === 0) {
+      setIsMuted(true);
+    } else {
+      setIsMuted(false);
+    }
+    if (videoRef.current) {
+      videoRef.current.volume = newVol;
+      videoRef.current.muted = newVol === 0;
+    }
+  };
+
+  const toggleMute = () => {
+    if (isMuted) {
+      setIsMuted(false);
+      const restoreVol = volume === 0 ? 0.8 : volume;
+      setVolume(restoreVol);
+      if (videoRef.current) {
+        videoRef.current.volume = restoreVol;
+        videoRef.current.muted = false;
+      }
+    } else {
+      setIsMuted(true);
+      if (videoRef.current) {
+        videoRef.current.muted = true;
+      }
+    }
+  };
+
   // 3D Hotspots State
   const [selectedHotspot, setSelectedHotspot] = useState<Interactive3DHotspot | null>(null);
   const [isGeneratingAi, setIsGeneratingAi] = useState<boolean>(false);
@@ -744,25 +808,88 @@ export const DestinationCardItem: React.FC<{
         )}
 
         {viewTab === 'video' && (
-          <div className="w-full h-full relative bg-slate-950 flex flex-col justify-between">
-            {/* Real embedded video iframe / container */}
+          <div ref={playerContainerRef} className="w-full h-full relative bg-slate-950 flex flex-col justify-between group/player select-none overflow-hidden rounded-xl">
+            {/* Real embedded video iframe / HTML5 video container */}
             <div className="absolute inset-0 z-0">
-              <iframe
-                title={`NatGeo Archive - ${trip.title}`}
-                src={`${archive.videoEmbedUrl}`}
-                className="w-full h-full border-none opacity-90"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              />
+              {archive.videoEmbedUrl.endsWith('.mp4') || archive.videoEmbedUrl.endsWith('.webm') ? (
+                <video
+                  ref={videoRef}
+                  src={archive.videoEmbedUrl}
+                  poster={archive.thumbnailUrl}
+                  className="w-full h-full object-cover"
+                  playsInline
+                  loop
+                  onTimeUpdate={() => {
+                    if (videoRef.current) {
+                      const cur = videoRef.current.currentTime;
+                      const dur = videoRef.current.duration || archive.durationSeconds;
+                      setCurrentTime(cur);
+                      setProgress((cur / dur) * 100);
+                    }
+                  }}
+                />
+              ) : (
+                <iframe
+                  title={`NatGeo Archive - ${trip.title}`}
+                  src={`${archive.videoEmbedUrl}`}
+                  className="w-full h-full border-none opacity-90"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                />
+              )}
+            </div>
+
+            {/* Canvas Click Overlay for Play/Pause toggle */}
+            <div
+              onClick={() => {
+                const nextPlaying = !isPlaying;
+                setIsPlaying(nextPlaying);
+                if (videoRef.current) {
+                  if (nextPlaying) videoRef.current.play();
+                  else videoRef.current.pause();
+                }
+              }}
+              className="absolute inset-0 z-[1] cursor-pointer bg-slate-950/20 hover:bg-slate-950/10 transition flex items-center justify-center"
+            >
+              {/* Big center Play/Pause overlay indicator */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const nextPlaying = !isPlaying;
+                  setIsPlaying(nextPlaying);
+                  if (videoRef.current) {
+                    if (nextPlaying) videoRef.current.play();
+                    else videoRef.current.pause();
+                  }
+                }}
+                className={`w-12 h-12 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-950 flex items-center justify-center shadow-2xl transition transform border-2 border-slate-950 cursor-pointer ${
+                  !isPlaying ? 'scale-100 opacity-100' : 'scale-75 opacity-0 group-hover/player:opacity-90 group-hover/player:scale-100'
+                }`}
+                title={isPlaying ? 'Pause Video' : 'Play Video'}
+              >
+                {isPlaying ? <Pause className="w-6 h-6 fill-slate-950" /> : <Play className="w-6 h-6 fill-slate-950 ml-0.5" />}
+              </button>
             </div>
 
             {/* Top Watermark Badge Overlay */}
-            <div className="relative z-10 p-2 flex items-center justify-between bg-gradient-to-b from-slate-950/90 to-transparent pointer-events-none">
+            <div className="relative z-10 p-2 flex items-center justify-between bg-gradient-to-b from-slate-950/90 via-slate-950/40 to-transparent pointer-events-none">
               <div className="flex items-center gap-1.5 bg-amber-400 text-slate-950 px-2 py-0.5 rounded font-black text-[9px] uppercase tracking-wider shadow border border-amber-300">
                 <span>NATIONAL GEOGRAPHIC ARCHIVE</span>
               </div>
-              <span className="text-[9px] font-mono font-extrabold text-amber-300 bg-slate-950/80 px-1.5 py-0.5 rounded border border-white/10">
-                {archive.hdQuality}
-              </span>
+              <div className="flex items-center gap-1.5 pointer-events-auto">
+                <span className="text-[9px] font-mono font-extrabold text-amber-300 bg-slate-950/80 px-1.5 py-0.5 rounded border border-white/10">
+                  {archive.hdQuality}
+                </span>
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  className="p-1 rounded bg-slate-950/80 hover:bg-amber-400 hover:text-slate-950 text-amber-300 border border-white/10 transition cursor-pointer"
+                  title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+                >
+                  {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                </button>
+              </div>
             </div>
 
             {/* Closed Caption Live Educational Subtitle Overlay */}
@@ -793,32 +920,67 @@ export const DestinationCardItem: React.FC<{
 
               {/* Controls Buttons Row */}
               <div className="flex items-center justify-between text-white text-[11px]">
-                {/* Left: Play/Pause, Mute, Timer */}
+                {/* Left: Play/Pause, Volume + Slider, Timer */}
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setIsPlaying(!isPlaying)}
-                    className="p-1 rounded bg-amber-400 text-slate-950 hover:bg-amber-300 transition cursor-pointer font-bold"
+                    onClick={() => {
+                      const nextPlaying = !isPlaying;
+                      setIsPlaying(nextPlaying);
+                      if (videoRef.current) {
+                        if (nextPlaying) videoRef.current.play();
+                        else videoRef.current.pause();
+                      }
+                    }}
+                    className="p-1 rounded bg-amber-400 text-slate-950 hover:bg-amber-300 transition cursor-pointer font-bold flex items-center gap-1 shadow"
                     title={isPlaying ? 'Pause' : 'Play'}
                   >
                     {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-slate-950" />}
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setIsMuted(!isMuted)}
-                    className="p-1 rounded text-slate-300 hover:text-white transition cursor-pointer"
-                    title={isMuted ? 'Unmute' : 'Mute'}
-                  >
-                    {isMuted ? <VolumeX className="w-3.5 h-3.5 text-rose-400" /> : <Volume2 className="w-3.5 h-3.5 text-amber-300" />}
-                  </button>
+                  {/* Volume Control Button & Popup Slider */}
+                  <div className="relative flex items-center" onMouseLeave={() => setShowVolumeSlider(false)}>
+                    <button
+                      type="button"
+                      onClick={toggleMute}
+                      onMouseEnter={() => setShowVolumeSlider(true)}
+                      className="p-1 rounded text-slate-300 hover:text-white transition cursor-pointer flex items-center gap-1"
+                      title={isMuted ? 'Unmute' : `Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+                    >
+                      {isMuted || volume === 0 ? (
+                        <VolumeX className="w-3.5 h-3.5 text-rose-400" />
+                      ) : volume < 0.5 ? (
+                        <Volume1 className="w-3.5 h-3.5 text-amber-300" />
+                      ) : (
+                        <Volume2 className="w-3.5 h-3.5 text-amber-300" />
+                      )}
+                    </button>
+
+                    {/* Interactive Volume Range Slider Tooltip */}
+                    {showVolumeSlider && (
+                      <div className="absolute bottom-full left-0 mb-1 p-2 rounded-xl bg-slate-900 border border-amber-400/40 shadow-2xl flex items-center gap-2 z-30 animate-in fade-in slide-in-from-bottom-2">
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={isMuted ? 0 : volume}
+                          onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                          className="w-16 accent-amber-400 h-1.5 rounded-lg bg-slate-800 cursor-pointer"
+                        />
+                        <span className="text-[10px] font-mono font-bold text-amber-300 shrink-0">
+                          {Math.round((isMuted ? 0 : volume) * 100)}%
+                        </span>
+                      </div>
+                    )}
+                  </div>
 
                   <span className="font-mono text-[10px] text-amber-300">
                     {formatTime(currentTime)} / {archive.durationFormatted}
                   </span>
                 </div>
 
-                {/* Right: Speed, Captions CC, Transcript */}
+                {/* Right: Speed, Captions CC, Transcript, Fullscreen */}
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
@@ -847,6 +1009,15 @@ export const DestinationCardItem: React.FC<{
                     title="View Full Educational Transcript"
                   >
                     📜
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={toggleFullscreen}
+                    className="p-1 rounded hover:bg-amber-400 hover:text-slate-950 text-slate-300 transition cursor-pointer"
+                    title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+                  >
+                    {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
                   </button>
                 </div>
               </div>

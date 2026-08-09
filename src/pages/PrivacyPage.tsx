@@ -186,14 +186,19 @@ export const PrivacyPage: React.FC = () => {
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-1">
-            <div className="p-3 rounded-xl bg-slate-950 border border-amber-500/30 bg-amber-500/5 space-y-1 sm:col-span-2">
+            <div className="p-3.5 rounded-xl bg-slate-950 border border-amber-500/30 bg-amber-500/5 space-y-2 sm:col-span-2">
               <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
                 <Phone className="w-3.5 h-3.5 text-amber-400" />
-                <span>Direct Phone & WhatsApp Helpline</span>
+                <span>Direct Contact Phone & WhatsApp Bot</span>
               </span>
-              <a href="tel:+254740183394" className="text-amber-400 font-extrabold text-sm hover:underline block">
-                +254 740 183394
-              </a>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <a href="tel:+254704360522" className="text-amber-400 font-extrabold hover:underline block">
+                  Direct Call: 0704 360 522 (+254 704 360522)
+                </a>
+                <a href="https://wa.me/254740183934" target="_blank" rel="noopener noreferrer" className="text-emerald-400 font-extrabold hover:underline block">
+                  WhatsApp Bot: 0740 183 934 (+254 740 183934)
+                </a>
+              </div>
             </div>
 
             <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">

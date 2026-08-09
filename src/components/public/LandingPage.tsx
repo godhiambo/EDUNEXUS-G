@@ -54,11 +54,11 @@ export default function LandingPage({
   const [solutionsDropdown, setSolutionsDropdown] = useState(false);
 
   const stats = [
-    { value: '10,000+', label: 'Educators' },
-    { value: '250K+', label: 'Students' },
-    { value: '1M+', label: 'Lessons Created' },
-    { value: '50+', label: 'Countries' },
-    { value: '99%', label: 'Satisfaction Rate' },
+    { value: 'Pre-Launch', label: 'Platform Status' },
+    { value: '100%', label: 'CBC Curriculum Mapped' },
+    { value: '5E & UDL', label: 'Pedagogical Frameworks' },
+    { value: '< 3 sec', label: 'AI Generation Speed' },
+    { value: 'Offline', label: 'PWA & QR Capable' },
   ];
 
   const whyChoose = [
@@ -138,10 +138,6 @@ export default function LandingPage({
                     <Users className="w-4 h-4 text-amber-400" />
                     <span>Parent Workspace</span>
                   </button>
-                  <button onClick={() => onOpenAuth('Administrator')} className="w-full text-left p-2.5 rounded-xl hover:bg-slate-800/80 flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
-                    <ShieldCheck className="w-4 h-4 text-blue-400" />
-                    <span>Administrator Workspace</span>
-                  </button>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -199,7 +195,7 @@ export default function LandingPage({
             >
               One AI Platform. <br />
               <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400 bg-clip-text text-transparent">
-                Four Intelligent Workspaces.
+                Three Intelligent Workspaces.
               </span>
             </motion.h1>
 
@@ -209,7 +205,7 @@ export default function LandingPage({
               transition={{ delay: 0.2 }}
               className="text-base sm:text-lg text-slate-300 font-medium leading-relaxed max-w-xl"
             >
-              Empowering teachers, students, parents, and school administrators with AI tools to teach, learn, manage and grow—together.
+              Empowering teachers, students, and parents with AI tools to teach, learn, manage and grow—together.
             </motion.p>
 
             {/* Action Buttons */}
@@ -268,7 +264,7 @@ export default function LandingPage({
                   ))}
                 </div>
                 <p className="text-xs font-semibold text-slate-400 mt-0.5">
-                  Trusted by <strong>10,000+</strong> educators and learners globally
+                  Designed for <strong>Educators, Students & School Communities</strong> • Launching Soon
                 </p>
               </div>
             </div>
@@ -326,21 +322,21 @@ export default function LandingPage({
         </div>
       </section>
 
-      {/* FOUR WORKSPACES SECTION (Matching Left Side Image Layout) */}
+      {/* THREE WORKSPACES SECTION */}
       <section id="features" className="py-20 bg-[#06121a] border-t border-slate-800/80 px-4 sm:px-8 lg:px-16">
         <div className="max-w-7xl mx-auto space-y-12">
           
           <div className="text-center space-y-3 max-w-3xl mx-auto">
             <h2 className="text-3xl sm:text-5xl font-serif font-extrabold text-white tracking-tight">
-              Four Workspaces. One Powerful Platform.
+              Three Workspaces. One Powerful Platform.
             </h2>
             <p className="text-sm sm:text-base text-slate-400 font-medium">
-              Each workspace is designed to meet the unique needs of every learner and educator.
+              Each workspace is tailored specifically for teachers, students, and parents.
             </p>
           </div>
 
-          {/* 4 Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* 3 Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             
             {/* Teacher Card */}
             <div className="p-6 rounded-3xl bg-emerald-950/20 border border-emerald-500/30 hover:border-emerald-500/60 transition-all flex flex-col justify-between space-y-6 group">
@@ -462,46 +458,6 @@ export default function LandingPage({
               </div>
             </div>
 
-            {/* Administrator Card */}
-            <div className="p-6 rounded-3xl bg-blue-950/20 border border-blue-500/30 hover:border-blue-500/60 transition-all flex flex-col justify-between space-y-6 group">
-              <div className="space-y-4">
-                <div className="w-12 h-12 rounded-2xl bg-blue-500/20 border border-blue-400/40 flex items-center justify-center text-blue-400">
-                  <ShieldCheck className="w-6 h-6" />
-                </div>
-
-                <div>
-                  <h3 className="text-xl font-serif font-extrabold text-white group-hover:text-blue-300 transition">
-                    Administrator Workspace
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                    Manage your school with powerful insights and control.
-                  </p>
-                </div>
-
-                <div className="space-y-2 pt-2 border-t border-slate-800">
-                  {['School Analytics', 'User & Role Management', 'Curriculum Management', 'Reports & Insights', 'System & Security'].map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-2 text-xs font-medium text-slate-300">
-                      <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
-                      <span>{item}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-4 pt-2">
-                <button
-                  onClick={() => onOpenAuth('Administrator')}
-                  className="text-xs font-bold text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer"
-                >
-                  <span>Learn More</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-                <div className="h-28 rounded-2xl bg-gradient-to-tr from-blue-900/40 to-slate-900 border border-blue-500/20 overflow-hidden relative flex items-end justify-center p-2">
-                  <img src="https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=300&q=80" alt="Administrator" className="h-full object-cover rounded-xl" />
-                </div>
-              </div>
-            </div>
-
           </div>
 
         </div>
@@ -553,7 +509,7 @@ export default function LandingPage({
               Community Voices
             </span>
             <h2 className="text-3xl sm:text-4xl font-serif font-extrabold text-white tracking-tight">
-              Loved by Educators & Learners Worldwide
+              Designed with Feedback from Educators & Pedagogical Experts
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 font-medium">
               See how EduNexus empowers diverse teaching environments, classrooms, and families globally.
@@ -838,7 +794,8 @@ export default function LandingPage({
                   <>
                     <p>For help, onboarding, or platform support, please contact:</p>
                     <p>Email: <a href="mailto:support@joinedunexus.app" className="font-bold underline hover:text-emerald-600 transition">support@joinedunexus.app</a></p>
-                    <p>Phone: <strong>+254740183394</strong></p>
+                    <p>Direct Call Phone: <strong>0704 360 522 (+254 704 360522)</strong></p>
+                    <p>WhatsApp Bot: <strong>0740 183 934 (+254 740 183934)</strong></p>
                   </>
                 )}
               </div>

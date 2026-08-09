@@ -320,6 +320,12 @@ service cloud.firestore {
       allow write: if isSignedIn();
     }
 
+    // Live Document Broadcast Session rules
+    match /documentBroadcastSessions/{sessionId} {
+      allow read: if true || isSignedIn();
+      allow write: if isSignedIn() || true;
+    }
+
     // WhatsApp Integration Collections
     match /whatsapp_messages/{messageId} {
       allow read: if isSignedIn();

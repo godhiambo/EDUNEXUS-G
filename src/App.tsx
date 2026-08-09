@@ -9,7 +9,7 @@ import CookiePolicyPage from './pages/CookiePolicyPage';
 import DataDeletionPolicyPage from './pages/DataDeletionPolicyPage';
 import AccessibilityStatementPage from './pages/AccessibilityStatementPage';
 import NotFoundPage from './pages/NotFoundPage';
-import { SavedDocument, GenerationParams, DocumentDraft, AppNotification } from './types';
+import { SavedDocument, GenerationParams, DocumentDraft, AppNotification, getCurriculumTutorName } from './types';
 import { INITIAL_DOCUMENTS } from './data/seedDocs';
 import { EditableSelect } from './components/EditableSelect';
 import { AuthProvider, useAuth, resolveDisplayName } from './context/AuthContext';
@@ -49,6 +49,7 @@ const LearnersPerformance = lazy(() => import('./components/LearnersPerformance'
 const VisualPhoneticsStudio = lazy(() => import('./components/VisualPhoneticsStudio'));
 const QRMappingDashboard = lazy(() => import('./components/QRMappingDashboard'));
 const VirtualFieldTripStudio = lazy(() => import('./components/VirtualFieldTripStudio').then(m => ({ default: m.VirtualFieldTripStudio })));
+const LowerSchoolMagicStudio = lazy(() => import('./components/LowerSchoolMagicStudio'));
 import PilotFeedbackModal from './components/PilotFeedbackModal';
 const SidebarTimerWidget = lazy(() => import('./components/SidebarTimerWidget'));
 import ErrorBoundary from './components/ErrorBoundary';
@@ -56,6 +57,10 @@ import VoiceNavigation from './components/VoiceNavigation';
 const AppIconShowcaseModal = lazy(() => import('./components/AppIconShowcaseModal'));
 import { ScannedStationPortalModal } from './components/ScannedStationPortalModal';
 import GlobalSearchModal from './components/GlobalSearchModal';
+import { useSubscription } from './hooks/useSubscription';
+import PricingSubscriptionModal from './components/PricingSubscriptionModal';
+import SubscriptionBadgeWidget from './components/SubscriptionBadgeWidget';
+import FeatureGateModal from './components/FeatureGateModal';
 
 import {
   Menu,
@@ -93,8 +98,11 @@ import {
   Sun,
   Moon,
   RotateCcw,
-  Search
+  Search,
+  Radio,
+  Cast
 } from 'lucide-react';
+import { subscribeToDocumentBroadcast, stopDocumentBroadcastSession, DocumentBroadcastData } from './services/documentBroadcastService';
 
 function ViewLoadingFallback() {
   return (
@@ -110,6 +118,67 @@ function ViewLoadingFallback() {
   );
 }
 
+
+function RequireDeveloperGuard({ children }: { children: React.ReactNode }) {
+  const { user, profile, isDeveloper, hasDeveloperClaim, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-white">
+        <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center animate-spin mb-4">
+          <Shield className="w-6 h-6" />
+        </div>
+        <p className="text-xs text-slate-400 font-mono">Verifying Developer Custom Claim...</p>
+      </div>
+    );
+  }
+
+  const isDevAccess = isDeveloper || hasDeveloperClaim;
+
+  if (!user || !isDevAccess) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-white">
+        <div className="max-w-md w-full bg-slate-900 border border-rose-500/30 rounded-3xl p-8 space-y-6 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-600 via-amber-500 to-rose-600" />
+          
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-500 flex items-center justify-center shadow-lg">
+            <Shield className="w-8 h-8" />
+          </div>
+
+          <div className="space-y-2">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/20 border border-rose-500/30 text-rose-300 text-[11px] font-black uppercase tracking-wider">
+              <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+              <span>403 Forbidden</span>
+            </span>
+            <h1 className="text-2xl font-black text-white tracking-tight">Access Restricted</h1>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              The <span className="text-rose-400 font-semibold">/admin</span> Developer Console requires an account with verified custom claim <code className="bg-slate-800 px-1.5 py-0.5 rounded text-rose-300 font-mono">developer: true</code>.
+            </p>
+          </div>
+
+          <div className="p-3.5 bg-slate-950/80 rounded-2xl border border-slate-800 text-left text-xs space-y-1.5">
+            <div className="text-[10px] font-mono uppercase text-slate-500">Your Current Account Role</div>
+            <div className="font-bold text-amber-400 capitalize">{profile?.role || 'Unauthenticated'} ({user?.email || 'No Session'})</div>
+            <p className="text-[11px] text-slate-400 leading-normal">
+              Teachers, Students, and Parents do not possess developer authorization claims and are forbidden from accessing this route.
+            </p>
+          </div>
+
+          <div className="pt-2">
+            <a
+              href="/"
+              className="inline-flex items-center justify-center gap-2 w-full py-3 px-4 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-lg shadow-rose-600/20"
+            >
+              <span>Return to Application Workspace</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
 
 export default function App() {
   console.log('[App Lifecycle] Rendering root App component with Providers');
@@ -128,6 +197,11 @@ export default function App() {
                 <Route path="/cookies" element={<CookiePolicyPage />} />
                 <Route path="/data-deletion" element={<DataDeletionPolicyPage />} />
                 <Route path="/accessibility" element={<AccessibilityStatementPage />} />
+                <Route path="/admin" element={
+                  <RequireDeveloperGuard>
+                    <AppContent initialTab="admin" />
+                  </RequireDeveloperGuard>
+                } />
                 <Route path="/" element={<AppContent />} />
                 <Route path="*" element={<NotFoundPage />} />
               </Routes>
@@ -139,9 +213,9 @@ export default function App() {
   );
 }
 
-function AppContent() {
+function AppContent({ initialTab }: { initialTab?: 'dashboard' | 'create' | 'view' | 'admin' | 'playbook' | 'settings' | 'resources' | 'collaboration' | 'voice-notes' | 'tutor' | 'assessment-generator' | 'file-library' | 'image-studio' | 'video-studio' | 'performance' | 'phonetics' | 'qr-mapping' | 'virtual-field-trip' | 'magic-objects' }) {
   console.log('[App Lifecycle] Rendering AppContent functional component');
-  const { user, profile, loading, logout, systemPolicies } = useAuth();
+  const { user, profile, loading, logout, systemPolicies, isDeveloper: isAuthDeveloper, hasDeveloperClaim } = useAuth();
   const { t, language, aiLanguage, setLanguage, setAiLanguage } = useLanguage();
 
   useEffect(() => {
@@ -149,7 +223,11 @@ function AppContent() {
   }, [user]);
   const [documents, setDocuments] = useState<SavedDocument[]>([]);
   const [isDocsLoading, setIsDocsLoading] = useState<boolean>(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'create' | 'view' | 'admin' | 'settings' | 'resources' | 'collaboration' | 'voice-notes' | 'tutor' | 'assessment-generator' | 'file-library' | 'image-studio' | 'video-studio' | 'performance' | 'phonetics' | 'qr-mapping' | 'virtual-field-trip'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'create' | 'view' | 'admin' | 'playbook' | 'settings' | 'resources' | 'collaboration' | 'voice-notes' | 'tutor' | 'assessment-generator' | 'file-library' | 'image-studio' | 'video-studio' | 'performance' | 'phonetics' | 'qr-mapping' | 'virtual-field-trip' | 'magic-objects'>(() => {
+    if (initialTab) return initialTab;
+    if (typeof window !== 'undefined' && window.location.pathname === '/admin') return 'admin';
+    return 'dashboard';
+  });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [tutorResourceId, setTutorResourceId] = useState<string>('');
   const [selectedDoc, setSelectedDoc] = useState<SavedDocument | null>(null);
@@ -159,6 +237,26 @@ function AppContent() {
   const [lastGenParams, setLastGenParams] = useState<GenerationParams | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>(() => getStoredNotifications());
   const [shortcutToast, setShortcutToast] = useState<{ message: string; keys: string; type: 'save' | 'print' | 'new' | 'info' } | null>(null);
+
+  // Live Real-Time Document Broadcast state
+  const [liveBroadcast, setLiveBroadcast] = useState<DocumentBroadcastData | null>(null);
+
+  useEffect(() => {
+    const unsub = subscribeToDocumentBroadcast('global_active_broadcast', (broadcastData) => {
+      setLiveBroadcast(broadcastData);
+    });
+    return () => unsub();
+  }, []);
+
+  // Subscription & Entitlement State Engine
+  const subscriptionState = useSubscription(user?.uid || 'guest');
+  const { subscription, limits, checkAndConsumeQuota, upgradePlan, startTrial, buyCredits, toggleAutoRenew } = subscriptionState;
+  const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
+  const [featureGateData, setFeatureGateData] = useState<{
+    isOpen: boolean;
+    title?: string;
+    description?: string;
+  }>({ isOpen: false });
 
   // Synthesize a beautiful dual-tone chime sound
   const playChime = () => {
@@ -258,7 +356,6 @@ function AppContent() {
 
   const isStudent = profile?.role === 'Student';
   const isParent = profile?.role === 'Parent';
-  const isAdmin = profile?.role === 'Administrator';
 
   const ALLOWED_ADMIN_EMAILS = [
     'ojiambo.godfrey@gmail.com',
@@ -266,6 +363,8 @@ function AppContent() {
     'godfreynexused@gmail.com'
   ];
   const userEmailLower = (user?.email || profile?.email || '').toLowerCase().trim();
+  const isDeveloper = isAuthDeveloper || hasDeveloperClaim || profile?.role === 'developer' || ALLOWED_ADMIN_EMAILS.includes(userEmailLower);
+  const isAdmin = profile?.role === 'Administrator' || isDeveloper;
   const hasPlaybookAccess = true;
 
   // Pilot program feedback form state and interceptor
@@ -604,6 +703,9 @@ function AppContent() {
         },
         body: JSON.stringify({
           ...params,
+          curriculum: params.curriculum || profile?.primaryCurriculum || profile?.curriculum || 'cbc',
+          primaryCurriculum: profile?.primaryCurriculum || profile?.curriculum || params.curriculum || 'cbc',
+          userId: profile?.uid,
           explainLikeMasterTeacher: systemPolicies?.forceMasterTeacherMode ? true : params.explainLikeMasterTeacher,
           language: aiLanguage
         }),
@@ -739,7 +841,7 @@ function AppContent() {
       }
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err.message || 'An error occurred during curriculum generation. Please make sure your Gemini key is valid and try again.');
+      setErrorMsg(err.message || 'An error occurred during curriculum generation. Please make sure your AI service configuration is valid and try again.');
       setIsGenerating(false);
     }
   };
@@ -1039,7 +1141,7 @@ function AppContent() {
   return (
     <>
       <SEOHead activeTab={activeTab} docTitle={activeTab === 'view' ? selectedDoc?.title : undefined} />
-      <div className="min-h-screen bg-slate-950 flex flex-col font-sans text-slate-100 selection:bg-cyan-500/30 selection:text-cyan-200">
+      <div className="app-root-container min-h-screen bg-slate-950 flex flex-col font-sans text-slate-100 selection:bg-cyan-500/30 selection:text-cyan-200">
       {/* Navigation Header */}
       <nav className="app-nav-bar min-h-16 h-auto sm:h-16 py-1.5 sm:py-0 flex items-center justify-between px-3 sm:px-6 md:px-8 bg-slate-900/80 backdrop-blur-md border-b border-slate-800/80 shadow-lg shrink-0 z-30">
         <div className="flex items-center gap-2 sm:gap-2.5">
@@ -1063,7 +1165,7 @@ function AppContent() {
             <div className="app-header-brand-text flex flex-col items-center sm:items-start justify-center text-center sm:text-left whitespace-nowrap">
               <span className="font-extrabold text-xs sm:text-lg tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-teal-400 via-cyan-300 to-blue-400 block leading-tight whitespace-nowrap">EduNexus</span>
               <span className="text-[8px] sm:text-[10px] text-cyan-400/90 font-bold uppercase tracking-wider block mt-0.5 whitespace-nowrap">
-                <span>Teacher Admin Assistant</span>
+                <span>Unlimited Learning</span>
                 <span className="hidden sm:inline-block ml-1 px-1 py-0.2 bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-[8px] rounded font-black tracking-normal">App Icon</span>
               </span>
             </div>
@@ -1120,6 +1222,14 @@ function AppContent() {
                   setActiveTab('view');
                 }
               }}
+            />
+
+            {/* Plan Subscription Status Badge & Quick Upgrade Trigger */}
+            <SubscriptionBadgeWidget
+              subscription={subscription}
+              limits={limits}
+              onOpenPricingModal={() => setIsPricingModalOpen(true)}
+              compact={true}
             />
 
             {/* Voice-Activated Tab Navigation System */}
@@ -1217,17 +1327,31 @@ function AppContent() {
               </button>
 
               {!(isStudent || isParent) && (
-                <button
-                  onClick={startNewGeneration}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
-                    activeTab === 'create'
-                      ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/20'
-                      : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                  }`}
-                >
-                  <PlusCircle className="w-4 h-4" />
-                  <span>Lesson Plans</span>
-                </button>
+                <>
+                  <button
+                    onClick={startNewGeneration}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
+                      activeTab === 'create'
+                        ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/20'
+                        : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                    }`}
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    <span>Lesson Plans</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('playbook')}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
+                      activeTab === 'playbook'
+                        ? 'bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/20'
+                        : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                    }`}
+                  >
+                    <Shield className="w-4 h-4 text-amber-400" />
+                    <span>Teacher Playbook</span>
+                  </button>
+                </>
               )}
 
               <button
@@ -1263,7 +1387,7 @@ function AppContent() {
                 }`}
               >
                 <Award className="w-4 h-4" />
-                <span>EduNexus AI Tutor</span>
+                <span>{getCurriculumTutorName(profile?.primaryCurriculum || profile?.curriculum)}</span>
               </button>
 
               <button
@@ -1415,26 +1539,40 @@ function AppContent() {
                 <Compass className="w-4 h-4 text-amber-400" />
                 <span>Virtual Field Trips</span>
               </button>
-            </div>
-          </div>
 
-          {/* ADMINISTRATION SECTION */}
-          <div className="space-y-2">
-            <p className="text-[10px] font-extrabold text-rose-400 uppercase tracking-[0.15em] px-2 mb-1.5">Administration</p>
-            <div className="flex flex-col gap-1">
               <button
-                onClick={() => setActiveTab('admin')}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
-                  activeTab === 'admin'
-                    ? 'bg-gradient-to-r from-rose-600 to-amber-600 text-white shadow-lg shadow-rose-500/20 font-extrabold'
-                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                onClick={() => setActiveTab('magic-objects')}
+                className={`flex items-center gap-3 px-3 py-2 rounded-xl transition text-xs font-bold cursor-pointer ${
+                  activeTab === 'magic-objects'
+                    ? 'bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white shadow-lg shadow-purple-500/20 font-black'
+                    : 'text-amber-300 hover:bg-slate-800/60 hover:text-white'
                 }`}
               >
-                <Shield className="w-4 h-4 text-rose-400 shrink-0" />
-                <span>Admin Playbook & Panel</span>
+                <Sparkles className="w-4 h-4 text-yellow-300 animate-spin" />
+                <span>Magic Objects (Click AI)</span>
               </button>
             </div>
           </div>
+
+          {/* DEVELOPER CONSOLE SECTION (PLATFORM OWNER ONLY) */}
+          {isDeveloper && (
+            <div className="space-y-2">
+              <p className="text-[10px] font-extrabold text-rose-400 uppercase tracking-[0.15em] px-2 mb-1.5">Developer Console</p>
+              <div className="flex flex-col gap-1">
+                <button
+                  onClick={() => setActiveTab('admin')}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-xs font-bold cursor-pointer ${
+                    activeTab === 'admin'
+                      ? 'bg-gradient-to-r from-rose-600 to-amber-600 text-white shadow-lg shadow-rose-500/20 font-extrabold'
+                      : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                  }`}
+                >
+                  <Shield className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>Developer Console</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Upgrade to Premium Promo Box */}
           <div className="mt-auto p-4 rounded-2xl bg-gradient-to-br from-teal-900/80 via-slate-900 to-cyan-950 text-white space-y-2 border border-teal-500/30 shadow-lg relative overflow-hidden">
@@ -1466,7 +1604,76 @@ function AppContent() {
         </aside>
 
         {/* Central Workspace */}
-        <main className="flex-1 p-6 md:p-8 flex flex-col gap-6 overflow-y-auto">
+        <main className="flex-1 p-3 sm:p-6 md:p-8 flex flex-col gap-4 sm:gap-6 overflow-y-auto w-full max-w-7xl xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto ultrawide-container">
+          {/* Real-time Teacher Document Broadcast Banner */}
+          {liveBroadcast && liveBroadcast.isBroadcasting && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-gradient-to-r from-rose-950 via-red-900 to-rose-950 text-white px-5 py-3.5 rounded-2xl shadow-xl border border-rose-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-sans shrink-0"
+            >
+              <div className="flex items-center gap-3">
+                <span className="flex h-3 w-3 relative shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+                </span>
+                <div className="space-y-0.5">
+                  <span className="font-extrabold uppercase tracking-wider text-rose-300 text-[10px] block">
+                    🔴 LIVE CLASSROOM BROADCAST
+                  </span>
+                  <p className="font-bold text-slate-100 text-xs sm:text-sm">
+                    {liveBroadcast.teacherName || 'Teacher'} is broadcasting: <span className="text-amber-200 underline underline-offset-2">"{liveBroadcast.documentTitle}"</span>
+                  </p>
+                  {liveBroadcast.spotlightNote && (
+                    <p className="text-amber-200 text-xs font-medium bg-rose-950/80 px-2.5 py-1 rounded-lg border border-rose-800/80 mt-1 inline-block">
+                      📣 Educator Note: {liveBroadcast.spotlightNote}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                <button
+                  onClick={() => {
+                    const docObj: SavedDocument = {
+                      id: liveBroadcast.documentId || 'live_broadcast_doc',
+                      title: liveBroadcast.documentTitle || 'Live Broadcast Document',
+                      content: liveBroadcast.documentContent || '',
+                      subject: liveBroadcast.documentSubject || 'General',
+                      classLevel: liveBroadcast.documentClassLevel || 'All Grades',
+                      docType: 'lesson-plan',
+                      curriculum: 'cbc',
+                      topic: liveBroadcast.documentTitle || 'Live Lesson',
+                      subTopic: 'Classroom Stream',
+                      duration: '45 mins',
+                      createdAt: new Date(liveBroadcast.updatedAt).toISOString(),
+                      lastModified: new Date(liveBroadcast.updatedAt).toISOString(),
+                      tags: ['Live Broadcast', 'Classroom']
+                    };
+                    setSelectedDoc(docObj);
+                    setActiveTab('view');
+                  }}
+                  className="bg-white text-rose-950 hover:bg-rose-50 px-4 py-2 rounded-xl font-black shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer active:scale-95"
+                >
+                  <Radio className="w-3.5 h-3.5 text-rose-600 animate-pulse" />
+                  <span>{selectedDoc?.id === liveBroadcast.documentId && activeTab === 'view' ? 'Syncing Live View' : 'Join Live View'}</span>
+                </button>
+
+                {(profile?.role === 'Teacher' || profile?.role === 'Administrator' || isAuthDeveloper) && (
+                  <button
+                    onClick={async () => {
+                      await stopDocumentBroadcastSession('global_active_broadcast', user?.uid);
+                    }}
+                    className="bg-rose-900/80 hover:bg-rose-950 border border-rose-700/60 text-rose-200 px-3 py-2 rounded-xl font-bold transition text-xs cursor-pointer"
+                    title="End live broadcast session"
+                  >
+                    Stop Broadcast
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          )}
+
           {/* Dynamic Breadcrumbs Navigation & Crawlability Schema */}
           <Breadcrumbs 
             activeTab={activeTab} 
@@ -1486,21 +1693,24 @@ function AppContent() {
                 {activeTab === 'dashboard' && 'Pedagogical Assistant Dashboard'}
                 {activeTab === 'create' && 'Curriculum Generator'}
                 {activeTab === 'view' && 'Pedagogical Material'}
-                {activeTab === 'admin' && "Administrators' Playbook"}
+                {activeTab === 'admin' && 'Developer Console'}
+                {activeTab === 'playbook' && 'Teacher Playbook'}
                 {activeTab === 'settings' && 'Workspace Settings'}
                 {activeTab === 'collaboration' && 'Faculty Collaboration Hub'}
                 {activeTab === 'resources' && 'Global Teaching Resource Explorer'}
                 {activeTab === 'voice-notes' && 'Audio-to-Text Lecture Notes & Concept Mindmaps'}
-                {activeTab === 'tutor' && 'EduNexus AI Tutor'}
+                {activeTab === 'tutor' && getCurriculumTutorName(profile?.primaryCurriculum || profile?.curriculum)}
                 {activeTab === 'assessment-generator' && 'AI Assessment Item Generator'}
                 {activeTab === 'file-library' && 'Curriculum & Teaching Material File Library'}
                 {activeTab === 'qr-mapping' && 'QR Touchpoint Mapping & Scavenger Hunt Studio'}
+                {activeTab === 'magic-objects' && 'Lower Primary Magic Objects Studio (Click-to-Generate)'}
               </h1>
               <p className="text-slate-600 dark:text-slate-400 text-xs sm:text-sm font-medium">
                 {activeTab === 'dashboard' && 'Access and organize your curriculum-aligned lesson plans, rubrics, and materials.'}
                 {activeTab === 'create' && 'Create high-quality, comprehensive lesson plans or worksheets in seconds.'}
                 {activeTab === 'view' && 'Edit, print, or export your teacher administrator resource files.'}
-                {activeTab === 'admin' && "Execute global system commands, audit pedagogical outputs, and tune user permission overrides."}
+                {activeTab === 'admin' && 'Platform owner console for live telemetry, user accounts, system policies, and infrastructure monitoring.'}
+                {activeTab === 'playbook' && 'Comprehensive guide and module directory for EduNexus educational features and school operational workflows.'}
                 {activeTab === 'settings' && 'Configure custom typographical styles, autosave delays, and regional metadata.'}
                 {activeTab === 'collaboration' && 'Securely share resources, exchange teaching feedback, and tune AI generation templates.'}
                 {activeTab === 'resources' && 'Scan, discover, and import real-time global teaching aids, interactive simulators, and worksheets.'}
@@ -1509,6 +1719,7 @@ function AppContent() {
                 {activeTab === 'assessment-generator' && 'Generate rigorous, curriculum-scaffolded assessment items with diagnostic feedback and in-place fine-tuning.'}
                 {activeTab === 'file-library' && 'Browse, search, and manage teacher-uploaded curriculum guides, syllabi, and reference sheets.'}
                 {activeTab === 'qr-mapping' && 'Design complete, print-ready classroom scavenger hunts for all subjects and map digital QR touchpoints.'}
+                {activeTab === 'magic-objects' && 'Zero-prompt interactive studio for lower school students and teachers. Simply click any animated object to generate AI lessons, rhymes, audio narrations, and guides!'}
               </p>
             </div>
 
@@ -1599,6 +1810,7 @@ function AppContent() {
                   onOpenVideoStudio={() => setActiveTab('video-studio')}
                   onOpenQRMapping={() => setActiveTab('qr-mapping')}
                   onOpenAdminPlaybook={() => setActiveTab('admin')}
+                  onOpenMagicStudio={() => setActiveTab('magic-objects')}
                   userRole={profile?.role}
                   notifications={notifications}
                   setNotifications={setNotifications}
@@ -1628,18 +1840,44 @@ function AppContent() {
                 />
               )}
 
-              {activeTab === 'admin' && hasPlaybookAccess && (
+              {activeTab === 'playbook' && (
                 <div className="space-y-8 animate-fadeIn">
-                  {/* Admin Panel at the Top */}
-                  <AdminPanel />
-
-                  {/* Comprehensive Master Admin Playbook & System Directory */}
                   <AdminPlaybook />
                 </div>
               )}
 
+              {activeTab === 'admin' && (
+                isDeveloper ? (
+                  <div className="space-y-8 animate-fadeIn">
+                    <AdminPanel />
+                  </div>
+                ) : (
+                  <div className="min-h-[60vh] flex flex-col items-center justify-center p-8 text-center space-y-4 bg-slate-900/40 rounded-3xl border border-slate-800">
+                    <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-500 flex items-center justify-center">
+                      <Shield className="w-8 h-8" />
+                    </div>
+                    <h2 className="text-2xl font-bold text-slate-100">403 - Access Forbidden</h2>
+                    <p className="text-sm text-slate-400 max-w-md">
+                      The Developer Console is strictly restricted to authorized platform owners. Access denied.
+                    </p>
+                    <button
+                      onClick={() => setActiveTab('dashboard')}
+                      className="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-md"
+                    >
+                      Return to Workspace
+                    </button>
+                  </div>
+                )
+              )}
+
               {activeTab === 'settings' && (
-                <Settings documents={documents} />
+                <Settings
+                  documents={documents}
+                  subscription={subscription}
+                  limits={limits}
+                  onOpenPricingModal={() => setIsPricingModalOpen(true)}
+                  onToggleAutoRenew={toggleAutoRenew}
+                />
               )}
 
               {activeTab === 'resources' && (
@@ -1715,6 +1953,19 @@ function AppContent() {
               {activeTab === 'virtual-field-trip' && (
                 <VirtualFieldTripStudio
                   onOpenQRMapping={() => setActiveTab('qr-mapping')}
+                />
+              )}
+
+              {activeTab === 'magic-objects' && (
+                <LowerSchoolMagicStudio
+                  onSaveToDocuments={(newDoc) => {
+                    setDocuments(prev => [newDoc, ...prev]);
+                  }}
+                  onNavigateToViewer={(docToView) => {
+                    setSelectedDoc(docToView);
+                    setActiveTab('view');
+                  }}
+                  onOpenVideoStudio={() => setActiveTab('video-studio')}
                 />
               )}
             </Suspense>
@@ -2048,7 +2299,7 @@ function AppContent() {
                 </div>
                 <div>
                   <span className="font-bold text-base tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-teal-400 via-cyan-300 to-blue-400 block leading-none">EduNexus</span>
-                  <span className="text-[9px] text-cyan-400/90 font-bold uppercase tracking-wider block mt-0.5">Teacher Admin Assistant</span>
+                  <span className="text-[9px] text-cyan-400/90 font-bold uppercase tracking-wider block mt-0.5">Unlimited Learning</span>
                 </div>
               </button>
               
@@ -2285,7 +2536,24 @@ function AppContent() {
                     </>
                   )}
 
-                  {hasPlaybookAccess && (
+                  {!(isStudent || isParent) && (
+                    <button
+                      onClick={() => {
+                        setActiveTab('playbook');
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className={`flex items-center gap-3 p-3 rounded-xl border border-transparent transition-all text-sm font-medium cursor-pointer w-full text-left ${
+                        activeTab === 'playbook'
+                          ? 'bg-[#5f6f52]/10 text-[#5f6f52] font-semibold'
+                          : 'bg-white text-slate-600 hover:bg-[#e9e5db]'
+                      }`}
+                    >
+                      <Shield className="w-4.5 h-4.5 text-amber-500 shrink-0" />
+                      <span>Teacher Playbook</span>
+                    </button>
+                  )}
+
+                  {isDeveloper && (
                     <button
                       onClick={() => {
                         setActiveTab('admin');
@@ -2298,7 +2566,7 @@ function AppContent() {
                       }`}
                     >
                       <Shield className="w-4.5 h-4.5 text-rose-600 shrink-0" />
-                      <span>Administrators' Playbook</span>
+                      <span>Developer Console</span>
                     </button>
                   )}
 
@@ -2424,6 +2692,27 @@ function AppContent() {
         onLaunchParentPlaybook={() => {
           setActiveTab('admin');
         }}
+      />
+
+      {/* EduNexus Pricing, Plans & Subscription Modal */}
+      <PricingSubscriptionModal
+        isOpen={isPricingModalOpen}
+        onClose={() => setIsPricingModalOpen(false)}
+        subscription={subscription}
+        limits={limits}
+        onUpgrade={upgradePlan}
+        onStartTrial={startTrial}
+        onBuyCredits={buyCredits}
+      />
+
+      {/* Daily Quota & Feature Gate Modal */}
+      <FeatureGateModal
+        isOpen={featureGateData.isOpen}
+        onClose={() => setFeatureGateData({ isOpen: false })}
+        title={featureGateData.title}
+        description={featureGateData.description}
+        onOpenPricingModal={() => setIsPricingModalOpen(true)}
+        onStartTrial={!subscription?.hasUsedTrial ? startTrial : undefined}
       />
     </Suspense>
     </>

@@ -90,7 +90,7 @@ const DEFAULT_FAQS: FAQItem[] = [
     id: 'ai-grading-accuracy',
     category: 'AI Capabilities',
     question: 'How does AI grading and assessment analysis work?',
-    answer: 'EduNexus uses Gemini 3.5 Flash models to analyze student quiz answers, reading levels, and essay responses against standard rubric criteria. It provides constructive feedback, flags areas needing remediation, and generates adaptive study pathways for individual learners.',
+    answer: 'EduNexus uses advanced AI models to analyze student quiz answers, reading levels, and essay responses against standard rubric criteria. It provides constructive feedback, flags areas needing remediation, and generates adaptive study pathways for individual learners.',
     tags: ['AI Assessment', 'Rubrics', 'Reading Level', 'Adaptive Learning']
   }
 ];

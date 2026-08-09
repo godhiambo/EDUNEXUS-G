@@ -345,7 +345,7 @@ export default function AboutModal({ isOpen, onClose }: AboutModalProps) {
                           <Star className="w-3.5 h-3.5 text-amber-500" /> Key Technical Resiliences
                         </h5>
                         <ul className="list-disc pl-4 space-y-1.5 text-slate-500">
-                          <li><strong>Dual-Engine Model Fallback:</strong> Automatically reroutes material synthesis to a secondary Gemini cluster during high latency, guaranteeing constant classroom uptime.</li>
+                          <li><strong>Dual-Engine Model Fallback:</strong> Automatically reroutes material synthesis to a secondary AI cluster during high latency, guaranteeing constant classroom uptime.</li>
                           <li><strong>Continuous Offline Persistence:</strong> Synchronizes localized changes with server-side Firestore automatically, preventing data loss.</li>
                           <li><strong>Fuzzy-Matching Indexing:</strong> Features a high-speed predictive search engine allowing lookups across strands, grades, and tags with complete typo tolerance.</li>
                         </ul>

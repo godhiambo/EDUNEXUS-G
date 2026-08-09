@@ -22,7 +22,13 @@ export type WhatsAppOutputType =
   | 'graph'
   | 'math_equation'
   | 'chemistry_formula'
-  | 'physics_diagram';
+  | 'physics_diagram'
+  | 'rubric'
+  | 'cat_exam'
+  | 'ppt_outline'
+  | 'notes'
+  | 'ai_tutor'
+  | 'general';
 
 export type UserWhatsAppOutputPreference =
   | 'auto'
@@ -112,7 +118,8 @@ export function classifyWhatsAppOutput(promptText: string, aiText: string): What
 export function formatWhatsAppRichText(
   aiText: string,
   outputType: WhatsAppOutputType,
-  userName: string = 'Learner'
+  userName: string = 'Learner',
+  customFollowUpBlock?: string
 ): string {
   let text = aiText;
 
@@ -172,6 +179,10 @@ export function formatWhatsAppRichText(
   // Ensure double line breaks between paragraphs for mobile accessibility & readability
   text = text.replace(/\n{3,}/g, '\n\n');
 
+  if (customFollowUpBlock !== undefined) {
+    return text.trim() + customFollowUpBlock;
+  }
+
   // Contextual Interactive Follow-up Prompt
   const followUps = getFollowUpOptions(outputType);
   const followUpBlock = `\n\n💡 *Interactive Follow-ups (Reply to action):*\n${followUps.map(f => `• ${f}`).join('\n')}`;
@@ -184,13 +195,27 @@ export function formatWhatsAppRichText(
  */
 export function getFollowUpOptions(outputType: WhatsAppOutputType): string[] {
   switch (outputType) {
-    case 'lesson_plan':
+    case 'ai_tutor':
+    case 'math_equation':
+    case 'chemistry_formula':
+    case 'physics_diagram':
       return [
-        '📖 Reply *"Explain this lesson"*',
-        '📝 Reply *"Edit lesson parameters"*',
-        '📄 Reply *"Generate student worksheet"*',
-        '📽️ Reply *"Create PowerPoint outline"*',
-        '❓ Reply *"Generate 5-question CAT exam"*'
+        '🧠 Reply *"Next Step"*',
+        '📝 Reply *"Practice Question"*',
+        '📊 Reply *"Quiz Me"*',
+        '🖼️ Reply *"Diagram"*',
+        '🎥 Reply *"Animation"*',
+        '📖 Reply *"Summary Notes"*',
+        '❓ Reply *"Common Mistakes"*'
+      ];
+    case 'lesson_plan':
+    case 'scheme_of_work':
+      return [
+        '📄 Reply *"Worksheet"*',
+        '📝 Reply *"CAT Exam"*',
+        '📊 Reply *"Rubric"*',
+        '🎥 Reply *"Presentation"*',
+        '📖 Reply *"Lesson Notes"*'
       ];
     case 'examination_paper':
     case 'marking_scheme':
@@ -364,7 +389,7 @@ export function generateEduNexusPdf(
   }
 
   // Footer on all pages
-  const pageCount = doc.internal.getNumberOfPages();
+  const pageCount = (doc.internal as any).getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
 

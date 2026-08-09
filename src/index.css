@@ -1573,6 +1573,100 @@ table {
   }
 }
 
+/* ==========================================================
+   GLOBAL MULTI-SCREEN & RESPONSIVE OPTIMIZATION SYSTEM
+   ========================================================== */
+
+/* Touch Device Target Optimization (Min 44px for primary mobile tap zones) */
+@media (pointer: coarse) {
+  button, 
+  a, 
+  input[type="checkbox"], 
+  input[type="radio"], 
+  select {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  /* Prevent unintended double-tap zoom on fast clicks */
+  button, a {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Responsive Table Wrapper with Touch Momentum Scrolling */
+.responsive-table-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 0.75rem;
+  scrollbar-width: thin;
+}
+
+/* Smooth Horizontal Scroll container for Tab Strips & Pill Bar Navigation */
+.horizontal-scroll-nav {
+  display: flex;
+  overflow-x: auto;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE 10+ */
+}
+.horizontal-scroll-nav::-webkit-scrollbar {
+  display: none; /* Safari/Chrome */
+}
+
+/* Prevent accidental horizontal overflow globally */
+body, #root, .app-root-container {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+/* Ultra-wide Screen Scaling & Container Balance (4K & 1440p displays) */
+@media (min-width: 1920px) {
+  .ultrawide-container {
+    max-width: 1800px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+
+  .ultrawide-grid-5 {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  }
+
+  .ultrawide-grid-6 {
+    grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 2560px) {
+  .ultrawide-container {
+    max-width: 2200px !important;
+  }
+
+  body {
+    font-size: 1.05rem;
+  }
+}
+
+/* Mobile Small Screens (<380px) text truncation & flex safety */
+@media (max-width: 380px) {
+  .xs-stack-buttons {
+    flex-direction: column !important;
+    width: 100% !important;
+  }
+
+  .xs-hide-badge {
+    display: none !important;
+  }
+
+  .xs-text-tight {
+    font-size: 0.7rem !important;
+    letter-spacing: -0.02em !important;
+  }
+}
+
+
 
 
 

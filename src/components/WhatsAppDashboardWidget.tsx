@@ -38,6 +38,7 @@ export const WhatsAppDashboardWidget: React.FC<WhatsAppDashboardWidgetProps> = (
   const [copiedNumber, setCopiedNumber] = useState(false);
   const [selectedPrompt, setSelectedPrompt] = useState<string>('');
   const [preferredFormat, setPreferredFormat] = useState<'auto' | 'mobile_text' | 'pdf_document' | 'image_document' | 'rich_report'>('auto');
+  const [conversationMode, setConversationMode] = useState<'structured' | 'flexible' | 'smart' | 'expert'>('smart');
   const [savingPref, setSavingPref] = useState(false);
   const [prefSavedMessage, setPrefSavedMessage] = useState(false);
 
@@ -48,7 +49,7 @@ export const WhatsAppDashboardWidget: React.FC<WhatsAppDashboardWidgetProps> = (
       await fetch('/api/whatsapp/preference', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferredOutputFormat: newFormat })
+        body: JSON.stringify({ preferredOutputFormat: newFormat, conversationMode })
       });
       setPrefSavedMessage(true);
       setTimeout(() => setPrefSavedMessage(false), 2500);
@@ -59,8 +60,26 @@ export const WhatsAppDashboardWidget: React.FC<WhatsAppDashboardWidgetProps> = (
     }
   };
 
-  const rawPhoneNumber = '254740183394';
-  const displayPhoneNumber = '+254 740 183 394';
+  const handleModeChange = async (newMode: 'structured' | 'flexible' | 'smart' | 'expert') => {
+    setConversationMode(newMode);
+    setSavingPref(true);
+    try {
+      await fetch('/api/whatsapp/preference', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferredOutputFormat: preferredFormat, conversationMode: newMode })
+      });
+      setPrefSavedMessage(true);
+      setTimeout(() => setPrefSavedMessage(false), 2500);
+    } catch (err) {
+      console.error('Failed to update WhatsApp mode preference:', err);
+    } finally {
+      setSavingPref(false);
+    }
+  };
+
+  const rawPhoneNumber = '254740183934';
+  const displayPhoneNumber = '0740 183 934 (+254 740 183 934)';
 
   const defaultMessages = {
     Student: 'Hello EduNexus AI Tutor! 🎓 I am a Student and I need help with my studies.',
@@ -240,6 +259,52 @@ export const WhatsAppDashboardWidget: React.FC<WhatsAppDashboardWidgetProps> = (
                 >
                   <Sparkles className="w-3.5 h-3.5 text-[#25D366] shrink-0" aria-hidden="true" />
                   <span>"{prompt}"</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Multi-Mode WhatsApp AI Experience Selector */}
+          <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-[#25D366]/30 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-black text-[#25D366] uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-[#25D366]" />
+                <span>WhatsApp AI Conversation Mode</span>
+              </span>
+              {prefSavedMessage && (
+                <span className="text-[10px] font-extrabold text-[#25D366] animate-pulse flex items-center gap-1">
+                  <Check className="w-3 h-3" /> Preference Saved
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+              {[
+                { id: 'smart', label: '🧠 Smart Mode', tag: 'Adaptive Default', desc: 'Auto-adapts between structured menus and fluid natural conversation based on query intent' },
+                { id: 'structured', label: '🧭 Structured Mode', tag: 'Guided Workflows', desc: 'Includes step-by-step breakdowns and numbered interactive action menus with every reply' },
+                { id: 'flexible', label: '💬 Flexible Mode', tag: 'Natural Conversation', desc: 'Direct, open-ended conversational AI without visual menus or option lists unless requested' },
+                { id: 'expert', label: '🎓 Expert Mode', tag: 'Deep Reasoning & STEM', desc: 'Deep technical reasoning, formulas, equations, structured tables & zero fluff for advanced users' }
+              ].map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => handleModeChange(m.id as any)}
+                  className={`p-2.5 rounded-xl text-left border transition cursor-pointer flex flex-col justify-between ${
+                    conversationMode === m.id
+                      ? 'bg-[#25D366]/20 border-[#25D366] text-white shadow-xs'
+                      : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:border-slate-600'
+                  }`}
+                >
+                  <div className="space-y-0.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black truncate text-[#25D366]">{m.label}</span>
+                      <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-[#25D366]/20 text-[#25D366] border border-[#25D366]/40">{m.tag}</span>
+                    </div>
+                    <p className="text-[10px] text-slate-300 leading-tight mt-1">{m.desc}</p>
+                  </div>
+                  {conversationMode === m.id && (
+                    <span className="text-[9px] font-bold text-[#25D366] mt-1.5 flex items-center gap-1">
+                      <Check className="w-3 h-3" /> Selected Mode
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

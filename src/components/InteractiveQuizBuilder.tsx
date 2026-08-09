@@ -21,7 +21,7 @@ import {
   Maximize2,
   Minimize2
 } from 'lucide-react';
-import { SavedDocument, DocumentQuiz, QuizQuestion, QuestionBankItem } from '../types';
+import { SavedDocument, DocumentQuiz, QuizQuestion, QuestionBankItem, CurriculumType } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 import { handleResponseJson } from '../utils/api';
 import { db, auth } from '../firebase';
@@ -65,7 +65,7 @@ export default function InteractiveQuizBuilder({
   // Customizable assessment states
   const [topic, setTopic] = useState(document.topic || document.title || '');
   const [gradeLevel, setGradeLevel] = useState(document.classLevel || 'Grade 6');
-  const [curriculumType, setCurriculumType] = useState<'cbc' | 'standard'>(document.curriculum || 'cbc');
+  const [curriculumType, setCurriculumType] = useState<CurriculumType>(document.curriculum || 'cbc');
   const [learningObjectives, setLearningObjectives] = useState('');
   const [questionTypes, setQuestionTypes] = useState<string[]>(['multiple-choice', 'true-false', 'fill-in-blanks', 'short-answer']);
 

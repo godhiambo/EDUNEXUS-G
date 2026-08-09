@@ -11,7 +11,7 @@ import {
   persistentMultipleTabManager
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
-import { SavedDocument } from './types';
+import { SavedDocument, CurriculumType } from './types';
 import { compressObject, decompressObject, compressString, decompressString } from './utils/compression';
 import firebaseConfigJson from '../firebase-applet-config.json';
 
@@ -77,8 +77,8 @@ async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
+    if (error instanceof Error && (error.message.includes('the client is offline') || error.message.includes('unavailable'))) {
+      console.warn("Firestore client operating in offline cache mode.");
     }
   }
 }
@@ -247,6 +247,34 @@ export async function saveDocumentWithImageChunks(docId: string, docData: SavedD
       handleFirestoreError(err, OperationType.WRITE, `documents/${docId}`);
       throw err;
     }
+  }
+}
+
+/**
+ * Service function to update the user's primaryCurriculum document in Firestore.
+ */
+export async function updateUserPrimaryCurriculum(userId: string, primaryCurriculum: CurriculumType): Promise<void> {
+  if (!userId) return;
+  try {
+    const userRef = doc(db, 'users', userId);
+    await setDoc(
+      userRef,
+      cleanUndefined({
+        primaryCurriculum,
+        curriculum: primaryCurriculum,
+        whatsappSettings: {
+          curriculum: primaryCurriculum,
+          updatedAt: new Date().toISOString(),
+        },
+        updatedAt: new Date().toISOString(),
+      }),
+      { merge: true }
+    );
+    console.log(`[Firebase Service] Updated primaryCurriculum to '${primaryCurriculum}' for user ${userId}`);
+  } catch (err) {
+    console.error('Error updating user primary curriculum in Firestore:', err);
+    handleFirestoreError(err, OperationType.UPDATE, `users/${userId}`);
+    throw err;
   }
 }
 

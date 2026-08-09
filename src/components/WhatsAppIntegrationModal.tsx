@@ -54,7 +54,7 @@ export default function WhatsAppIntegrationModal({
   isOpen,
   onClose,
   defaultPrompt = "Hello EduNexus AI! Can you explain Newton's Second Law of Motion?",
-  userPhone = "+254740183394"
+  userPhone = "+254740183934"
 }: WhatsAppIntegrationModalProps) {
   const [activeTab, setActiveTab] = useState<'simulator' | 'link' | 'broadcast' | 'accessibility' | 'config' | 'direct'>('simulator');
   const [inputMessage, setInputMessage] = useState<string>(defaultPrompt);
@@ -563,7 +563,7 @@ export default function WhatsAppIntegrationModal({
                   <p className="leading-relaxed text-emerald-800/90 text-[11px]">
                     1. Student sends a message via WhatsApp.<br />
                     2. Meta Cloud API forwards payload to EduNexus Cloud Run Webhook.<br />
-                    3. EduNexus AI backend runs Socratic Gemini AI logic.<br />
+                    3. EduNexus AI backend runs Socratic AI logic.<br />
                     4. Response is sent straight back to student's WhatsApp!
                   </p>
                 </div>
@@ -684,7 +684,7 @@ export default function WhatsAppIntegrationModal({
                       type="text"
                       value={broadcastRecipients}
                       onChange={(e) => setBroadcastRecipients(e.target.value)}
-                      placeholder="e.g. +254740183394, +254700123456"
+                      placeholder="e.g. +254740183934, +254704360522"
                       className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 font-mono text-xs text-slate-800"
                     />
                   </div>
@@ -745,7 +745,7 @@ export default function WhatsAppIntegrationModal({
                   <div className="bg-slate-800 p-3 rounded-xl border border-slate-700">
                     <Bot className="w-5 h-5 text-amber-400 mx-auto mb-1" />
                     <span className="font-bold text-white block">EduNexus AI</span>
-                    <span className="text-[9px] text-slate-400">Gemini Socratic Engine</span>
+                    <span className="text-[9px] text-slate-400">EduNexus Socratic Engine</span>
                   </div>
                 </div>
               </div>
@@ -943,7 +943,7 @@ export default function WhatsAppIntegrationModal({
                 <div className="flex items-center justify-between border-b border-slate-200 pb-3">
                   <div>
                     <h4 className="text-sm font-black text-slate-900">Interactive UDL WhatsApp Notification Generator</h4>
-                    <p className="text-xs text-slate-500">Test how Gemini AI constructs accessible messages based on active learner profiles</p>
+                    <p className="text-xs text-slate-500">Test how EduNexus AI constructs accessible messages based on active learner profiles</p>
                   </div>
                   <span className="px-2.5 py-1 rounded-xl bg-emerald-100 text-emerald-800 text-[10px] font-bold">
                     Live Engine Sandbox
@@ -1181,7 +1181,7 @@ export default function WhatsAppIntegrationModal({
         <div className="bg-slate-100 border-t border-slate-200 p-4 px-6 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
             <Bot className="w-4 h-4 text-emerald-600" />
-            <span>EduNexus Gemini 3.5 Socratic Engine</span>
+            <span>EduNexus Studio Socratic Engine</span>
           </div>
 
           <button

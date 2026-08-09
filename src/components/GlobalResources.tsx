@@ -1283,7 +1283,7 @@ ${chapterPreviews}
         </div>
         <div className="relative z-10 max-w-3xl space-y-3">
           <span className="bg-[#fefae0]/20 text-[#fefae0] text-[10px] uppercase font-bold tracking-widest px-3 py-1 rounded-full border border-[#fefae0]/20 inline-block">
-            ✨ Gemini Search Grounding
+            ✨ EduNexus Live Grounding
           </span>
           <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">Global Teaching Resource Explorer</h1>
           <p className="text-sm md:text-base text-slate-100 max-w-2xl leading-relaxed">
@@ -1681,7 +1681,7 @@ ${chapterPreviews}
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              Scan Live Web Repositories (Gemini Grounding)
+              Scan Live Web Repositories (Live Grounding)
             </span>
           </div>
 

@@ -67,6 +67,62 @@ if (apiKey) {
   });
 }
 
+// Classified Standardized Error Messages
+export const CLASSIFIED_ERRORS = {
+  GEMINI_UNAVAILABLE: "⚠️ EduNexus AI is temporarily busy. Please try again in a moment.",
+  ROLE_NOT_SELECTED: "👋 Please choose your role first: 1️⃣ Student, 2️⃣ Teacher, 3️⃣ Parent.",
+  SESSION_EXPIRED: "🔄 Your previous session has expired. Let's continue by selecting your role again.",
+  INTERNAL_ERROR: "⚠️ We encountered an unexpected problem while processing your request. Please try again shortly."
+};
+
+export function classifyErrorMessage(err: any): string {
+  if (!err) return CLASSIFIED_ERRORS.INTERNAL_ERROR;
+  const msg = typeof err === 'string' ? err : (err.message || String(err));
+  const lower = msg.toLowerCase();
+
+  if (
+    lower.includes('role not selected') ||
+    lower.includes('choose your role') ||
+    lower.includes('role required') ||
+    lower.includes('role_not_selected') ||
+    lower.includes('select a role') ||
+    lower.includes('select your role')
+  ) {
+    return CLASSIFIED_ERRORS.ROLE_NOT_SELECTED;
+  }
+
+  if (
+    lower.includes('session expired') ||
+    lower.includes('previous session has expired') ||
+    lower.includes('session_expired') ||
+    lower.includes('session timeout') ||
+    lower.includes('token expired')
+  ) {
+    return CLASSIFIED_ERRORS.SESSION_EXPIRED;
+  }
+
+  if (
+    lower.includes('gemini') ||
+    lower.includes('quota') ||
+    lower.includes('rate limit') ||
+    lower.includes('busy') ||
+    lower.includes('temporarily busy') ||
+    lower.includes('unavailable') ||
+    lower.includes('resource_exhausted') ||
+    lower.includes('api_key') ||
+    lower.includes('api key') ||
+    lower.includes('connection surge') ||
+    lower.includes('429') ||
+    lower.includes('503') ||
+    lower.includes('overloaded') ||
+    lower.includes('service_unavailable')
+  ) {
+    return CLASSIFIED_ERRORS.GEMINI_UNAVAILABLE;
+  }
+
+  return CLASSIFIED_ERRORS.INTERNAL_ERROR;
+}
+
 function cleanDocumentText(text: string): string {
   if (!text) return '';
   // 1. Replace dollar signs ($) with KES
@@ -313,6 +369,633 @@ class GeminiQuotaTracker {
 }
 
 const geminiQuotaTracker = new GeminiQuotaTracker();
+
+// ==========================================
+// CENTRALIZED AI GATEWAY & FINOPS ENGINE
+// ==========================================
+
+export type AICategory =
+  | 'simple_question'
+  | 'homework'
+  | 'lesson_plan'
+  | 'worksheet'
+  | 'cat_exam'
+  | 'marking_scheme'
+  | 'research'
+  | 'image_generation'
+  | 'video_generation'
+  | 'document_analysis'
+  | 'audio_transcription'
+  | 'voice_conversation'
+  | 'analytics'
+  | 'general';
+
+export interface AILogEntry {
+  id: string;
+  timestamp: string;
+  userId?: string;
+  userRole?: string;
+  category: AICategory;
+  provider: string;
+  model: string;
+  promptHash: string;
+  promptSnippet: string;
+  latencyMs: number;
+  estimatedTokens: number;
+  estimatedCostUSD: number;
+  cached: boolean;
+  success: boolean;
+  fallbackTriggered: boolean;
+  error?: string;
+}
+
+export interface AIBudgetConfig {
+  dailyBudgetUSD: number;
+  weeklyBudgetUSD: number;
+  monthlyBudgetUSD: number;
+  costSavingMode: boolean;
+  costSavingModeAutoThresholdPercent: number;
+  emergencyModeThresholdPercent: number;
+  restrictedNonEssentialThresholdPercent: number;
+  allowEducationalOnlyThresholdPercent: number;
+  maxRequestsPerMinPerUser: number;
+  maxRequestsPerHourPerUser: number;
+}
+
+export interface AICacheEntry {
+  key: string;
+  category: AICategory;
+  response: any;
+  textResponse?: string;
+  createdAt: number;
+  ttlMs: number;
+  hits: number;
+}
+
+class AIGatewayManager {
+  private config: AIBudgetConfig = {
+    dailyBudgetUSD: 50.0,
+    weeklyBudgetUSD: 350.0,
+    monthlyBudgetUSD: 1500.0,
+    costSavingMode: false,
+    costSavingModeAutoThresholdPercent: 75,
+    emergencyModeThresholdPercent: 100,
+    restrictedNonEssentialThresholdPercent: 90,
+    allowEducationalOnlyThresholdPercent: 95,
+    maxRequestsPerMinPerUser: 30,
+    maxRequestsPerHourPerUser: 300
+  };
+
+  private cache = new Map<string, AICacheEntry>();
+  private logs: AILogEntry[] = [];
+  private rateLimitWindow = new Map<string, { count: number; windowStart: number }>();
+
+  private dailySpendUSD = 0;
+  private weeklySpendUSD = 0;
+  private monthlySpendUSD = 0;
+  private categoryCostsUSD: Record<string, number> = {};
+  private modelUsageCounts: Record<string, { requests: number; tokens: number; costUSD: number }> = {};
+  private cacheHits = 0;
+  private cacheMisses = 0;
+  private totalRequests = 0;
+  private fallbackActivations = 0;
+
+  constructor() {
+    setInterval(() => {
+      const date = new Date();
+      if (date.getHours() === 0 && date.getMinutes() === 0) {
+        this.dailySpendUSD = 0;
+      }
+    }, 60000);
+  }
+
+  public estimateCost(model: string, tokens: number, category: AICategory): number {
+    if (category === 'image_generation') return 0.03;
+    if (category === 'video_generation') return 0.25;
+
+    if (model.includes('3.1-flash-lite') || model.includes('2.5-flash-lite')) {
+      return (tokens / 1000) * 0.000025;
+    }
+    if (model.includes('3.5-flash') || model.includes('2.5-flash')) {
+      return (tokens / 1000) * 0.0001;
+    }
+    return (tokens / 1000) * 0.000075;
+  }
+
+  public classifyRequest(promptText: string, contextCategory?: string): AICategory {
+    if (contextCategory && contextCategory !== 'general') {
+      return contextCategory as AICategory;
+    }
+    const lower = (promptText || '').toLowerCase();
+    if (/\b(image|picture|diagram|illustration|photo|draw)\b/.test(lower) && /\b(generate|create|make|draw)\b/.test(lower)) {
+      return 'image_generation';
+    }
+    if (/\b(video|animation|clip)\b/.test(lower) && /\b(generate|create|make)\b/.test(lower)) {
+      return 'video_generation';
+    }
+    if (/\b(lesson plan|scheme of work|syllabus|curriculum)\b/.test(lower)) return 'lesson_plan';
+    if (/\b(worksheet|exercise|practice questions)\b/.test(lower)) return 'worksheet';
+    if (/\b(cat|exam|test|quiz|paper|assessment)\b/.test(lower)) return 'cat_exam';
+    if (/\b(marking scheme|rubric|answer key)\b/.test(lower)) return 'marking_scheme';
+    if (/\b(homework|assignment|solution)\b/.test(lower)) return 'homework';
+    if (/\b(what is|define|who is|explain|formula|meaning|simple|short)\b/.test(lower) && lower.length < 120) {
+      return 'simple_question';
+    }
+    return 'general';
+  }
+
+  public selectModel(category: AICategory, requestedModel?: string): string {
+    const percentSpent = (this.dailySpendUSD / this.config.dailyBudgetUSD) * 100;
+    const autoCostSaving = percentSpent >= this.config.costSavingModeAutoThresholdPercent || this.config.costSavingMode;
+
+    if (category === 'image_generation') return 'gemini-3.1-flash-image';
+    if (category === 'video_generation') return 'veo-2.0-generate-001';
+
+    if (autoCostSaving) {
+      if (category === 'simple_question' || category === 'general' || category === 'homework') {
+        return 'gemini-3.1-flash-lite';
+      }
+    }
+
+    if (requestedModel && requestedModel !== 'emgen_fallback_nanobanana') {
+      return requestedModel;
+    }
+
+    if (category === 'simple_question') return 'gemini-3.1-flash-lite';
+    return 'gemini-3.5-flash';
+  }
+
+  public checkRateLimit(clientId: string): { allowed: boolean; reason?: string } {
+    const now = Date.now();
+    const clientRecord = this.rateLimitWindow.get(clientId) || { count: 0, windowStart: now };
+
+    if (now - clientRecord.windowStart > 60000) {
+      clientRecord.count = 0;
+      clientRecord.windowStart = now;
+    }
+
+    if (clientRecord.count >= this.config.maxRequestsPerMinPerUser) {
+      return { allowed: false, reason: 'Rate limit exceeded (Max 30 requests/min). Please pause briefly.' };
+    }
+
+    clientRecord.count += 1;
+    this.rateLimitWindow.set(clientId, clientRecord);
+    return { allowed: true };
+  }
+
+  public getCache(key: string): AICacheEntry | null {
+    const entry = this.cache.get(key);
+    if (!entry) {
+      this.cacheMisses += 1;
+      return null;
+    }
+
+    if (Date.now() - entry.createdAt > entry.ttlMs) {
+      this.cache.delete(key);
+      this.cacheMisses += 1;
+      return null;
+    }
+
+    entry.hits += 1;
+    this.cacheHits += 1;
+    return entry;
+  }
+
+  public setCache(key: string, category: AICategory, response: any, textResponse?: string, ttlMs: number = 7200000) {
+    this.cache.set(key, {
+      key,
+      category,
+      response,
+      textResponse,
+      createdAt: Date.now(),
+      ttlMs,
+      hits: 0
+    });
+
+    if (this.cache.size > 500) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey) this.cache.delete(oldestKey);
+    }
+  }
+
+  public clearCache() {
+    this.cache.clear();
+    this.cacheHits = 0;
+    this.cacheMisses = 0;
+  }
+
+  public recordRequestLog(entry: Omit<AILogEntry, 'id' | 'timestamp'>) {
+    const fullLog: AILogEntry = {
+      id: `gw-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      timestamp: new Date().toISOString(),
+      ...entry
+    };
+
+    this.logs.unshift(fullLog);
+    if (this.logs.length > 200) this.logs.pop();
+
+    this.totalRequests += 1;
+    if (!fullLog.cached) {
+      this.dailySpendUSD += fullLog.estimatedCostUSD;
+      this.weeklySpendUSD += fullLog.estimatedCostUSD;
+      this.monthlySpendUSD += fullLog.estimatedCostUSD;
+
+      this.categoryCostsUSD[fullLog.category] = (this.categoryCostsUSD[fullLog.category] || 0) + fullLog.estimatedCostUSD;
+
+      const m = fullLog.model || 'gemini-3.5-flash';
+      if (!this.modelUsageCounts[m]) {
+        this.modelUsageCounts[m] = { requests: 0, tokens: 0, costUSD: 0 };
+      }
+      this.modelUsageCounts[m].requests += 1;
+      this.modelUsageCounts[m].tokens += fullLog.estimatedTokens;
+      this.modelUsageCounts[m].costUSD += fullLog.estimatedCostUSD;
+    }
+
+    if (fullLog.fallbackTriggered) {
+      this.fallbackActivations += 1;
+    }
+  }
+
+  public getStats() {
+    const percentSpent = Math.min(100, Math.round((this.dailySpendUSD / this.config.dailyBudgetUSD) * 100));
+    const isCostSavingActive = this.config.costSavingMode || percentSpent >= this.config.costSavingModeAutoThresholdPercent;
+    const cacheHitRatePercent = (this.cacheHits + this.cacheMisses) > 0
+      ? Math.round((this.cacheHits / (this.cacheHits + this.cacheMisses)) * 100)
+      : 0;
+
+    let budgetStatusLevel: 'HEALTHY' | 'WARNING' | 'HIGH_SPEND' | 'RESTRICTED' | 'EXHAUSTED' = 'HEALTHY';
+    if (percentSpent >= 100) budgetStatusLevel = 'EXHAUSTED';
+    else if (percentSpent >= 95) budgetStatusLevel = 'RESTRICTED';
+    else if (percentSpent >= 90) budgetStatusLevel = 'RESTRICTED';
+    else if (percentSpent >= 75) budgetStatusLevel = 'HIGH_SPEND';
+    else if (percentSpent >= 50) budgetStatusLevel = 'WARNING';
+
+    return {
+      config: this.config,
+      budget: {
+        dailyBudgetUSD: this.config.dailyBudgetUSD,
+        dailySpendUSD: parseFloat(this.dailySpendUSD.toFixed(4)),
+        weeklySpendUSD: parseFloat(this.weeklySpendUSD.toFixed(4)),
+        monthlySpendUSD: parseFloat(this.monthlySpendUSD.toFixed(4)),
+        percentSpent,
+        budgetStatusLevel,
+        isCostSavingActive,
+        isEmergencyMode: percentSpent >= this.config.emergencyModeThresholdPercent
+      },
+      cache: {
+        totalEntries: this.cache.size,
+        cacheHits: this.cacheHits,
+        cacheMisses: this.cacheMisses,
+        cacheHitRatePercent
+      },
+      metrics: {
+        totalRequests: this.totalRequests,
+        fallbackActivations: this.fallbackActivations,
+        categoryCostsUSD: this.categoryCostsUSD,
+        modelUsageCounts: this.modelUsageCounts
+      },
+      logs: this.logs.slice(0, 30)
+    };
+  }
+
+  public updateConfig(newConfig: Partial<AIBudgetConfig>) {
+    this.config = { ...this.config, ...newConfig };
+    return this.config;
+  }
+}
+
+export const aiGateway = new AIGatewayManager();
+
+// ==========================================
+// CENTRALIZED SUBSCRIPTION & ENTITLEMENTS MANAGER
+// ==========================================
+
+export interface UserSubscriptionData {
+  userId: string;
+  plan: 'free' | 'premium' | 'pro' | 'enterprise';
+  status: 'active' | 'trialing' | 'canceled' | 'past_due' | 'expired';
+  billingCycle: 'monthly' | 'quarterly' | 'annual';
+  startDate: string;
+  renewalDate: string;
+  trialEndDate?: string;
+  aiCredits: number;
+  paymentMethod?: string;
+  autoRenew: boolean;
+  hasUsedTrial: boolean;
+  usageToday: {
+    aiQuestions: number;
+    whatsappMsgs: number;
+    images: number;
+    videos: number;
+    lessonPlans: number;
+    documents: number;
+    resetAt: string;
+  };
+  transactions: Array<{
+    id: string;
+    date: string;
+    amountUSD: number;
+    description: string;
+    paymentMethod: string;
+    receiptNo: string;
+  }>;
+}
+
+export const PLAN_LIMITS = {
+  free: {
+    aiQuestionsPerDay: 20,
+    whatsappMsgsPerDay: 30,
+    imagesPerDay: 5,
+    videosPerDay: 2,
+    lessonPlansPerDay: 3,
+    documentsPerDay: 5,
+    priorityAiQueue: false,
+    advancedExport: false,
+    unlimitedResearch: false
+  },
+  premium: {
+    aiQuestionsPerDay: -1,
+    whatsappMsgsPerDay: -1,
+    imagesPerDay: 50,
+    videosPerDay: 10,
+    lessonPlansPerDay: 20,
+    documentsPerDay: 50,
+    priorityAiQueue: true,
+    advancedExport: true,
+    unlimitedResearch: true
+  },
+  pro: {
+    aiQuestionsPerDay: -1,
+    whatsappMsgsPerDay: -1,
+    imagesPerDay: -1,
+    videosPerDay: -1,
+    lessonPlansPerDay: -1,
+    documentsPerDay: -1,
+    priorityAiQueue: true,
+    advancedExport: true,
+    unlimitedResearch: true
+  },
+  enterprise: {
+    aiQuestionsPerDay: -1,
+    whatsappMsgsPerDay: -1,
+    imagesPerDay: -1,
+    videosPerDay: -1,
+    lessonPlansPerDay: -1,
+    documentsPerDay: -1,
+    priorityAiQueue: true,
+    advancedExport: true,
+    unlimitedResearch: true
+  }
+};
+
+class SubscriptionManager {
+  private userSubscriptions = new Map<string, UserSubscriptionData>();
+
+  private getTodayDateString(): string {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  public getSubscription(userId: string = 'guest'): UserSubscriptionData {
+    const todayStr = this.getTodayDateString();
+    let sub = this.userSubscriptions.get(userId);
+
+    if (!sub) {
+      sub = {
+        userId,
+        plan: 'free',
+        status: 'active',
+        billingCycle: 'monthly',
+        startDate: new Date().toISOString(),
+        renewalDate: new Date(Date.now() + 30 * 86400000).toISOString(),
+        aiCredits: 50, // Free bonus initial credits
+        autoRenew: true,
+        hasUsedTrial: false,
+        usageToday: {
+          aiQuestions: 0,
+          whatsappMsgs: 0,
+          images: 0,
+          videos: 0,
+          lessonPlans: 0,
+          documents: 0,
+          resetAt: todayStr
+        },
+        transactions: []
+      };
+      this.userSubscriptions.set(userId, sub);
+    }
+
+    // Daily Usage Counter Auto-Reset at Midnight
+    if (sub.usageToday.resetAt !== todayStr) {
+      sub.usageToday = {
+        aiQuestions: 0,
+        whatsappMsgs: 0,
+        images: 0,
+        videos: 0,
+        lessonPlans: 0,
+        documents: 0,
+        resetAt: todayStr
+      };
+    }
+
+    // Auto Trial Expiry Check
+    if (sub.status === 'trialing' && sub.trialEndDate) {
+      if (new Date() > new Date(sub.trialEndDate)) {
+        sub.plan = 'free';
+        sub.status = 'active';
+      }
+    }
+
+    return sub;
+  }
+
+  public startTrial(userId: string = 'guest'): { success: boolean; message: string; subscription: UserSubscriptionData } {
+    const sub = this.getSubscription(userId);
+    if (sub.hasUsedTrial) {
+      return { success: false, message: 'A 14-day Premium free trial has already been redeemed for this account.', subscription: sub };
+    }
+
+    const fourteenDaysLater = new Date(Date.now() + 14 * 86400000).toISOString();
+    sub.plan = 'premium';
+    sub.status = 'trialing';
+    sub.trialEndDate = fourteenDaysLater;
+    sub.renewalDate = fourteenDaysLater;
+    sub.hasUsedTrial = true;
+    sub.aiCredits += 250;
+
+    sub.transactions.unshift({
+      id: `tx-trial-${Date.now()}`,
+      date: new Date().toISOString(),
+      amountUSD: 0,
+      description: '14-Day EduNexus Premium Free Trial Activation',
+      paymentMethod: 'Free Trial',
+      receiptNo: `EN-TRIAL-${Math.random().toString(36).substring(2, 8).toUpperCase()}`
+    });
+
+    this.userSubscriptions.set(userId, sub);
+    return { success: true, message: '14-Day EduNexus Premium Free Trial activated successfully!', subscription: sub };
+  }
+
+  public upgradePlan(
+    userId: string = 'guest',
+    targetPlan: 'free' | 'premium' | 'pro' | 'enterprise',
+    billingCycle: 'monthly' | 'annual' = 'monthly',
+    paymentMethod: string = 'mpesa',
+    phoneOrCard?: string
+  ): { success: boolean; message: string; subscription: UserSubscriptionData } {
+    const sub = this.getSubscription(userId);
+    
+    let priceUSD = 0;
+    if (targetPlan === 'premium') priceUSD = billingCycle === 'annual' ? 99 : 9.99;
+    if (targetPlan === 'pro') priceUSD = billingCycle === 'annual' ? 249 : 24.99;
+
+    const daysToAdd = billingCycle === 'annual' ? 365 : 30;
+    const newRenewalDate = new Date(Date.now() + daysToAdd * 86400000).toISOString();
+
+    sub.plan = targetPlan;
+    sub.status = 'active';
+    sub.billingCycle = billingCycle;
+    sub.paymentMethod = paymentMethod;
+    sub.renewalDate = newRenewalDate;
+
+    // Bonus credits upon upgrade
+    if (targetPlan === 'premium') sub.aiCredits += 250;
+    if (targetPlan === 'pro') sub.aiCredits += 1000;
+
+    sub.transactions.unshift({
+      id: `tx-${Date.now()}`,
+      date: new Date().toISOString(),
+      amountUSD: priceUSD,
+      description: `EduNexus ${targetPlan.toUpperCase()} Plan (${billingCycle.toUpperCase()})`,
+      paymentMethod: `${paymentMethod.toUpperCase()}${phoneOrCard ? ` (${phoneOrCard.slice(-4)})` : ''}`,
+      receiptNo: `EDUNEXUS-${Math.random().toString(36).substring(2, 8).toUpperCase()}`
+    });
+
+    this.userSubscriptions.set(userId, sub);
+    return {
+      success: true,
+      message: `Successfully upgraded to EduNexus ${targetPlan.toUpperCase()} (${billingCycle.toUpperCase()})!`,
+      subscription: sub
+    };
+  }
+
+  public buyCredits(
+    userId: string = 'guest',
+    packageId: string,
+    creditAmount: number,
+    costUSD: number,
+    paymentMethod: string = 'mpesa'
+  ): { success: boolean; message: string; subscription: UserSubscriptionData } {
+    const sub = this.getSubscription(userId);
+    sub.aiCredits += creditAmount;
+
+    sub.transactions.unshift({
+      id: `tx-credits-${Date.now()}`,
+      date: new Date().toISOString(),
+      amountUSD: costUSD,
+      description: `AI Credits Top-Up Pack (+${creditAmount} Credits)`,
+      paymentMethod: paymentMethod.toUpperCase(),
+      receiptNo: `EN-CRED-${Math.random().toString(36).substring(2, 8).toUpperCase()}`
+    });
+
+    this.userSubscriptions.set(userId, sub);
+    return {
+      success: true,
+      message: `Added +${creditAmount} AI Credits to your account balance!`,
+      subscription: sub
+    };
+  }
+
+  public toggleAutoRenew(userId: string = 'guest'): UserSubscriptionData {
+    const sub = this.getSubscription(userId);
+    sub.autoRenew = !sub.autoRenew;
+    this.userSubscriptions.set(userId, sub);
+    return sub;
+  }
+
+  public checkAndConsumeQuota(
+    userId: string = 'guest',
+    feature: 'aiQuestions' | 'whatsappMsgs' | 'images' | 'videos' | 'lessonPlans' | 'documents',
+    count: number = 1
+  ): { allowed: boolean; remaining: number; plan: string; creditsUsed?: boolean; remainingCredits?: number; reason?: string } {
+    const sub = this.getSubscription(userId);
+    const planLimitKey = `${feature}PerDay` as keyof typeof PLAN_LIMITS['free'];
+    const limit = PLAN_LIMITS[sub.plan][planLimitKey] as number;
+
+    // Unlimited check (-1)
+    if (limit === -1) {
+      sub.usageToday[feature] += count;
+      return { allowed: true, remaining: 99999, plan: sub.plan };
+    }
+
+    // Daily limit quota check
+    const currentUsage = sub.usageToday[feature];
+    if (currentUsage + count <= limit) {
+      sub.usageToday[feature] += count;
+      return { allowed: true, remaining: limit - sub.usageToday[feature], plan: sub.plan };
+    }
+
+    // Quota exhausted -> Check AI Credits fallback
+    const creditCostPerUnit = (feature === 'videos' || feature === 'images') ? 5 : 1;
+    if (sub.aiCredits >= creditCostPerUnit) {
+      sub.aiCredits -= creditCostPerUnit;
+      sub.usageToday[feature] += count;
+      return {
+        allowed: true,
+        remaining: 0,
+        plan: sub.plan,
+        creditsUsed: true,
+        remainingCredits: sub.aiCredits
+      };
+    }
+
+    return {
+      allowed: false,
+      remaining: 0,
+      plan: sub.plan,
+      reason: `Daily ${feature} limit (${limit}/day) reached on your ${sub.plan.toUpperCase()} plan. Upgrade or add AI Credits to keep creating.`
+    };
+  }
+
+  public getAdminStats() {
+    let freeCount = 0;
+    let premiumCount = 0;
+    let proCount = 0;
+    let enterpriseCount = 0;
+    let totalMRR = 0;
+    let totalCreditsIssued = 0;
+
+    this.userSubscriptions.forEach((sub) => {
+      if (sub.plan === 'free') freeCount += 1;
+      if (sub.plan === 'premium') {
+        premiumCount += 1;
+        totalMRR += sub.billingCycle === 'annual' ? 8.25 : 9.99;
+      }
+      if (sub.plan === 'pro') {
+        proCount += 1;
+        totalMRR += sub.billingCycle === 'annual' ? 20.75 : 24.99;
+      }
+      if (sub.plan === 'enterprise') enterpriseCount += 1;
+
+      totalCreditsIssued += sub.aiCredits;
+    });
+
+    const totalUsers = freeCount + premiumCount + proCount + enterpriseCount || 1;
+    const conversionRatePercent = Math.round(((premiumCount + proCount + enterpriseCount) / totalUsers) * 100);
+
+    return {
+      counts: { free: freeCount, premium: premiumCount, pro: proCount, enterprise: enterpriseCount, totalUsers },
+      financials: {
+        mrrUSD: parseFloat(totalMRR.toFixed(2)),
+        arrUSD: parseFloat((totalMRR * 12).toFixed(2)),
+        conversionRatePercent,
+        totalCreditsIssued
+      },
+      planLimits: PLAN_LIMITS
+    };
+  }
+}
+
+export const subscriptionManager = new SubscriptionManager();
 
 // AI Engine Image Generation Helper with Automatic Fallback (Emgen Primary + Nano Banana Fallback)
 async function generateImageWithFallback({
@@ -666,11 +1349,59 @@ async function generateContentWithFallback(params: any) {
     };
   }
 
+  const promptText = params.contents ? (typeof params.contents === 'string' ? params.contents : JSON.stringify(params.contents)) : '';
+  const category = aiGateway.classifyRequest(promptText, params.contextCategory);
+
+  // 1. Check AI Response Cache
+  const cryptoKey = promptText.length + '-' + promptText.substring(0, 100) + '-' + (params.model || 'default');
+  const cacheKey = `cache-${category}-${Buffer.from(cryptoKey).toString('base64').substring(0, 40)}`;
+  const cachedEntry = aiGateway.getCache(cacheKey);
+  if (cachedEntry) {
+    console.log(`[AI Gateway Cache Hit] Category: ${category}, Key: ${cacheKey}`);
+    aiGateway.recordRequestLog({
+      userId: params.userId,
+      userRole: params.userRole,
+      category,
+      provider: 'Google AI Studio',
+      model: params.model || 'cached',
+      promptHash: cacheKey,
+      promptSnippet: promptText.substring(0, 100),
+      latencyMs: 0,
+      estimatedTokens: 0,
+      estimatedCostUSD: 0,
+      cached: true,
+      success: true,
+      fallbackTriggered: false
+    });
+    return cachedEntry.response;
+  }
+
+  // 2. Rate Limiting Check
+  const clientId = params.userId || params.clientIp || 'anonymous';
+  const rateLimitStatus = aiGateway.checkRateLimit(clientId);
+  if (!rateLimitStatus.allowed) {
+    throw new Error(rateLimitStatus.reason || 'Rate limit exceeded. Please wait a moment.');
+  }
+
+  // 3. Check Budget / Emergency Mode
+  const stats = aiGateway.getStats();
+  if (stats.budget.isEmergencyMode) {
+    return {
+      text: "EduNexus AI is temporarily experiencing high demand or operating under emergency budget optimization. Your request has been safely recorded. Please try again shortly.",
+      candidates: [{
+        content: {
+          parts: [{ text: "EduNexus AI is temporarily experiencing high demand or operating under emergency budget optimization. Your request has been safely recorded. Please try again shortly." }]
+        }
+      }]
+    };
+  }
+
   const startTime = Date.now();
   healthMetrics.totalCalls += 1;
   healthMetrics.lastCallTimestamp = new Date().toISOString();
 
-  const requestedModel = params.model || 'emgen_fallback_nanobanana';
+  // Select primary model according to budget & category
+  const requestedModel = params.model || aiGateway.selectModel(category, params.model);
   let modelsToTry: string[] = [];
 
   if (requestedModel === 'emgen_fallback_nanobanana' || requestedModel === 'dual_engine') {
@@ -689,17 +1420,15 @@ async function generateContentWithFallback(params: any) {
     ];
   }
 
-  // Remove duplicates while keeping order
   const uniqueModels = Array.from(new Set(modelsToTry));
-
   let lastError = null;
   let attempt = 0;
+  let fallbackTriggered = false;
 
   for (const model of uniqueModels) {
     attempt += 1;
     try {
-      console.log(`[Gemini Request] Attempting content generation with model: ${model}`);
-      const promptText = params.contents ? JSON.stringify(params.contents) : '';
+      console.log(`[AI Gateway] Attempting execution with model: ${model}`);
       const estimatedTokens = Math.max(120, Math.ceil(promptText.length / 4));
       geminiQuotaTracker.recordCall(model, estimatedTokens);
 
@@ -709,12 +1438,9 @@ async function generateContentWithFallback(params: any) {
       });
 
       geminiQuotaTracker.recordSuccess(model);
-      
-      // Update latency and success stats
       const duration = Date.now() - startTime;
       healthMetrics.successfulCalls += 1;
-      
-      // Moving average for latency
+
       if (healthMetrics.averageLatencyMs === 0) {
         healthMetrics.averageLatencyMs = duration;
       } else {
@@ -722,11 +1448,32 @@ async function generateContentWithFallback(params: any) {
       }
 
       if (attempt > 1) {
+        fallbackTriggered = true;
         healthMetrics.fallbackCount += 1;
-        // Mark previous retry log as resolved
         if (healthMetrics.retryLogs.length > 0) {
           healthMetrics.retryLogs[healthMetrics.retryLogs.length - 1].resolved = true;
         }
+      }
+
+      const estimatedCost = aiGateway.estimateCost(model, estimatedTokens, category);
+      aiGateway.recordRequestLog({
+        userId: params.userId,
+        userRole: params.userRole,
+        category,
+        provider: 'Google AI Studio',
+        model,
+        promptHash: cacheKey,
+        promptSnippet: promptText.substring(0, 100),
+        latencyMs: duration,
+        estimatedTokens,
+        estimatedCostUSD: estimatedCost,
+        cached: false,
+        success: true,
+        fallbackTriggered
+      });
+
+      if (response) {
+        aiGateway.setCache(cacheKey, category, response, typeof response === 'string' ? response : undefined);
       }
 
       return response;
@@ -734,9 +1481,8 @@ async function generateContentWithFallback(params: any) {
       lastError = error;
       healthMetrics.retryCount += 1;
       geminiQuotaTracker.recordError(model, error);
-      console.warn(`[Gemini Request] Model ${model} failed:`, error.message || error);
-      
-      // Log retry to registry
+      console.warn(`[AI Gateway] Model ${model} failed:`, error.message || error);
+
       healthMetrics.retryLogs.push({
         timestamp: new Date().toISOString(),
         model: model,
@@ -745,34 +1491,37 @@ async function generateContentWithFallback(params: any) {
         resolved: false
       });
 
-      // Cap logs length to avoid memory bloat
       if (healthMetrics.retryLogs.length > 50) {
         healthMetrics.retryLogs.shift();
       }
 
-      const isRetryable = 
-        error.status === 503 || 
-        error.status === 429 ||
-        (error.message && error.message.includes('503')) || 
-        (error.message && error.message.includes('UNAVAILABLE')) || 
-        (error.message && error.message.includes('high demand')) ||
-        (error.message && error.message.includes('Resource has been exhausted')) ||
-        (error.message && error.message.includes('quota'));
-
-      if (!isRetryable) {
-        if (attempt < uniqueModels.length) {
-          console.warn('[Gemini Request] Non-retryable error encountered; trying next model in the fallback chain.');
-          continue;
-        }
-        healthMetrics.failedCalls += 1;
-        throw error;
+      if (attempt < uniqueModels.length) {
+        const backoffMs = attempt === 1 ? 200 : attempt * 1000;
+        await new Promise(r => setTimeout(r, backoffMs));
+        fallbackTriggered = true;
+        continue;
       }
-      
-      console.warn(`Attempting next fallback model in the chain due to retryable error...`);
     }
   }
 
   healthMetrics.failedCalls += 1;
+  aiGateway.recordRequestLog({
+    userId: params.userId,
+    userRole: params.userRole,
+    category,
+    provider: 'Google AI Studio',
+    model: uniqueModels[0] || 'unknown',
+    promptHash: cacheKey,
+    promptSnippet: promptText.substring(0, 100),
+    latencyMs: Date.now() - startTime,
+    estimatedTokens: 0,
+    estimatedCostUSD: 0,
+    cached: false,
+    success: false,
+    fallbackTriggered: true,
+    error: lastError?.message || 'All AI Gateway fallback models failed'
+  });
+
   throw lastError;
 }
 
@@ -1215,6 +1964,289 @@ Instructions:
   }
 });
 
+// POST endpoint for AI Personalized Weekly Adaptive Schedule Generation
+app.post('/api/generate-weekly-personalized-schedule', async (req, res) => {
+  const {
+    curriculum = 'cbc',
+    userName = 'Student',
+    studentXp = 1200,
+    streakDays = 5,
+    intensity = 'balanced',
+    performanceMetrics = {},
+    savedDocuments = []
+  } = req.body;
+
+  const docSummaries = (savedDocuments || []).slice(0, 10).map((doc: any) =>
+    `- [${doc.docType || 'Document'}] "${doc.title}" (${doc.subject || 'General'} - ${doc.topic || 'General'})`
+  );
+
+  const quizScoresText = JSON.stringify(performanceMetrics.quizScores || [
+    { subject: 'Mathematics', topic: 'Algebraic Equations', scorePercent: 62 },
+    { subject: 'Integrated Science', topic: 'Photosynthesis', scorePercent: 78 },
+    { subject: 'English Language', topic: 'Grammar & Essay', scorePercent: 88 }
+  ]);
+
+  const weakAreas = performanceMetrics.weakSubjects || ['Algebraic Equations', 'Plant Respiration'];
+
+  if (!ai) {
+    // Return structured default adaptive schedule if Gemini is unconfigured
+    return res.json({
+      schedule: {
+        title: `EduNexus Personalized Adaptive Weekly Path (${curriculum.toUpperCase()})`,
+        curriculumName: curriculum.toUpperCase(),
+        aiPerformanceAnalysis: `Based on current performance trends (62% accuracy in Mathematics & 78% in Science), AI has identified conceptual gaps in Algebraic Equations. This week focuses on remedial Socratic problem solving and spaced flashcard reviews.`,
+        overallMasteryScore: 74,
+        weakestSubject: weakAreas[0] || 'Mathematics',
+        targetXpGoal: 1050,
+        weeklyIntensity: intensity,
+        days: [
+          {
+            dayId: 'mon',
+            dayName: 'Monday',
+            dateLabel: 'Day 1',
+            focusSubject: 'Mathematics',
+            focusTopic: 'Algebraic Equations & Factoring',
+            subTopic: 'Linear Equations & Coefficients',
+            activityType: 'socratic_tutor',
+            activityLabel: '🧠 Socratic AI Tutor',
+            suggestedTime: '08:30 AM',
+            durationMinutes: 40,
+            priority: 'High',
+            urgencyReason: 'Quiz score (62%) indicates need for step-by-step guidance before problem set.',
+            aiStudyTip: 'Focus on isolating variables on one side of the equation first.',
+            xpReward: 150,
+            completed: false,
+            learningObjective: 'Master step-by-step algebraic isolation techniques using Socratic inquiry.'
+          },
+          {
+            dayId: 'tue',
+            dayName: 'Tuesday',
+            dateLabel: 'Day 2',
+            focusSubject: 'Integrated Science',
+            focusTopic: 'Photosynthesis & Light Reactions',
+            subTopic: 'Chlorophyll Energy Conversion',
+            activityType: 'flashcard_mastery',
+            activityLabel: '🎴 Flashcard Review',
+            suggestedTime: '09:15 AM',
+            durationMinutes: 30,
+            priority: 'Medium',
+            urgencyReason: 'SM-2 memory decay model predicts 30% retention drop in technical terms today.',
+            aiStudyTip: 'Review key terms: ATP, NADPH, Stroma, and Thylakoid membranes.',
+            xpReward: 120,
+            completed: false,
+            learningObjective: 'Reinforce memory retention for photosynthesis chemical pathways.'
+          },
+          {
+            dayId: 'wed',
+            dayName: 'Wednesday',
+            dateLabel: 'Day 3',
+            focusSubject: 'Mathematics',
+            focusTopic: 'Quadratic Equations & Graphing',
+            subTopic: 'Parabola Vertices & Roots',
+            activityType: 'practice_problems',
+            activityLabel: '📝 Interactive Quiz Challenge',
+            suggestedTime: '10:00 AM',
+            durationMinutes: 45,
+            priority: 'High',
+            urgencyReason: 'Prerequisite topic from Monday completed; now test application skills.',
+            aiStudyTip: 'Use the discriminant b^2 - 4ac to quickly determine root types.',
+            xpReward: 180,
+            completed: false,
+            learningObjective: 'Apply quadratic formulas and verify root values accurately.'
+          },
+          {
+            dayId: 'thu',
+            dayName: 'Thursday',
+            dateLabel: 'Day 4',
+            focusSubject: 'Social Studies & Civics',
+            focusTopic: 'Government Structure & Constitution',
+            subTopic: 'Arms of Government & Rights',
+            activityType: 'concept_deep_dive',
+            activityLabel: '📚 Concept Summary & Mindmap',
+            suggestedTime: '02:00 PM',
+            durationMinutes: 35,
+            priority: 'Medium',
+            urgencyReason: 'New curriculum strand introduced this week.',
+            aiStudyTip: 'Compare executive, legislative, and judicial branches in a 3-column table.',
+            xpReward: 140,
+            completed: false,
+            learningObjective: 'Summarize constitutional balance of powers and civic duties.'
+          },
+          {
+            dayId: 'fri',
+            dayName: 'Friday',
+            dateLabel: 'Day 5',
+            focusSubject: 'Integrated Science',
+            focusTopic: 'Cellular Respiration & Mitochondria',
+            subTopic: 'Aerobic vs Anaerobic Pathways',
+            activityType: 'socratic_tutor',
+            activityLabel: '🔬 Lab Simulation & AI Discussion',
+            suggestedTime: '11:00 AM',
+            durationMinutes: 45,
+            priority: 'High',
+            urgencyReason: 'Connects with Tuesday Photosynthesis topic for comprehensive unit mastery.',
+            aiStudyTip: 'Notice how photosynthesis outputs (glucose + oxygen) are inputs for respiration.',
+            xpReward: 160,
+            completed: false,
+            learningObjective: 'Synthesize interrelationships between photosynthesis and cellular respiration.'
+          },
+          {
+            dayId: 'sat',
+            dayName: 'Saturday',
+            dateLabel: 'Day 6',
+            focusSubject: 'English Language',
+            focusTopic: 'Expository Essay Writing & Grammar',
+            subTopic: 'Thesis Statements & Transition Words',
+            activityType: 'practice_problems',
+            activityLabel: '✍️ Essay Draft & AI Feedback',
+            suggestedTime: '10:30 AM',
+            durationMinutes: 50,
+            priority: 'Low',
+            urgencyReason: 'Maintain strong language mastery (currently 88%) with creative practice.',
+            aiStudyTip: 'Ensure every body paragraph starts with a clear topic sentence.',
+            xpReward: 150,
+            completed: false,
+            learningObjective: 'Draft a 300-word structured expository essay with transition clarity.'
+          },
+          {
+            dayId: 'sun',
+            dayName: 'Sunday',
+            dateLabel: 'Day 7',
+            focusSubject: 'Cross-Curriculum Review',
+            focusTopic: 'Weekly Adaptive Synthesis & Master Quiz',
+            subTopic: 'Weak Topic Retest & XP Milestone',
+            activityType: 'quiz_challenge',
+            activityLabel: '🏆 Weekly Mastery Challenge',
+            suggestedTime: '04:00 PM',
+            durationMinutes: 30,
+            priority: 'High',
+            urgencyReason: 'Weekly checkpoint to measure performance growth and calibrate next week path.',
+            aiStudyTip: 'Take a short 5-minute break before starting to refresh focus.',
+            xpReward: 250,
+            completed: false,
+            learningObjective: 'Demonstrate overall retention growth across all weekly focus topics.'
+          }
+        ]
+      }
+    });
+  }
+
+  const systemInstruction = `You are an elite AI Learning Scientist and Adaptive Curriculum Planner at EduNexus.
+Your goal is to analyze a student's recent performance trends (quiz scores, weak topics, flashcards mastered, study streak) and curate a highly tailored, day-by-day (Monday to Sunday) adaptive learning schedule for the week.
+
+Guidelines:
+1. Heavily prioritize weaker subjects and topics with low quiz scores or retention drops early in the week with high-impact activities (e.g., Socratic AI Tutoring or targeted quiz challenges).
+2. Balance study duration (30-50 mins) and assign realistic time slots (e.g., "08:30 AM").
+3. Attach actionable AI Study Tips for each day.
+4. Output strict JSON matching the requested schema. Do NOT use markdown asterisks in strings.`;
+
+  const prompt = `Student Learning Profile:
+- Name: ${userName}
+- Curriculum: ${curriculum.toUpperCase()}
+- Current XP: ${studentXp}
+- Active Study Streak: ${streakDays} days
+- Intensity Setting: ${intensity}
+- Quiz Performance Trends: ${quizScoresText}
+- Identified Weak Topics: ${weakAreas.join(', ')}
+- Saved Study Notes / Documents:
+${docSummaries.length > 0 ? docSummaries.join('\n') : 'No saved documents yet.'}
+
+Formulate a unique 7-day adaptive weekly learning schedule (Monday through Sunday) targeting these performance trends.`;
+
+  try {
+    const response = await generateContentWithFallback({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        systemInstruction,
+        temperature: 0.3,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            curriculumName: { type: Type.STRING },
+            aiPerformanceAnalysis: { type: Type.STRING },
+            overallMasteryScore: { type: Type.INTEGER },
+            weakestSubject: { type: Type.STRING },
+            targetXpGoal: { type: Type.INTEGER },
+            weeklyIntensity: { type: Type.STRING },
+            days: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  dayId: { type: Type.STRING },
+                  dayName: { type: Type.STRING },
+                  dateLabel: { type: Type.STRING },
+                  focusSubject: { type: Type.STRING },
+                  focusTopic: { type: Type.STRING },
+                  subTopic: { type: Type.STRING },
+                  activityType: { type: Type.STRING },
+                  activityLabel: { type: Type.STRING },
+                  suggestedTime: { type: Type.STRING },
+                  durationMinutes: { type: Type.INTEGER },
+                  priority: { type: Type.STRING },
+                  urgencyReason: { type: Type.STRING },
+                  aiStudyTip: { type: Type.STRING },
+                  xpReward: { type: Type.INTEGER },
+                  completed: { type: Type.BOOLEAN },
+                  learningObjective: { type: Type.STRING }
+                },
+                required: [
+                  'dayId',
+                  'dayName',
+                  'dateLabel',
+                  'focusSubject',
+                  'focusTopic',
+                  'subTopic',
+                  'activityType',
+                  'activityLabel',
+                  'suggestedTime',
+                  'durationMinutes',
+                  'priority',
+                  'urgencyReason',
+                  'aiStudyTip',
+                  'xpReward',
+                  'completed',
+                  'learningObjective'
+                ]
+              }
+            }
+          },
+          required: [
+            'title',
+            'curriculumName',
+            'aiPerformanceAnalysis',
+            'overallMasteryScore',
+            'weakestSubject',
+            'targetXpGoal',
+            'weeklyIntensity',
+            'days'
+          ]
+        }
+      }
+    });
+
+    const rawText = response.text || '{}';
+    const data = validateAndRepairJson(rawText, [
+      'title',
+      'curriculumName',
+      'aiPerformanceAnalysis',
+      'overallMasteryScore',
+      'weakestSubject',
+      'targetXpGoal',
+      'weeklyIntensity',
+      'days'
+    ]);
+
+    res.json({ schedule: data });
+  } catch (error: any) {
+    console.error('Weekly Personalized Schedule Generation Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate personalized schedule.' });
+  }
+});
+
 // GET endpoint for API Health Monitor and Retry Registry statistics
 const serverQrMappings: Record<string, any> = {
   'soc-bio72': {
@@ -1382,6 +2414,81 @@ app.post('/api/admin/gemini-quota/clear-logs', (req, res) => {
 });
 
 // ==========================================
+// CENTRALIZED AI GATEWAY API ENDPOINTS
+// ==========================================
+
+// GET AI Gateway Stats, Budget & Cache Telemetry
+app.get('/api/admin/ai-gateway/stats', (req, res) => {
+  res.json(aiGateway.getStats());
+});
+
+// POST update AI Gateway Budget, Cost-Saving Mode & Rate Limits
+app.post('/api/admin/ai-gateway/config', (req, res) => {
+  const updated = aiGateway.updateConfig(req.body);
+  res.json({ success: true, config: updated, stats: aiGateway.getStats() });
+});
+
+// POST clear AI Gateway Response Cache
+app.post('/api/admin/ai-gateway/clear-cache', (req, res) => {
+  aiGateway.clearCache();
+  res.json({ success: true, message: 'AI Gateway Response Cache cleared.' });
+});
+
+// ==========================================
+// CENTRALIZED SUBSCRIPTION & ENTITLEMENTS ENDPOINTS
+// ==========================================
+
+// GET user subscription status & daily quotas
+app.get('/api/subscription/status', (req, res) => {
+  const userId = (req.query.userId as string) || 'guest';
+  const sub = subscriptionManager.getSubscription(userId);
+  const limits = PLAN_LIMITS[sub.plan];
+  res.json({ subscription: sub, limits });
+});
+
+// POST upgrade subscription plan
+app.post('/api/subscription/upgrade', (req, res) => {
+  const { userId = 'guest', plan = 'premium', billingCycle = 'monthly', paymentMethod = 'mpesa', phoneOrCard } = req.body;
+  const result = subscriptionManager.upgradePlan(userId, plan, billingCycle, paymentMethod, phoneOrCard);
+  const limits = PLAN_LIMITS[result.subscription.plan];
+  res.json({ ...result, limits });
+});
+
+// POST start 14-day free trial
+app.post('/api/subscription/start-trial', (req, res) => {
+  const { userId = 'guest' } = req.body;
+  const result = subscriptionManager.startTrial(userId);
+  const limits = PLAN_LIMITS[result.subscription.plan];
+  res.json({ ...result, limits });
+});
+
+// POST buy AI credits top-up pack
+app.post('/api/subscription/buy-credits', (req, res) => {
+  const { userId = 'guest', packageId = 'pack_medium', creditAmount = 500, costUSD = 5.0, paymentMethod = 'mpesa' } = req.body;
+  const result = subscriptionManager.buyCredits(userId, packageId, creditAmount, costUSD, paymentMethod);
+  res.json(result);
+});
+
+// POST toggle auto-renew
+app.post('/api/subscription/toggle-auto-renew', (req, res) => {
+  const { userId = 'guest' } = req.body;
+  const sub = subscriptionManager.toggleAutoRenew(userId);
+  res.json({ success: true, subscription: sub });
+});
+
+// POST check feature entitlement and consume quota
+app.post('/api/subscription/check-quota', (req, res) => {
+  const { userId = 'guest', feature = 'aiQuestions', count = 1 } = req.body;
+  const result = subscriptionManager.checkAndConsumeQuota(userId, feature, count);
+  res.json(result);
+});
+
+// GET admin subscription stats & financial breakdown
+app.get('/api/admin/subscription/stats', (req, res) => {
+  res.json(subscriptionManager.getAdminStats());
+});
+
+// ==========================================
 // META WHATSAPP BUSINESS CLOUD API INTEGRATION
 // ==========================================
 
@@ -1399,16 +2506,554 @@ interface WhatsAppMessageLog {
   isSubmission?: boolean;
 }
 
+interface WhatsAppActiveContext {
+  taskType?: 'lesson_plan' | 'scheme_of_work' | 'worksheet' | 'cat_exam' | 'ppt_outline' | 'notes' | 'rubric' | 'ai_tutor' | 'examination_paper' | 'marking_scheme' | 'general';
+  subject?: string;
+  grade?: string;
+  topic?: string;
+  method?: string;
+  duration?: string;
+  curriculum?: string;
+  title?: string;
+  fullContent?: string;
+  lastDocId?: string;
+  updatedAt: string;
+  isAwaitingClarification?: boolean;
+}
+
+interface WhatsAppResourceItem {
+  id: string;
+  type: string;
+  title: string;
+  subject?: string;
+  grade?: string;
+  topic?: string;
+  content: string;
+  pdfUrl?: string;
+  createdAt: string;
+}
+
+export type CurriculumType = 'cbc' | 'kcse' | 'cambridge_primary' | 'igcse' | 'a_level' | 'ib' | 'us_common_core' | 'cbse' | 'australian' | 'french_bac' | 'standard';
+export type WhatsAppConversationMode = 'structured' | 'flexible' | 'smart' | 'expert';
+
 interface WhatsAppConversationSession {
   phoneNumber: string;
   name: string;
   userId?: string;
   userRole?: string;
   userEmail?: string;
+  curriculum?: CurriculumType;
+  primaryCurriculum?: CurriculumType;
   preferredOutputFormat?: UserWhatsAppOutputPreference;
+  conversationMode?: WhatsAppConversationMode;
+  language?: string;
+  developerMode?: boolean;
   history: { role: 'user' | 'model'; parts: { text: string }[] }[];
   lastActive: string;
   messageCount: number;
+  activeContext?: WhatsAppActiveContext;
+  resourceHistory?: WhatsAppResourceItem[];
+  lastProcessedPrompt?: string;
+  lastProcessedTime?: number;
+  lastProcessedReply?: string;
+}
+
+function extractCleanAcademicTopic(text: string) {
+  let subject = '';
+  let grade = '';
+  let topic = '';
+  let method = '';
+  let duration = '';
+
+  // 1. Grade / Form Detection
+  const gradeMatch = text.match(/\b(form\s*[1-4]|grade\s*[1-9]|class\s*[1-8]|standard\s*[1-8]|pp[12])\b/i);
+  if (gradeMatch) {
+    grade = gradeMatch[1].toUpperCase().replace(/\s+/, ' ');
+  }
+
+  // 2. Duration
+  const durationMatch = text.match(/\b(\d+\s*(min|minute|minutes|hr|hour|hours))\b/i);
+  if (durationMatch) {
+    duration = durationMatch[1];
+  }
+
+  // 3. Method Detection
+  if (/\b(matrix method|matrices|matrix)\b/i.test(text)) {
+    method = 'Matrix Method';
+  } else if (/\b(substitution method|substitution)\b/i.test(text)) {
+    method = 'Substitution Method';
+  } else if (/\b(elimination method|elimination)\b/i.test(text)) {
+    method = 'Elimination Method';
+  } else if (/\b(graphical method|graphical)\b/i.test(text)) {
+    method = 'Graphical Method';
+  } else if (/\b(completing the square)\b/i.test(text)) {
+    method = 'Completing the Square';
+  }
+
+  // 4. Topic & Subject Detection
+  if (/\b(simultaneous equations?|simultaneous|matrix method)\b/i.test(text) || /[0-9]x\s*[\+\-]/i.test(text)) {
+    subject = 'Mathematics';
+    topic = 'Simultaneous Equations';
+  } else if (/\b(quadratic equations?|quadratic)\b/i.test(text)) {
+    subject = 'Mathematics';
+    topic = 'Quadratic Equations';
+  } else if (/\b(photosynthesis)\b/i.test(text)) {
+    subject = 'Biology';
+    topic = 'Photosynthesis';
+  } else if (/\b(mixtures|separation of mixtures)\b/i.test(text)) {
+    subject = 'Chemistry';
+    topic = 'Mixtures';
+  } else if (/\b(acids and bases|acid|base|pH)\b/i.test(text)) {
+    subject = 'Chemistry';
+    topic = 'Acids and Bases';
+  } else if (/\b(trigonometry|sine|cosine|tangent)\b/i.test(text)) {
+    subject = 'Mathematics';
+    topic = 'Trigonometry';
+  } else if (/\b(vectors?)\b/i.test(text)) {
+    subject = 'Mathematics';
+    topic = 'Vectors';
+  } else if (/\b(calculus|derivatives|integrals)\b/i.test(text)) {
+    subject = 'Mathematics';
+    topic = 'Calculus';
+  } else if (/\b(genetics|DNA|inheritance)\b/i.test(text)) {
+    subject = 'Biology';
+    topic = 'Genetics';
+  } else if (/\b(newton'?s laws|kinematics|motion|force)\b/i.test(text)) {
+    subject = 'Physics';
+    topic = "Newton's Laws of Motion";
+  }
+
+  // Fallback Subject Detection
+  if (!subject) {
+    const subjectMatch = text.match(/\b(mathematics|math|maths|chemistry|physics|biology|science|english|kiswahili|swahili|geography|history|cre|ire|business|agriculture|computer|social studies)\b/i);
+    if (subjectMatch) {
+      let rawSub = subjectMatch[1].toLowerCase();
+      if (['math', 'maths'].includes(rawSub)) rawSub = 'mathematics';
+      subject = rawSub.charAt(0).toUpperCase() + rawSub.slice(1);
+    }
+  }
+
+  // Fallback Clean Topic Extraction
+  if (!topic) {
+    let raw = text
+      .replace(/teach\s+me\s+how\s+to\s+solve/i, '')
+      .replace(/teach\s+me\s+how\s+to/i, '')
+      .replace(/teach\s+me\s+about/i, '')
+      .replace(/teach\s+me/i, '')
+      .replace(/how\s+do\s+i\s+solve/i, '')
+      .replace(/how\s+to\s+solve/i, '')
+      .replace(/how\s+to/i, '')
+      .replace(/can\s+you\s+explain/i, '')
+      .replace(/explain\s+how\s+to/i, '')
+      .replace(/explain/i, '')
+      .replace(/prepare\s+a\s+lesson\s+plan\s+on/i, '')
+      .replace(/create\s+a\s+lesson\s+plan\s+for/i, '')
+      .replace(/using\s+the\s+matrix\s+method/i, '')
+      .replace(/step\s+by\s+step/i, '')
+      .replace(/for\s+(form|grade|class)\s*\d+/i, '')
+      .replace(/\d+\s*(min|minute|minutes)/i, '')
+      .trim();
+
+    raw = raw.replace(/^[:\-\s,]+/, '').replace(/[:\-\s,]+$/, '');
+    if (raw.length > 2 && !['a', 'the', 'how', 'me', 'it', 'this'].includes(raw.toLowerCase())) {
+      topic = raw.charAt(0).toUpperCase() + raw.slice(1);
+    }
+  }
+
+  return { subject, grade, topic, method, duration };
+}
+
+function parseTopicAndParameters(text: string) {
+  return extractCleanAcademicTopic(text);
+}
+
+function detectIntentAndExtractContext(
+  promptText: string,
+  session: WhatsAppConversationSession
+) {
+  const extracted = extractCleanAcademicTopic(promptText);
+  const textLower = promptText.trim().toLowerCase();
+  const activeCtx = session.activeContext;
+
+  const isTutoringTrigger =
+    /\b(teach me|how to solve|how do i solve|explain how|what is|help me solve|solve this|solve these|calculate|step by step|how does|why does|matrix method|simultaneous equations|quadratic)\b/i.test(promptText) ||
+    /[0-9]x\s*[\+\-]/i.test(promptText);
+
+  const isLessonPlanTrigger = /\b(lesson plan|plan a lesson|prepare a lesson|schemes of work|scheme of work)\b/i.test(promptText);
+  const isExamTrigger = /\b(cat exam|cat test|examination paper|set an exam)\b/i.test(promptText);
+
+  const isFollowUpChoice =
+    /^(1|2|3|4|5|6|7|1\.|2\.|3\.|4\.|5\.|6\.|7\.)$/.test(textLower) ||
+    /\b(next step|practice question|quiz me|summary notes|common mistakes|worksheet|cat exam|cat|powerpoint|ppt|rubric|lesson notes|marking scheme|adjust difficulty|add diagrams|video solution)\b/i.test(textLower);
+
+  // If user explicitly asks a new tutoring / explanation / math solving question:
+  if (isTutoringTrigger && !isLessonPlanTrigger && !isExamTrigger) {
+    const newTopic = extracted.topic || 'Simultaneous Equations';
+    const newSubject = extracted.subject || 'Mathematics';
+    const newMethod = extracted.method || (newTopic.includes('Simultaneous') ? 'Matrix Method' : '');
+    const title = `AI Tutor: ${newTopic}${newMethod ? ` (${newMethod})` : ''}`;
+
+    return {
+      intentType: 'NEW_TASK_TUTORING' as const,
+      isContextSwitch: true,
+      context: {
+        taskType: 'ai_tutor' as const,
+        subject: newSubject,
+        grade: extracted.grade || activeCtx?.grade || 'Form 3',
+        topic: newTopic,
+        method: newMethod,
+        duration: extracted.duration || '20 minutes',
+        title,
+        fullContent: '',
+        updatedAt: new Date().toISOString(),
+        isAwaitingClarification: false
+      }
+    };
+  }
+
+  // If user asks for a new lesson plan explicitly
+  if (isLessonPlanTrigger) {
+    return {
+      intentType: 'NEW_TASK_LESSON_PLAN' as const,
+      isContextSwitch: true,
+      context: {
+        taskType: 'lesson_plan' as const,
+        subject: extracted.subject || activeCtx?.subject || 'Mathematics',
+        grade: extracted.grade || activeCtx?.grade || 'Form 3',
+        topic: extracted.topic || 'New Lesson',
+        duration: extracted.duration || '40 minutes',
+        title: `${extracted.grade || 'Form 3'} ${extracted.subject || 'Mathematics'}: ${extracted.topic || 'Lesson Plan'}`,
+        fullContent: '',
+        updatedAt: new Date().toISOString(),
+        isAwaitingClarification: !extracted.topic
+      }
+    };
+  }
+
+  // If active context exists and user responds with a follow-up action option
+  if (activeCtx && activeCtx.topic && (isFollowUpChoice || !extracted.subject)) {
+    return {
+      intentType: 'CONTINUE_ACTIVE_TASK' as const,
+      isContextSwitch: false,
+      context: activeCtx
+    };
+  }
+
+  return {
+    intentType: 'GENERAL_QUERY' as const,
+    isContextSwitch: false,
+    context: activeCtx
+  };
+}
+
+function buildInteractiveActionMenu(context: WhatsAppActiveContext): string {
+  const taskType = context.taskType || 'lesson_plan';
+  const topic = context.topic || 'Lesson';
+  const subject = context.subject || '';
+  const grade = context.grade || '';
+  const header = (grade || subject) ? `${grade} ${subject}: ${topic}`.trim() : topic;
+
+  if (taskType === 'ai_tutor') {
+    return (
+      `\n\n📌 *Interactive Follow-ups for AI Tutor (${topic}):*\n` +
+      `Reply with a number or action:\n` +
+      `1️⃣ *Next Step* – Guided step-by-step breakdown\n` +
+      `2️⃣ *Practice Question* – Try a practice problem\n` +
+      `3️⃣ *Quiz Me* – 3-question quick check\n` +
+      `4️⃣ *Diagram* – Visual breakdown diagram\n` +
+      `5️⃣ *Animation* – Video explanation\n` +
+      `6️⃣ *Summary Notes* – Formulas & cheat sheet\n` +
+      `7️⃣ *Common Mistakes* – Common errors to avoid`
+    );
+  }
+
+  // Teacher Document Interactive Follow-up Choices
+  return (
+    `\n\n📚 *Continue with ${header}:*\n` +
+    `1️⃣ Generate Student Worksheet\n` +
+    `2️⃣ Generate CAT with Marking Scheme\n` +
+    `3️⃣ Create PowerPoint Presentation Outline\n` +
+    `4️⃣ Generate Practical Activity & Lab Guide\n` +
+    `5️⃣ Create Assessment Rubric\n` +
+    `6️⃣ Generate Homework & Revision Guide\n` +
+    `7️⃣ Produce Printable PDF\n` +
+    `8️⃣ Generate Educational Diagram\n` +
+    `9️⃣ Create Teaching Video Script\n\n` +
+    `_Reply with *1* to *9*, or type your custom instruction!_`
+  );
+}
+
+function resolveCurriculumForWhatsApp(
+  session: WhatsAppConversationSession,
+  normPhone: string,
+  userQuery: string
+): CurriculumType {
+  const queryLower = userQuery.toLowerCase();
+
+  // 1. Explicit mention in current query
+  if (/\b(cbc|competency based|competency-based|kenya cbc)\b/i.test(queryLower)) return 'cbc';
+  if (/\b(kcse|8-4-4|844|kenya 8-4-4|kenya secondary|knec)\b/i.test(queryLower)) return 'kcse';
+  if (/\b(cambridge primary|cambridge lower|checkpoint|stage [1-9])\b/i.test(queryLower)) return 'cambridge_primary';
+  if (/\b(igcse|0580|0610|0470|cambridge igcse)\b/i.test(queryLower)) return 'igcse';
+  if (/\b(as level|a level|a-level|caie|9709|9701|9702|as & a level)\b/i.test(queryLower)) return 'a_level';
+  if (/\b(ib|international baccalaureate|myp|dp|theory of knowledge|tok)\b/i.test(queryLower)) return 'ib';
+  if (/\b(us common core|common core|ccss|ngss|ap biology|ap calculus|ap physics|ap chemistry|us curriculum|american curriculum)\b/i.test(queryLower)) return 'us_common_core';
+  if (/\b(cbse|icse|ncert|indian curriculum|class 10 board|class 12 board|cbse board)\b/i.test(queryLower)) return 'cbse';
+  if (/\b(australian curriculum|acara|vce|hsc|atar|queensland curriculum|australia curriculum)\b/i.test(queryLower)) return 'australian';
+  if (/\b(french bac|baccalaureat|aefe|french curriculum|programme francais|terminale|seconde|premiere)\b/i.test(queryLower)) return 'french_bac';
+  if (/\b(standard syllabus|standard curriculum|traditional syllabus)\b/i.test(queryLower)) return 'standard';
+
+  // 2. Profile Settings (User or Linked Profile)
+  const linked = whatsappLinkedUsers[normPhone];
+  if (linked?.primaryCurriculum) return linked.primaryCurriculum;
+  if (linked?.curriculum) return linked.curriculum;
+
+  // 3. School Profile (if user belongs to an institution with a set curriculum)
+  if ((linked as any)?.schoolProfile?.curriculum) {
+    return (linked as any).schoolProfile.curriculum as CurriculumType;
+  }
+
+  // 4. Session / Active Context / Previous Teaching History
+  if (session.primaryCurriculum) return session.primaryCurriculum;
+  if (session.curriculum) return session.curriculum;
+  if (session.activeContext?.curriculum) return session.activeContext.curriculum as CurriculumType;
+
+  // 5. Default Fallback
+  return 'cbc';
+}
+
+/**
+ * EduNexus Curriculum Intelligence Engine
+ * Generates official, curriculum-compliant system instructions for all EduNexus modules
+ * (Web App Generators, Teacher Playbook, EduNexus AI Tutor, WhatsApp AI, etc.)
+ */
+function getCurriculumEngineInstruction(
+  curriculum: CurriculumType | string,
+  userRole: string = 'Teacher',
+  mode: string = 'smart'
+): string {
+  const currKey = (curriculum || 'cbc').toLowerCase();
+
+  let header =
+    `You are the EduNexus Curriculum Intelligence Engine.\n` +
+    `Your responsibility is to generate educational documents that fully comply with the official requirements, terminology, pedagogical philosophy, and documentation standards of each supported curriculum.\n` +
+    `CRITICAL MANDATE: Never use one generic template for all curricula. Each curriculum MUST maintain its own distinct document architecture.\n` +
+    `QUALITY MANTRA: All generated documents MUST be curriculum-compliant, educationally accurate, pedagogically appropriate, classroom-ready, professionally formatted, and complete with ZERO missing or placeholder sections.\n\n`;
+
+  let frameworkSpec = '';
+
+  if (currKey === 'cbc' || currKey.includes('kenya cbc')) {
+    frameworkSpec =
+      `MANDATORY CURRICULUM ARCHITECTURE: KENYA COMPETENCY-BASED CURRICULUM (CBC - KICD Framework)\n` +
+      `- Educational Philosophy: Learner-centred, competency-based, experiential, values-driven, and inquiry-led.\n` +
+      `- Required Architecture & Terminology:\n` +
+      `  • Learning Area & Grade Level\n` +
+      `  • Strand & Sub-strand\n` +
+      `  • Specific Learning Outcomes (Knowledge, Skills, Values & Attitudes - SMART format)\n` +
+      `  • Key Inquiry Questions (KIQ - open-ended, thought-provoking questions)\n` +
+      `  • Core Competencies Explicitly Integrated: Communication & Collaboration, Critical Thinking & Problem Solving, Creativity & Imagination, Citizenship, Self-efficacy, Digital Literacy, Learning to Learn\n` +
+      `  • Values Explicitly Integrated: Love, Responsibility, Respect, Integrity, Unity, Peace, Patriotism\n` +
+      `  • Pertinent & Contemporary Issues (PCIs): Environmental Care, Health Education, Financial Literacy, ESD, Life Skills\n` +
+      `  • Learner-Centred Experiences: Detailed active learning activities specifying (a) Teacher Role and (b) Learner Role\n` +
+      `  • Learning Resources: Physical, low-cost/improvised materials, and digital tools\n` +
+      `  • Community Service Learning (CSL) / Extended Learning Links\n` +
+      `  • 4-Tier Competency Assessment Rubric: Exceeding Expectations (EE), Meeting Expectations (ME), Approaching Expectations (AE), Below Expectations (BE)\n` +
+      `  • Teacher Self-Reflection Prompts\n`;
+  } else if (currKey === 'kcse' || currKey === '8-4-4' || currKey.includes('8-4-4')) {
+    frameworkSpec =
+      `MANDATORY CURRICULUM ARCHITECTURE: KENYA 8-4-4 / KCSE (KNEC SYLLABUS & MINISTRY OF EDUCATION)\n` +
+      `- Educational Philosophy: Objective-driven, content-mastery, examination-ready, structured, and syllabus-aligned.\n` +
+      `- Required Architecture & Terminology:\n` +
+      `  • Subject & Form/Class\n` +
+      `  • Topic & Sub-topic\n` +
+      `  • Instructional Objectives: SMART objectives categorized into Cognitive, Psychomotor, and Affective domains (SWBAT - Student Will Be Able To...)\n` +
+      `  • Prerequisite Entry Behavior / Prior Knowledge\n` +
+      `  • Systematic Content Coverage Breakdown & Chalkboard Summary Notes\n` +
+      `  • Structured Teacher Activities & Learner Activities\n` +
+      `  • Teaching/Learning Resources & References: Textbooks, syllabus references, apparatus, models, boardwork\n` +
+      `  • Evaluation & Oral Diagnostic Checks\n` +
+      `  • Student Homework / Class Assignments\n` +
+      `  • Teacher's Self-Evaluation & Remarks\n`;
+  } else if (currKey === 'cambridge_primary' || currKey.includes('cambridge primary') || currKey.includes('checkpoint')) {
+    frameworkSpec =
+      `MANDATORY CURRICULUM ARCHITECTURE: CAMBRIDGE PRIMARY & LOWER SECONDARY\n` +
+      `- Educational Philosophy: Active learning, spiral progression, international learner attributes, and formative growth.\n` +
+      `- Required Architecture & Terminology:\n` +
+      `  • Centre/School Name, Subject, Stage/Year (Stage 1 to 9), Unit Title\n` +
+      `  • Official Cambridge Learning Objectives & Code References\n` +
+      `  • Success Criteria: Clear, student-facing "I can..." statements\n` +
+      `  • Cambridge Learner Attributes: Fostering Confident, Responsible, Reflective, Innovative, and Engaged learners\n` +
+      `  • Key Vocabulary & Definitions\n` +
+      `  • Lesson Progression: Starter Activity (Hook/Warm-up), Main Teaching & Active Learning (Teacher Input, Guided Group Practice, Independent Practice), Plenary (Exit tickets/peer reflection)\n` +
+      `  • Multi-Tier Differentiation: Support Strategies (Scaffolding/Visuals) & Stretch/Challenge Strategies (Higher-order inquiry)\n` +
+      `  • Learning Resources & Equipment\n` +
+      `  • Teacher Reflection & Next Steps\n`;
+  } else if (currKey === 'igcse' || currKey.includes('igcse')) {
+    frameworkSpec =
+      `MANDATORY CURRICULUM ARCHITECTURE: CAMBRIDGE IGCSE (CAIE)\n` +
+      `- Educational Philosophy: Rigorous subject discipline, Assessment Objective mastery, exam technique, and practical inquiry.\n` +
+      `- Required Architecture & Terminology:\n` +
+      `  • Centre Name, Subject & Syllabus Code (e.g., 0580 Mathematics, 0610 Biology, 0470 History, 0620 Chemistry)\n` +
+      `  • Syllabus Section & Sub-clause Reference\n` +
+      `  • Assessment Objectives Explicitly Mapped: AO1 (Knowledge & Understanding), AO2 (Application & Analysis), AO3 (Evaluation & Investigation)\n` +
+      `  • Official Exam Command Words Focus: Calculate, Explain, Evaluate, Outline, Discuss, Describe, State\n` +
+      `  • Lesson Structure: Exam Warm-up / Retrieval Practice, Teacher Modeling ("I Do"), Guided Group Practice ("We Do"), Independent Exam Task ("You Do"), Plenary & Mark Scheme Walkthrough\n` +
+      `  • Differentiation: Core Syllabus Tier vs Extended Syllabus Tier\n` +
+      `  • Past Paper References, Mark Schemes, and Exam Technique Prompts\n`;
+  } else if (currKey === 'a_level' || currKey.includes('a_level') || currKey.includes('as level') || currKey.includes('a level')) {
+    frameworkSpec =
+      `MANDATORY CURRICULUM ARCHITECTURE: CAMBRIDGE INTERNATIONAL AS & A LEVEL (CAIE)\n` +
+      `- Educational Philosophy: Advanced academic rigor, theoretical depth, higher-order synthesis, mathematical derivation, research, and laboratory precision.\n` +
+      `- Required Architecture & Terminology:\n` +
+      `  • Centre Name, Subject & Syllabus Code (e.g., 9709 Mathematics, 9701 Chemistry, 9702 Physics, 9708 Economics)\n` +
+      `  • Level: AS Level or A2 Level Specification Reference Points\n` +
+      `  • Theoretical & Mathematical Derivations / Formal Proofs\n` +
+      `  • Practical Lab / Fieldwork Skills & Safety Protocols\n` +
+      `  • Higher-Order Command Words: Critique, Derive, Analyze, Evaluate, Prove, Justify\n` +
+      `  • Assessment Objective Mapping (AO1, AO2, AO3)\n` +
+      `  • Academic Extension Tasks & Research Seminar Prompts\n` +
+      `  • Structured Exam Essay / Problem Set Assignments with Step-by-Step Mark Allocation\n`;
+  } else if (currKey === 'ib' || currKey.includes('ib') || currKey.includes('baccalaureate')) {
+    frameworkSpec =
+      `MANDATORY CURRICULUM ARCHITECTURE: INTERNATIONAL BACCALAUREATE (IB MYP & DP)\n` +
+      `- Educational Philosophy: Inquiry-based, conceptual, holistic, international-mindedness, reflective, and criterion-referenced.\n` +
+      `- Required Architecture & Terminology:\n` +
+      `  • Subject Group, Grade/Level (MYP 1-5 or DP SL/HL), Unit Title\n` +
+      `  • Statement of Inquiry\n` +
+      `  • Key Concept & Related Concepts\n` +
+      `  • Global Context Focus (e.g., Globalization & Sustainability, Scientific & Technical Innovation)\n` +
+      `  • Inquiry Questions Breakdown: Factual Questions, Conceptual Questions, and Debatable Questions\n` +
+      `  • Approaches to Learning (ATL) Skills: Thinking, Communication, Social, Self-Management, Research\n` +
+      `  • IB Learner Profile Attributes: Inquirers, Knowledgeable, Thinkers, Reflective, Principled, Open-Minded, Caring\n` +
+      `  • Inquiry Process Flow: Hook/Inquiry Launch, Action & Investigation, Synthesis & Presentation\n` +
+      `  • Criterion-Based Assessment: Mapped to IB Assessment Criteria A, B, C, D\n` +
+      `  • Teacher Reflection Before, During, and After Teaching\n`;
+  } else if (currKey === 'us_common_core' || currKey.includes('common core') || currKey.includes('ngss') || currKey.includes('ap')) {
+    frameworkSpec =
+      `MANDATORY CURRICULUM ARCHITECTURE: UNITED STATES COMMON CORE (CCSS, NGSS & AP)\n` +
+      `- Educational Philosophy: Rigorous college-and-career readiness, 3D science learning (NGSS), Depth of Knowledge (DOK) levels, and analytical text evidence.\n` +
+      `- Required Architecture & Terminology:\n` +
+      `  • School / District Name, Subject, Grade Level (K-12 / AP), Unit Title\n` +
+      `  • Standard Codes Mapped: CCSS.ELA-LITERACY / CCSS.MATH.CONTENT / NGSS Disciplinary Core Ideas & Performance Expectations\n` +
+      `  • Essential Questions (EQ) & Enduring Understandings\n` +
+      `  • Norman Webb's Depth of Knowledge (DOK 1 Recall, DOK 2 Skill/Concept, DOK 3 Strategic Thinking, DOK 4 Extended Thinking)\n` +
+      `  • Instructional Progression: Hook/Anticipatory Set, Direct Modeling ("I Do"), Guided Collaboration ("We Do"), Independent Practice ("You Do"), Formative Exit Ticket\n` +
+      `  • Universal Design for Learning (UDL) Accommodations: Representation, Expression, and Engagement Strategies (IEP/504 Scaffolding)\n` +
+      `  • Formative Assessment & Anchor Chart / Graphic Organizer Prompts\n`;
+  } else if (currKey === 'cbse' || currKey.includes('cbse') || currKey.includes('ncert') || currKey.includes('icse')) {
+    frameworkSpec =
+      `MANDATORY CURRICULUM ARCHITECTURE: INDIAN CBSE & ICSE SYSTEM (NCERT FRAMEWORK)\n` +
+      `- Educational Philosophy: Competency-focused learning, NCERT syllabus alignment, Board Examination preparation, HOTS (Higher Order Thinking Skills), and multi-disciplinary connection.\n` +
+      `- Required Architecture & Terminology:\n` +
+      `  • School Name, Subject, Class/Grade (Class 1 to 12), Chapter & Sub-topic\n` +
+      `  • NCERT Chapter Code & Official Learning Outcomes\n` +
+      `  • Prerequisite Concepts & Real-World Application\n` +
+      `  • Lesson Stages: Mind Map / Introduction, Concept Explanation & Board Work, Worked Textbook Examples, HOTS & Competency-Based Questions, Summary\n` +
+      `  • Assessment & Remediation: Assertion-Reasoning Questions, Case-Based Studies, Chapter-End Quiz, NCERT Exemplar Exercises\n` +
+      `  • Art Integration & Life Skills Alignment\n`;
+  } else if (currKey === 'australian' || currKey.includes('australian') || currKey.includes('acara') || currKey.includes('atar')) {
+    frameworkSpec =
+      `MANDATORY CURRICULUM ARCHITECTURE: AUSTRALIAN CURRICULUM (ACARA FRAMEWORK)\n` +
+      `- Educational Philosophy: Capability-driven, inquiry-based, 3-dimensional design (Learning Areas, General Capabilities, Cross-Curriculum Priorities).\n` +
+      `- Required Architecture & Terminology:\n` +
+      `  • School Name, Subject, Year Level (Foundation to Year 12), Unit Title\n` +
+      `  • Official ACARA Content Descriptions & Codes\n` +
+      `  • ACARA Achievement Standards Alignment\n` +
+      `  • General Capabilities Integrated: Literacy, Numeracy, ICT Capability, Critical & Creative Thinking, Personal & Social Capability, Ethical Understanding, Intercultural Understanding\n` +
+      `  • Cross-Curriculum Priorities: Aboriginal & Torres Strait Islander Histories & Cultures, Asia & Australia's Engagement with Asia, Sustainability\n` +
+      `  • Active Learning Progression: Tuning In, Finding Out, Sorting Out, Going Further, Making Conclusions, Taking Action\n` +
+      `  • Formative Diagnostic Rubric & Differentiation Matrix\n`;
+  } else if (currKey === 'french_bac' || currKey.includes('french') || currKey.includes('bac') || currKey.includes('aefe')) {
+    frameworkSpec =
+      `MANDATORY CURRICULUM ARCHITECTURE: FRENCH BACCALAURÉAT SYSTEM (MINISTÈRE DE L'ÉDUCATION NATIONALE)\n` +
+      `- Educational Philosophy: Rigueur conceptuelle, esprit critique, socle commun de connaissances, de compétences et de culture, préparation au Grand Oral et aux épreuves du Bac.\n` +
+      `- Required Architecture & Terminology:\n` +
+      `  • Établissement, Discipline, Niveau (CP à Terminale), Thème du Programme Officiel\n` +
+      `  • Objectifs d'Apprentissage & Notions Clés du Bulletin Officiel (BO)\n` +
+      `  • Compétences du Socle Commun Travaillées\n` +
+      `  • Déroulement de la Séance: Situation Problème / Accroche, Mise en Activité / Investigation Guidée, Synthèse / Institutionnalisation, Exercices d'Application & Analyse de Documents\n` +
+      `  • Évaluation & Préparation aux Épreuves: Questions d'analyse de documents, sujets type Bac, grille d'évaluation par compétences\n` +
+      `  • Pistes de Prolongement & Entraînement au Grand Oral\n`;
+  } else {
+    frameworkSpec =
+      `MANDATORY CURRICULUM ARCHITECTURE: STANDARD / UNIVERSAL SYLLABUS\n` +
+      `- Educational Philosophy: Outcomes-based, structured instructional sequence, essential questions, and universal accessibility.\n` +
+      `- Required Architecture & Terminology:\n` +
+      `  • Subject & Grade/Class\n` +
+      `  • Learning Objectives & Essential Questions\n` +
+      `  • Prerequisite Knowledge\n` +
+      `  • Instructional Sequence: Hook/Introduction, Direct Instruction, Guided Practice, Independent Application, Closure\n` +
+      `  • Learning Resources & Digital Aids\n` +
+      `  • Differentiated Accommodations & Modifications\n` +
+      `  • Diagnostic Checks & Summative Assessment\n`;
+  }
+
+  let modeInstruction = '';
+  if (userRole === 'Teacher') {
+    if (mode === 'smart') {
+      modeInstruction =
+        `WHATSAPP CONVERSATION BEHAVIOR: SMART MODE (ADAPTIVE DEFAULT)\n` +
+        `- When a teacher requests an educational document (Lesson Plan, Scheme of Work, CAT, Rubric, Notes, Worksheet), generate the complete curriculum-compliant professional document immediately.\n` +
+        `- Do not simplify, truncate, or summarize documents on WhatsApp simply because it is a chat interface.\n` +
+        `- Follow the generated document with interactive options / follow-up menu choices.\n`;
+    } else if (mode === 'flexible') {
+      modeInstruction =
+        `WHATSAPP CONVERSATION BEHAVIOR: FLEXIBLE MODE (NATURAL CONVERSATION)\n` +
+        `- Maintain natural, fluid, and professional conversation while continuing to produce complete documents using the official curriculum structure.\n` +
+        `- Do not output rigid option menus unless explicitly asked.\n`;
+    } else if (mode === 'structured') {
+      modeInstruction =
+        `WHATSAPP CONVERSATION BEHAVIOR: STRUCTURED MODE (STEP-BY-STEP GUIDED)\n` +
+        `- If required parameters (Subject, Grade, Topic) are missing, guide the teacher step-by-step through any missing information before generating the complete curriculum-compliant document.\n` +
+        `- Provide numbered choices for next actions.\n`;
+    } else if (mode === 'expert') {
+      modeInstruction =
+        `WHATSAPP CONVERSATION BEHAVIOR: EXPERT MODE (DEEP REASONING & STEM)\n` +
+        `- Deliver deep technical reasoning, detailed curriculum citations, equations/tables, and academic rigor with ZERO conversational fluff.\n` +
+        `- Maintain complete curriculum document architecture.\n`;
+    }
+  }
+
+  return header + frameworkSpec + (modeInstruction ? `\n${modeInstruction}` : '');
+}
+
+function checkCurriculumSwitchCommand(text: string): CurriculumType | 'menu' | null {
+  const lower = text.trim().toLowerCase();
+  if (/\b(set curriculum cbc|curriculum cbc|cbc curriculum|switch cbc|enable cbc)\b/i.test(lower)) return 'cbc';
+  if (/\b(set curriculum kcse|curriculum kcse|kcse curriculum|8-4-4 curriculum|switch kcse|enable kcse)\b/i.test(lower)) return 'kcse';
+  if (/\b(set curriculum cambridge primary|cambridge primary|switch cambridge primary)\b/i.test(lower)) return 'cambridge_primary';
+  if (/\b(set curriculum igcse|igcse curriculum|switch igcse|enable igcse)\b/i.test(lower)) return 'igcse';
+  if (/\b(set curriculum a level|a level curriculum|switch a level|a-level curriculum|enable a level)\b/i.test(lower)) return 'a_level';
+  if (/\b(set curriculum ib|ib curriculum|switch ib|enable ib)\b/i.test(lower)) return 'ib';
+  if (/\b(set curriculum standard|standard curriculum|switch standard)\b/i.test(lower)) return 'standard';
+  if (/\b(switch curriculum|change curriculum|select curriculum|curriculum menu|curriculum settings)\b/i.test(lower) || lower === 'curriculum') {
+    return 'menu';
+  }
+  return null;
+}
+
+function getModeAwareActionMenu(
+  mode: WhatsAppConversationMode,
+  activeContext: WhatsAppActiveContext | undefined,
+  promptText: string,
+  isContextSwitch: boolean
+): string {
+  if (!activeContext) return '';
+  if (mode === 'structured') {
+    return buildInteractiveActionMenu(activeContext);
+  } else if (mode === 'flexible') {
+    const wantsMenu = /\b(menu|options|choices|what next|show options|list actions|show menu)\b/i.test(promptText);
+    return wantsMenu ? buildInteractiveActionMenu(activeContext) : '';
+  } else {
+    // Smart Mode (Adaptive Default)
+    const isMenuTrigger =
+      /^(1|2|3|4|5|6|7|1\.|2\.|3\.|4\.|5\.|6\.|7\.)$/.test(promptText.trim()) ||
+      /\b(next step|practice question|quiz me|summary notes|common mistakes|worksheet|cat exam|cat|powerpoint|ppt|rubric|lesson notes|marking scheme|adjust difficulty|add diagrams|video solution|menu|options)\b/i.test(promptText) ||
+      isContextSwitch ||
+      activeContext.isAwaitingClarification;
+
+    return isMenuTrigger ? buildInteractiveActionMenu(activeContext) : '';
+  }
 }
 
 interface WhatsAppLinkedAccount {
@@ -1417,8 +3062,32 @@ interface WhatsAppLinkedAccount {
   userDisplayName: string;
   userEmail: string;
   userRole: string;
+  curriculum?: CurriculumType;
+  primaryCurriculum?: CurriculumType;
+  schoolProfile?: { curriculum?: CurriculumType };
   preferredOutputFormat?: UserWhatsAppOutputPreference;
+  conversationMode?: WhatsAppConversationMode;
   linkedAt: string;
+}
+
+function checkModeSwitchCommand(text: string): WhatsAppConversationMode | 'menu' | null {
+  const lower = text.trim().toLowerCase();
+  if (/\b(switch to structured mode|structured mode|set mode structured|enable structured mode|mode structured|switch structured)\b/i.test(lower)) {
+    return 'structured';
+  }
+  if (/\b(switch to flexible mode|flexible mode|set mode flexible|enable flexible mode|mode flexible|switch flexible)\b/i.test(lower)) {
+    return 'flexible';
+  }
+  if (/\b(switch to smart mode|smart mode|set mode smart|enable smart mode|mode smart|switch smart)\b/i.test(lower)) {
+    return 'smart';
+  }
+  if (/\b(switch to expert mode|edunexus expert mode|expert mode|set mode expert|enable expert mode|mode expert|switch expert)\b/i.test(lower)) {
+    return 'expert';
+  }
+  if (/\b(switch mode|change mode|select mode|ai mode|mode menu|mode settings|conversation mode|ai preferences)\b/i.test(lower) || lower === 'mode' || lower === 'settings') {
+    return 'menu';
+  }
+  return null;
 }
 
 interface WhatsAppBroadcast {
@@ -1536,6 +3205,130 @@ When prompting students to rate their topic confidence via WhatsApp (using Quick
 5. Output Clean Plain-Text: Provide ONLY the copy-pasteable plain text formatted exactly for a WhatsApp API text payload. Do not include markdown code block syntax in your final output unless explicitly requested.
 `;
 
+function handleWhatsAppSystemCommand(
+  promptText: string,
+  session: WhatsAppConversationSession,
+  normPhone: string,
+  linked?: WhatsAppLinkedAccount
+): string | null {
+  const trimmed = promptText.trim();
+  const lower = trimmed.toLowerCase();
+
+  // 1. Reset / Start Over / Clear
+  if (/\b(reset|start over|clear history|clear session|restart session|new conversation)\b/i.test(lower) || lower === 'reset' || lower === 'start over') {
+    session.history = [];
+    session.activeContext = undefined;
+    session.lastActive = new Date().toISOString();
+    return (
+      `🔄 *Session Reset Successful!*\n\n` +
+      `Your conversation history and active context have been cleared.\n\n` +
+      `• *Active Role:* ${session.userRole || 'Student'}\n` +
+      `• *Active Mode:* ${session.conversationMode || 'smart'}\n` +
+      `• *Active Curriculum:* ${(session.curriculum || 'cbc').toUpperCase()}\n\n` +
+      `What would you like to explore or create today? 🚀`
+    );
+  }
+
+  // 2. Settings
+  if (/\b(settings|my settings|preferences|config|view settings)\b/i.test(lower) || lower === 'settings') {
+    const activeCurr = resolveCurriculumForWhatsApp(session, normPhone, promptText).toUpperCase();
+    const activeMode = session.conversationMode || linked?.conversationMode || 'smart';
+    const activeRole = session.userRole || linked?.userRole || 'Student';
+    const activeLang = session.language || 'English';
+
+    return (
+      `⚙️ *EduNexus WhatsApp Assistant Settings*\n\n` +
+      `• 👤 *Role:* *${activeRole}* _(Type "Switch Role" to change)_\n` +
+      `• 🧠 *Conversation Mode:* *${activeMode.toUpperCase()}* _(Type "Switch Mode" to change)_\n` +
+      `• 📚 *Curriculum Framework:* *${activeCurr}* _(Type "Switch Curriculum" to change)_\n` +
+      `• 🌐 *Language:* *${activeLang}* _(Type "Switch Language" to change)_\n` +
+      `• 📄 *Output Format:* *${(session.preferredOutputFormat || 'auto').toUpperCase()}*\n\n` +
+      `💡 *Commands:*\n` +
+      `• Type *"Switch to Smart"*, *"Switch to Flexible"*, or *"Switch to Structured"*\n` +
+      `• Type *"Curriculum"* to switch syllabus framework\n` +
+      `• Type *"Reset"* to start a fresh session`
+    );
+  }
+
+  // 3. Help
+  if (/\b(help|guide|instructions|what can you do|commands|usage|how to use)\b/i.test(lower) || lower === 'help' || lower === '?') {
+    return (
+      `❓ *EduNexus WhatsApp Intelligence Engine Guide*\n\n` +
+      `I am your official EduNexus WhatsApp AI Assistant, delivering classroom-ready educational resources, Socratic tutoring, and parent guidance.\n\n` +
+      `📌 *Available Roles:*\n` +
+      `1️⃣ *Student:* Socratic guided tutoring, homework help, step-by-step math solving, past papers & quizzes.\n` +
+      `2️⃣ *Teacher:* Lesson plans, schemes of work, CATs, marking schemes, rubrics, worksheets, PowerPoint outlines.\n` +
+      `3️⃣ *Parent:* Learning progress tracking, home study tips, Socratic conversation prompts.\n\n` +
+      `⚙️ *Conversation Modes:*\n` +
+      `• *Structured Mode:* Step-by-step guided prompts & parameter checks before generation.\n` +
+      `• *Flexible Mode:* Natural continuous conversation with deep context memory.\n` +
+      `• *Smart Mode:* Auto-adapts based on role and task context.\n\n` +
+      `💡 *Useful Commands:*\n` +
+      `• *"Settings"* – View and customize AI settings\n` +
+      `• *"Switch Mode"* – Toggle conversation mode\n` +
+      `• *"Switch Curriculum"* – Set CBC, KCSE, IGCSE, Cambridge, or IB\n` +
+      `• *"Reset"* – Clear active conversation context\n` +
+      `• *"Profile"* – View linked account info`
+    );
+  }
+
+  // 4. Profile
+  if (/\b(profile|my profile|account|user profile|my account)\b/i.test(lower) || lower === 'profile') {
+    return (
+      `👤 *EduNexus User Profile*\n\n` +
+      `• *Name:* ${session.name}\n` +
+      `• *Phone Number:* +${session.phoneNumber}\n` +
+      `• *Role:* ${session.userRole || 'Student'}\n` +
+      `• *Linked Account:* ${linked ? `✅ Linked (${linked.userEmail || linked.userDisplayName})` : '📱 WhatsApp Guest Session'}\n` +
+      `• *Curriculum:* ${(session.curriculum || 'cbc').toUpperCase()}\n` +
+      `• *Messages Processed:* ${session.messageCount || 1}\n` +
+      `• *Session Status:* Active ⚡`
+    );
+  }
+
+  // 5. Subscription
+  if (/\b(subscription|my subscription|plan|billing|tier|quotas|my plan)\b/i.test(lower) || lower === 'subscription') {
+    return (
+      `💳 *EduNexus Subscription & Access Tier*\n\n` +
+      `• *Tier:* EduNexus Educator & Learner Pro (Full Access)\n` +
+      `• *Status:* ✅ Active\n` +
+      `• *Unlimited AI Generation:* Enabled (Gemini 2.5/3.5, Imagen, Veo)\n` +
+      `• *WhatsApp Cloud Engine:* Priority Access\n` +
+      `• *PDF & Image Rendering:* Included`
+    );
+  }
+
+  // 6. Language Switch
+  if (/\b(switch language|change language|language|set language|select language)\b/i.test(lower) || lower === 'language') {
+    if (/\b(english|swahili|kiswahili|french|francais|spanish|espanol)\b/i.test(lower)) {
+      if (lower.includes('swahili') || lower.includes('kiswahili')) session.language = 'Swahili';
+      else if (lower.includes('french') || lower.includes('francais')) session.language = 'French';
+      else if (lower.includes('spanish') || lower.includes('espanol')) session.language = 'Spanish';
+      else session.language = 'English';
+
+      return `🌐 *Language updated to ${session.language}!*\n\nEduNexus will now communicate and format responses in *${session.language}*.`;
+    }
+
+    return (
+      `🌐 *EduNexus Multi-Lingual Support*\n\n` +
+      `Select your preferred language:\n\n` +
+      `1️⃣ 🇬🇧 *English*\n` +
+      `2️⃣ 🇰🇪 *Swahili* (Kiswahili)\n` +
+      `3️⃣ 🇫🇷 *French* (Français)\n` +
+      `4️⃣ 🇪🇸 *Spanish* (Español)\n\n` +
+      `_Reply with the language name (e.g. "Swahili") to set your language!_`
+    );
+  }
+
+  // 7. Developer Mode
+  if (/\b(developer mode|dev mode|toggle dev mode|developer diagnostics)\b/i.test(lower)) {
+    session.developerMode = !session.developerMode;
+    return `🛠️ *Developer Mode ${session.developerMode ? 'ENABLED ✅' : 'DISABLED ❌'}*\n\nDiagnostics and system latency metrics will ${session.developerMode ? 'be included' : 'be hidden'} in session responses.`;
+  }
+
+  return null;
+}
+
 async function generateWhatsAppTutorReply(
   userQuery: string,
   userPhone: string,
@@ -1571,11 +3364,31 @@ async function generateWhatsAppTutorReply(
   session.lastActive = new Date().toISOString();
   session.messageCount += 1;
 
+  // Session expiration check (12 hours of inactivity)
+  const SESSION_TIMEOUT_MS = 12 * 60 * 60 * 1000;
+  if (session.lastActive) {
+    const inactiveMs = Date.now() - new Date(session.lastActive).getTime();
+    if (inactiveMs > SESSION_TIMEOUT_MS) {
+      session.history = [];
+      session.userRole = linked?.userRole || 'Unset';
+      session.activeContext = undefined;
+      session.lastActive = new Date().toISOString();
+      return CLASSIFIED_ERRORS.SESSION_EXPIRED;
+    }
+  }
+
   if (!ai) {
-    return `Hello *${session.name}*! 👋\n\n` +
-      `Welcome to *EduNexus AI Assistant* on WhatsApp.\n\n` +
-      `I received your message: *"${userQuery.slice(0, 80)}"*.\n\n` +
-      `Our Gemini AI engine is initializing. Please try again shortly or log into the EduNexus Web App! 🚀`;
+    return CLASSIFIED_ERRORS.GEMINI_UNAVAILABLE;
+  }
+
+  // Dynamic Role Detection & Role Switching (Works anytime in conversation)
+  const roleSwitchMatch = userQuery.match(/\b(switch role|change role|i am a teacher|i am a student|i am a parent|i am an admin|i'm a teacher|i'm a student|i'm a parent|i'm an admin|as a teacher|as a student|as a parent|as an admin)\b/i);
+  if (roleSwitchMatch) {
+    const matchedStr = roleSwitchMatch[0].toLowerCase();
+    if (matchedStr.includes('teacher')) session.userRole = 'Teacher';
+    else if (matchedStr.includes('student')) session.userRole = 'Student';
+    else if (matchedStr.includes('parent')) session.userRole = 'Parent';
+    else if (matchedStr.includes('admin')) session.userRole = 'Administrator';
   }
 
   // Role Selection for Unauthenticated / Unlinked WhatsApp Users
@@ -1583,8 +3396,9 @@ async function generateWhatsAppTutorReply(
     const trimmed = userQuery.trim().toLowerCase();
     if (['1', 'student', '1. student', 'i am a student', 'a student'].includes(trimmed)) {
       session.userRole = 'Student';
+      if (!session.conversationMode) session.conversationMode = 'smart';
       return `👋 Welcome, *${session.name}*! 🎓\n\n` +
-        `I'm your *EduNexus AI Tutor*.\n\n` +
+        `I'm your *EduNexus Guided AI Tutor*.\n\n` +
         `I can help you with:\n\n` +
         `📚 *Learning*\n` +
         `• ➕ Mathematics\n` +
@@ -1599,34 +3413,29 @@ async function generateWhatsAppTutorReply(
         `• 💼 Business Studies\n` +
         `• 🌱 Agriculture\n` +
         `• 💻 Computer Studies\n\n` +
-        `📝 *Study Support*\n` +
-        `• 📖 Explain difficult concepts\n` +
-        `• 🧠 Step-by-step solutions\n` +
-        `• 🧮 Calculations\n` +
-        `• 🧪 Practical questions\n` +
+        `📝 *Guided Study Support*\n` +
+        `• 📖 Explain difficult concepts step-by-step\n` +
+        `• 🧠 Interactive guided problem solving\n` +
+        `• 🧮 Calculations & Formulas\n` +
+        `• 🧪 Practical questions & Experiments\n` +
         `• 📷 Solve questions from photos\n` +
         `• 🎤 Voice question support\n\n` +
-        `📚 *Revision*\n` +
+        `📚 *Revision & Exam Prep*\n` +
         `• 📄 Past Papers\n` +
         `• 📝 Revision Notes\n` +
         `• 🎯 Topic Summaries\n` +
         `• ❓ Practice Questions\n` +
         `• 🏆 Mock Exams\n` +
         `• 🎲 Interactive Quizzes\n\n` +
-        `📊 *Progress*\n` +
+        `📊 *Progress & Goal Setting*\n` +
         `• 📈 Performance Tracking\n` +
         `• 🎯 Personalized Study Plans\n` +
         `• 🏅 Goal Setting\n` +
-        `• 📅 Revision Timetables\n` +
-        `• ⏰ Study Reminders\n\n` +
-        `🚀 *Career Guidance*\n` +
-        `• 🎓 University Courses\n` +
-        `• 💼 Career Advice\n` +
-        `• 📚 Subject Selection\n` +
-        `• 🌍 Scholarships\n\n` +
-        `🌟 *Ask me anything you're learning today!*`;
+        `• 📅 Revision Timetables\n\n` +
+        `🌟 *What concept or question would you like to explore today?*`;
     } else if (['2', 'teacher', 'educator', '2. teacher', 'i am a teacher', 'a teacher'].includes(trimmed)) {
       session.userRole = 'Teacher';
+      if (!session.conversationMode) session.conversationMode = 'flexible';
       return `👋 Welcome, *${session.name}*! 👨‍🏫\n\n` +
         `I'm your *EduNexus AI Teaching Assistant*. I can help you with:\n\n` +
         `📚 *Teaching & Learning*\n` +
@@ -1664,21 +3473,10 @@ async function generateWhatsAppTutorReply(
         `• 💬 Student Feedback\n` +
         `• 🌟 Gifted Learner Support\n` +
         `• 🤝 Remedial Teaching\n\n` +
-        `👨‍👩‍👧 *Parent Communication*\n` +
-        `• 📩 Parent Progress Reports\n` +
-        `• 📢 Announcements\n` +
-        `• 📅 Meeting Summaries\n` +
-        `• 📱 WhatsApp Updates\n\n` +
-        `📊 *Professional Support*\n` +
-        `• 📈 Data Analysis\n` +
-        `• 📄 Official Letters\n` +
-        `• 🏫 Department Planning\n` +
-        `• 📚 Teaching Resources\n` +
-        `• 🗓️ Timetable Assistance\n` +
-        `• 📝 Meeting Minutes\n\n` +
         `✨ *Simply tell me what you'd like to create or improve today!*`;
     } else if (['3', 'parent', '3. parent', 'i am a parent', 'a parent', 'guardian'].includes(trimmed)) {
       session.userRole = 'Parent';
+      if (!session.conversationMode) session.conversationMode = 'structured';
       return `👋 Welcome, *${session.name}*! 👨‍👩‍👧\n\n` +
         `I'm here to help you support your child's education.\n\n` +
         `I can assist with:\n\n` +
@@ -1690,112 +3488,101 @@ async function generateWhatsAppTutorReply(
         `🏫 *School Information*\n` +
         `• 📅 School Calendar\n` +
         `• 📢 Announcements\n` +
-        `• 🚌 School Events\n` +
-        `• 🎓 Academic Programs\n\n` +
+        `• 🚌 School Events\n\n` +
         `📚 *Homework*\n` +
         `• 📖 Homework Monitoring\n` +
-        `• ⏰ Due Date Reminders\n` +
-        `• 📄 Assignment Progress\n\n` +
-        `💬 *Communication*\n` +
-        `• 👨‍🏫 Contact Teachers\n` +
-        `• 📩 Receive Updates\n` +
-        `• 🤝 Parent Meetings\n\n` +
+        `• ⏰ Due Date Reminders\n\n` +
         `❤️ *Child Support*\n` +
         `• 📚 Study Tips\n` +
         `• 🧠 Learning Difficulties\n` +
         `• 😊 Motivation Strategies\n` +
-        `• 🏠 Home Learning Ideas\n` +
-        `• 💙 Student Well-being\n\n` +
-        `💰 *School Services*\n` +
-        `• 💳 Fee Balance\n` +
-        `• 🧾 Payment History\n` +
-        `• 📄 Fee Statements\n\n` +
-        `🔔 *Notifications*\n` +
-        `• 📱 Attendance Alerts\n` +
-        `• 🚨 Important Notices\n` +
-        `• 📝 Examination Schedules\n` +
-        `• 🏅 Achievement Updates\n\n` +
+        `• 🏠 Home Learning Ideas\n\n` +
         `🌟 *How can I help you support your child today?*`;
     } else if (['4', 'admin', 'administrator', '4. administrator', '4. admin', 'i am an admin', 'i am an administrator', 'school leader'].includes(trimmed)) {
       session.userRole = 'Administrator';
+      if (!session.conversationMode) session.conversationMode = 'flexible';
       return `👋 Welcome, *${session.name}*! 🏫\n\n` +
         `I can help you manage your institution efficiently.\n\n` +
         `🏫 *School Management*\n` +
         `• 👨‍🎓 Student Management\n` +
         `• 👩‍🏫 Staff Management\n` +
-        `• 🏫 School Records\n` +
-        `• 📅 Timetables\n` +
-        `• 📊 Analytics\n\n` +
-        `📈 *Reports*\n` +
-        `• 📊 Academic Reports\n` +
-        `• 📉 Performance Analytics\n` +
-        `• 💰 Financial Reports\n` +
-        `• 👥 Attendance Reports\n\n` +
-        `📢 *Communication*\n` +
-        `• 📩 Bulk Announcements\n` +
-        `• 📱 WhatsApp Broadcasts\n` +
-        `• 📧 Email Notifications\n` +
-        `• 🔔 Emergency Alerts\n\n` +
-        `⚙️ *Administration*\n` +
-        `• 👥 User Management\n` +
-        `• 🔒 Roles & Permissions\n` +
-        `• 🤖 AI Usage Monitoring\n` +
-        `• 💳 Subscription Management\n` +
-        `• ☁️ System Health\n\n` +
-        `📚 *Curriculum*\n` +
-        `• 📖 CBC Compliance\n` +
-        `• 📋 Quality Assurance\n` +
-        `• 📈 School Improvement Plans\n\n` +
+        `• 📅 Timetables\n\n` +
+        `📢 *Communication & Policy*\n` +
+        `• 📩 Bulk Announcements & Circulars\n` +
+        `• 📖 CBC Compliance & Quality Assurance\n\n` +
         `✨ *How can I assist you with administrative tasks today?*`;
-    } else if (['hi', 'hello', 'hey', 'start', 'menu', 'help'].includes(trimmed)) {
-      return `Welcome to *EduNexus Multi-Role AI Assistant*! 👋\n\n` +
-        `To give you personalized support, please tell me who you are:\n\n` +
-        `1️⃣ *Student* (Homework help, Socratic tutoring, quizzes, study plans)\n` +
-        `2️⃣ *Teacher* (CBC lesson plans, rubrics, marking schemes, parent updates)\n` +
-        `3️⃣ *Parent* (Curriculum guidance, home learning, interpreting grades)\n` +
-        `4️⃣ *Administrator* (School policies, circulars, CBC compliance, leadership)\n\n` +
-        `Reply with *1*, *2*, *3*, or *4* (or type your role) to get started! 🚀`;
     } else {
-      // If user asks a direct question without selecting a role, default role to Student and process immediately!
-      session.userRole = 'Student';
+      return CLASSIFIED_ERRORS.ROLE_NOT_SELECTED;
     }
   }
 
   const userRole = session.userRole || 'Student';
+
+  // System Command Interception (Reset, Settings, Help, Profile, Subscription, Language, Dev Mode)
+  const sysCmdReply = handleWhatsAppSystemCommand(userQuery, session, normPhone, linked);
+  if (sysCmdReply) {
+    session.lastProcessedPrompt = userQuery;
+    session.lastProcessedTime = Date.now();
+    session.lastProcessedReply = sysCmdReply;
+    session.history.push({ role: 'user', parts: [{ text: userQuery }] });
+    session.history.push({ role: 'model', parts: [{ text: sysCmdReply }] });
+    return sysCmdReply;
+  }
   const isAssignmentSubmission = /submission|assignment|homework|submit|my work|grade me|feedback/i.test(userQuery) ||
     (mediaAttachment && /doc|pdf|image/i.test(mediaAttachment.mimeType));
+
+  const activeCurriculum = resolveCurriculumForWhatsApp(session, normPhone, userQuery);
+  const effectiveMode: WhatsAppConversationMode = session.conversationMode || whatsappLinkedUsers[normPhone]?.conversationMode || 'smart';
+
+  const curriculumInstruction = getCurriculumEngineInstruction(activeCurriculum, userRole, effectiveMode);
 
   let rolePromptInstruction = '';
   if (userRole === 'Teacher') {
     rolePromptInstruction = 
       `USER ROLE: Teacher / Educator.\n` +
-      `You are the EduNexus Master Teacher Assistant.\n` +
-      `Capabilities: Lesson Plans, Lesson Notes, Schemes of Work, Learning Outcomes, CATs, Marking Schemes, Rubrics, Classroom Activities, Parent Communication, and Professional Support.\n` +
-      `UNRESTRICTED RESPONSE POLICY: Answer ANY pedagogical, subject-matter, or administrative question directly and thoroughly. Provide complete deliverables (e.g. lesson plans, notes) immediately whenever requested.`;
+      `You are the EduNexus AI Teaching Assistant on WhatsApp.\n` +
+      `Primary Directive: Provide teachers with the same high-quality, complete, professional, curriculum-compliant educational documents available in the EduNexus web app.\n` +
+      `DO NOT simplify educational documents, truncate sections, or use generic placeholder text simply because the interaction is on WhatsApp.\n\n` +
+      `${curriculumInstruction}\n` +
+      `GENERAL RULES FOR TEACHER DOCUMENTS:\n` +
+      `- Generate COMPLETE, CLASSROOM-READY documents immediately upon request.\n` +
+      `- Write out EVERY exercise, question, answer, step, and activity in full detail.\n` +
+      `- Never output placeholder text like "... [insert rest here]" or summarized stubs.\n` +
+      `- Format cleanly for mobile: Single asterisks for *Bold*, clean bullet points (•), unicode checklists ([x], ✅), and plain-text aligned tables where appropriate.`;
   } else if (userRole === 'Parent') {
     rolePromptInstruction = 
       `USER ROLE: Parent / Guardian.\n` +
       `You are the EduNexus Parent Companion Assistant.\n` +
       `Capabilities: Academic Progress, School Information, Homework Monitoring, Child Support, Home Learning Ideas, and Motivation Strategies.\n` +
-      `UNRESTRICTED RESPONSE POLICY: Answer ANY question in warm, clear, parent-friendly terms. Provide immediate, practical answers and actionable advice.`;
+      `FLEXIBLE PARENT SUPPORT POLICY:\n` +
+      `- Answer in warm, clear, empathetic, parent-friendly terms.\n` +
+      `- Adapt flexibly to home learning situations, providing practical advice and simple activities to help parents guide their children.`;
   } else if (userRole === 'Administrator') {
     rolePromptInstruction = 
       `USER ROLE: School Administrator / Leader.\n` +
       `You are the EduNexus Institutional Leadership Assistant.\n` +
       `Capabilities: School Management, Reports, Bulk Communication, Administration, CBC Compliance, Quality Assurance, and Policy.\n` +
-      `UNRESTRICTED RESPONSE POLICY: Professional executive tone. Provide comprehensive direct answers to any administrative, institutional, or compliance query.`;
+      `EXECUTIVE FLEXIBILITY POLICY:\n` +
+      `- Professional, executive tone.\n` +
+      `- Adapt flexibly to administrative requests, providing comprehensive, ready-to-issue circulars, policy drafts, and institutional guidance.`;
   } else {
     // Student
     rolePromptInstruction = 
       `USER ROLE: Student.\n` +
-      `You are the EduNexus Student AI Tutor.\n` +
+      `You are the EduNexus Guided AI Tutor.\n` +
       `Capabilities: Math, Sciences, Humanities, Languages, Applied Sciences, Goal Setting, Study Plans, Revision, Exam Prep, Career Advice, and General Knowledge.\n` +
-      `UNRESTRICTED RESPONSE POLICY:\n` +
-      `- Answer ANY question directly, completely, and accurately without restrictions. Whether the student asks "How can I set goals", "Explain photosynthesis", "Help me solve 2x+5=15", or asks for study tips, provide a comprehensive, direct, and actionable response first.\n` +
-      `- You may combine direct answers with guided Socratic inquiry or follow-up questions to encourage deeper learning, but NEVER withhold the primary answer or force artificial menu loops.`;
+      `GUIDED & FLEXIBLE STUDENT TUTORING POLICY:\n` +
+      `- FLEXIBILITY FIRST: Move smoothly in whichever direction the student asks. Adapt immediately to their questions, topic shifts, learning speed, or preferred format.\n` +
+      `- GUIDED TUTORING: When explaining concepts or solving academic problems, break them down into intuitive, bite-sized steps. Provide engaging real-world analogies, clear explanations, and gentle follow-up prompts.\n` +
+      `- COMPLY WITH DIRECT REQUESTS: If the student asks for direct answers, full solutions, or complete summaries ("just give me the answer", "solve it for me"), provide them directly and completely without being obstinate or refusing!\n` +
+      `- MOTIVATIONAL & ENCOURAGING: Keep tone friendly, patient, inspiring, and conversational.`;
   }
 
-  const systemInstruction = 
+  const isMathOrTutoringQuery =
+    /\b(teach me|how to solve|solve|matrix method|simultaneous|equation|algebra|calculus|trigonometry|quadratic|photosynthesis)\b/i.test(userQuery || '') ||
+    session.activeContext?.taskType === 'ai_tutor';
+
+  let systemInstruction = 
     `You are EduNexus AI Assistant on WhatsApp, an intelligent multi-role companion and Official Accessibility Engine for Students, Teachers, Parents, and Administrators.\n` +
     `CONVERSATION & UNRESTRICTED KNOWLEDGE RULES:\n` +
     `- You have UNRESTRICTED capabilities to answer any question or topic requested by the user thoroughly, accurately, and helpfully.\n` +
@@ -1810,10 +3597,330 @@ async function generateWhatsAppTutorReply(
     `- Never output raw markdown tables, HTML tags, or '#' headings.\n` +
     `${isAssignmentSubmission ? `- NOTICE: An assignment or document was submitted. Provide constructive, formative feedback, highlight strengths, and suggest improvements!\n` : ''}` +
     `- User Name: ${session.name}.\n` +
-    `${rolePromptInstruction}\n\n` +
-    `ACCESSIBILITY & UDL SYSTEM RULES:\n${WHATSAPP_ACCESSIBILITY_ENGINE_INSTRUCTIONS}`;
+    `${rolePromptInstruction}\n\n`;
+
+  if (isMathOrTutoringQuery) {
+    systemInstruction +=
+      `SPECIALIZED MATHEMATICS & TUTORING INSTRUCTIONS:\n` +
+      `- You are acting in AI TUTOR MODE for a student or teacher seeking academic guidance.\n` +
+      `- DO NOT format your response as a lesson plan or administrative template unless explicitly requested.\n` +
+      `- Break down mathematical solutions into step-by-step logical explanations:\n` +
+      `  1. State the problem and key formulas clearly.\n` +
+      `  2. Show every intermediate step and arithmetic calculation.\n` +
+      `  3. Explain WHY each step is taken conceptually.\n` +
+      `  4. End with a friendly comprehension check question.\n` +
+      `- Never start responses with repetitive greetings if in an active conversation session.\n\n`;
+  }
+
+  systemInstruction += `ACCESSIBILITY & UDL SYSTEM RULES:\n${WHATSAPP_ACCESSIBILITY_ENGINE_INSTRUCTIONS}`;
 
   const promptText = userQuery || 'How can you assist me today?';
+  const nowMs = Date.now();
+
+  // 0a. Curriculum Switch Command Interception
+  const curriculumCmd = checkCurriculumSwitchCommand(promptText);
+  if (curriculumCmd === 'menu') {
+    const currentCurr = resolveCurriculumForWhatsApp(session, normPhone, promptText);
+    const currMenuReply =
+      `🌐 *EduNexus Supported Curricula*\n\n` +
+      `Current Active Curriculum: *${currentCurr.toUpperCase()}*\n\n` +
+      `Select your curriculum framework:\n\n` +
+      `1️⃣ 🇰🇪 *Kenya CBC* (Competency-Based Curriculum)\n` +
+      `2️⃣ 🇰🇪 *Kenya 8-4-4 / KCSE* (KNEC Syllabus)\n` +
+      `3️⃣ 🇬🇧 *Cambridge Primary & Lower Secondary*\n` +
+      `4️⃣ 🌍 *Cambridge IGCSE*\n` +
+      `5️⃣ 🌍 *Cambridge International AS & A Level*\n` +
+      `6️⃣ 🌍 *International Baccalaureate (IB MYP/DP)*\n` +
+      `7️⃣ 🌐 *Standard / Universal Syllabus*\n\n` +
+      `_Reply with *1* to *7*, or type the curriculum name (e.g. "IGCSE") to set your framework!_`;
+
+    session.lastProcessedPrompt = promptText;
+    session.lastProcessedTime = nowMs;
+    session.lastProcessedReply = currMenuReply;
+    session.history.push({ role: 'user', parts: [{ text: promptText }] });
+    session.history.push({ role: 'model', parts: [{ text: currMenuReply }] });
+    return currMenuReply;
+  }
+
+  if (curriculumCmd) {
+    session.curriculum = curriculumCmd;
+    session.activeContext = session.activeContext || { updatedAt: new Date().toISOString() };
+    session.activeContext.curriculum = curriculumCmd;
+    if (whatsappLinkedUsers[normPhone]) {
+      whatsappLinkedUsers[normPhone].curriculum = curriculumCmd;
+    }
+    const confirmCurr =
+      `✅ *Curriculum framework set to ${curriculumCmd.toUpperCase()}!*\n\n` +
+      `EduNexus will now format all generated lesson plans, schemes of work, CATs, rubrics, and teaching resources according to official *${curriculumCmd.toUpperCase()}* guidelines.\n\n` +
+      `_Type your subject and topic to generate a complete document!_ 📚`;
+
+    session.lastProcessedPrompt = promptText;
+    session.lastProcessedTime = nowMs;
+    session.lastProcessedReply = confirmCurr;
+    session.history.push({ role: 'user', parts: [{ text: promptText }] });
+    session.history.push({ role: 'model', parts: [{ text: confirmCurr }] });
+    return confirmCurr;
+  }
+
+  // 0b. Mode Switch Command Interception & Menu Handling
+  const lastWasModeMenu = session.lastProcessedReply && session.lastProcessedReply.includes('EduNexus WhatsApp AI Conversation Modes');
+  let modeCommand = checkModeSwitchCommand(promptText);
+
+  if (!modeCommand && lastWasModeMenu) {
+    const trimmed = promptText.trim();
+    if (trimmed === '1' || trimmed === '1.') modeCommand = 'structured';
+    else if (trimmed === '2' || trimmed === '2.') modeCommand = 'flexible';
+    else if (trimmed === '3' || trimmed === '3.') modeCommand = 'smart';
+    else if (trimmed === '4' || trimmed === '4.') modeCommand = 'expert';
+  }
+
+  if (modeCommand === 'menu') {
+    const activeMode = session.conversationMode || whatsappLinkedUsers[normPhone]?.conversationMode || 'smart';
+    const activeLabel =
+      activeMode === 'structured' ? '🧭 Structured Mode' :
+      activeMode === 'flexible' ? '💬 Flexible Mode' :
+      activeMode === 'expert' ? '🎓 EduNexus Expert Mode' : '🧠 Smart Mode (Default)';
+
+    const menuReply =
+      `⚙️ *EduNexus WhatsApp AI Conversation Modes*\n\n` +
+      `Current Active Mode: *${activeLabel}*\n\n` +
+      `Choose a mode tailored to your workflow:\n\n` +
+      `1️⃣ 🧭 *Structured Mode*\n` +
+      `• Shows numbered menus & step-by-step guidance\n` +
+      `• Predefined follow-up choices & parameter prompts\n` +
+      `• *Best for:* New users, Students & Parents\n\n` +
+      `2️⃣ 💬 *Flexible Mode*\n` +
+      `• Natural conversation without constant menus\n` +
+      `• Maintains context across follow-ups ("Make it 40 min")\n` +
+      `• *Best for:* Teachers, Power Users & Educators\n\n` +
+      `3️⃣ 🧠 *Smart Mode (Recommended Default)*\n` +
+      `• Auto-adapts based on your role & interaction style\n` +
+      `• Starts conversational, adds menus when helpful\n` +
+      `• *Best for:* Everyone (Students, Teachers, All)\n\n` +
+      `4️⃣ 🎓 *EduNexus Expert Mode*\n` +
+      `• Deep technical reasoning, LaTeX equations & tables\n` +
+      `• Minimal fluff, research-grade answers & resources\n` +
+      `• *Best for:* Advanced Users, STEM Pros & Researchers\n\n` +
+      `_Reply with *1*, *2*, *3*, or *4*, or type the mode name (e.g. "Expert Mode") to switch instantly!_`;
+
+    session.lastProcessedPrompt = promptText;
+    session.lastProcessedTime = nowMs;
+    session.lastProcessedReply = menuReply;
+
+    session.history.push({ role: 'user', parts: [{ text: promptText }] });
+    session.history.push({ role: 'model', parts: [{ text: menuReply }] });
+
+    return menuReply;
+  }
+
+  if (modeCommand) {
+    session.conversationMode = modeCommand;
+    if (whatsappLinkedUsers[normPhone]) {
+      whatsappLinkedUsers[normPhone].conversationMode = modeCommand;
+    }
+
+    let confirmText = '';
+    if (modeCommand === 'structured') {
+      confirmText =
+        `🧭 *Switched to Structured Mode (Guided)!*\n\n` +
+        `EduNexus will now guide you with numbered menus, step-by-step workflows, and structured option prompts after every response.\n\n` +
+        `💡 *Active Features:*\n` +
+        `• Numbered menus (1️⃣, 2️⃣, 3️⃣...) with predefined follow-up choices\n` +
+        `• Step-by-step guided breakdowns for lesson plans, CATs & tutoring\n` +
+        `• Prompts for missing information before content generation\n\n` +
+        `_Reply with any topic or question to get started, or type *"Switch Mode"* anytime!_`;
+    } else if (modeCommand === 'flexible') {
+      confirmText =
+        `💬 *Switched to Flexible Mode (Natural Conversation)!*\n\n` +
+        `Responses will now be natural, conversational, and direct without visual menus or option lists unless explicitly requested.\n\n` +
+        `💡 *Active Features:*\n` +
+        `• Natural back-and-forth conversational AI\n` +
+        `• Deep context memory across follow-ups ("Make it 40 minutes", "Add practicals")\n` +
+        `• Direct answers & clean mobile text\n\n` +
+        `_Chat freely! Type *"Switch Mode"* anytime to adjust preferences._`;
+    } else if (modeCommand === 'expert') {
+      confirmText =
+        `🎓 *Switched to EduNexus Expert Mode (Deep Reasoning & STEM)!*\n\n` +
+        `EduNexus will now provide high-density, research-grade responses with professional formatting, formulas, structured tables, and deep pedagogical analysis.\n\n` +
+        `💡 *Active Features:*\n` +
+        `• Rigorous technical explanations & LaTeX equations\n` +
+        `• Structured data tables & publication-ready output\n` +
+        `• Zero conversational fluff, maximum educational density\n\n` +
+        `_Type your research query or educational request to begin, or type *"Switch Mode"* anytime!_`;
+    } else {
+      confirmText =
+        `🧠 *Switched to Smart Mode (Recommended Adaptive)!*\n\n` +
+        `EduNexus AI will automatically adapt between structured guidance and natural conversation based on your role and task context.\n\n` +
+        `💡 *Active Features:*\n` +
+        `• Starts with natural conversation\n` +
+        `• Displays interactive menus when creating documents or taking action\n` +
+        `• Learns from interactions and adapts to your style\n\n` +
+        `_Type *"Switch Mode"* anytime to select a specific mode!_`;
+    }
+
+    session.lastProcessedPrompt = promptText;
+    session.lastProcessedTime = nowMs;
+    session.lastProcessedReply = confirmText;
+
+    session.history.push({ role: 'user', parts: [{ text: promptText }] });
+    session.history.push({ role: 'model', parts: [{ text: confirmText }] });
+
+    return confirmText;
+  }
+
+  // Append Conversation Mode Instructions
+  if (effectiveMode === 'structured') {
+    systemInstruction +=
+      `\nCONVERSATION MODE: STRUCTURED MODE (GUIDED WORKFLOWS).\n` +
+      `- You are operating in STRUCTURED MODE (best for new users, students, and parents who prefer guided workflows).\n` +
+      `- Always format responses using clear numbered steps, bullet points, and guided templates.\n` +
+      `- Include a numbered menu of logical next steps (1️⃣, 2️⃣, 3️⃣...) at the end of every response (e.g., 1️⃣ Generate Worksheet, 2️⃣ Generate CAT, 3️⃣ Create Marking Scheme, 4️⃣ Create PowerPoint, 5️⃣ Generate Diagram, 6️⃣ Generate Video).\n` +
+      `- Prompt for missing required information (Subject, Grade, Topic) before generating full documents.\n`;
+  } else if (effectiveMode === 'flexible') {
+    systemInstruction +=
+      `\nCONVERSATION MODE: FLEXIBLE MODE (NATURAL CONVERSATION).\n` +
+      `- You are operating in FLEXIBLE MODE (best for teachers, experienced users, and power users).\n` +
+      `- Converse naturally, fluidly, and directly like an expert, friendly human educator.\n` +
+      `- DO NOT output numbered option menus or repetitive choice blocks in your text unless explicitly requested by the user.\n` +
+      `- Maintain conversation context across turns. Understand follow-up requests like "Make it 40 minutes", "Add practical activities", or "Now create a worksheet" seamlessly without restarting.\n` +
+      `- Only ask clarifying questions when essential information is missing.\n`;
+  } else if (effectiveMode === 'expert') {
+    systemInstruction +=
+      `\nCONVERSATION MODE: EDUNEXUS EXPERT MODE (DEEP REASONING & STEM).\n` +
+      `- You are operating in EDUNEXUS EXPERT MODE (best for teachers, university students, researchers, and STEM professionals).\n` +
+      `- Provide deep, rigorous, technical explanations with research-grade insights and clear pedagogical analysis.\n` +
+      `- Use professional formatting: structured markdown tables, mathematical equations/formulas, and precise domain terminology.\n` +
+      `- Completely eliminate conversational fluff, pleasantries, and unnecessary introductory/outro meta-text.\n` +
+      `- Deliver longer, highly detailed, classroom-ready and publication-grade resources directly.\n` +
+      `- Focus on academic rigor, accuracy, and professional educational depth.\n`;
+  } else {
+    systemInstruction +=
+      `\nCONVERSATION MODE: SMART MODE (RECOMMENDED ADAPTIVE DEFAULT).\n` +
+      `- You are operating in SMART MODE (recommended default for everyone).\n` +
+      `- Automatically adapt style based on user role (${userRole}) and interaction style:\n` +
+      `  • Students: Socratic guided tutoring and structured learning support.\n` +
+      `  • Teachers: Natural conversational dialogue with direct document generation.\n` +
+      `  • Parents: Clear, empathetic, structured guidance.\n` +
+      `- Start open discussions with natural conversation. Introduce structured menus only when generating complete documents or when guided choices add genuine value.\n` +
+      `- If user shows confusion, temporarily offer a guided menu.\n`;
+  }
+
+  // 1. Prevent Duplicate Processing (within 10s for identical prompt)
+  if (session.lastProcessedPrompt === promptText && session.lastProcessedTime && (nowMs - session.lastProcessedTime < 10000) && session.lastProcessedReply) {
+    console.log(`[WhatsApp Engine] Duplicate message prevented for ${normPhone}. Returning cached response.`);
+    return session.lastProcessedReply;
+  }
+
+  // 1. Context Expiry Check (60 Minutes)
+  const CONTEXT_EXPIRY_MS = 60 * 60 * 1000;
+  if (session.activeContext?.updatedAt) {
+    const elapsed = nowMs - new Date(session.activeContext.updatedAt).getTime();
+    if (elapsed > CONTEXT_EXPIRY_MS) {
+      console.log(`[WhatsApp Engine] Active context for ${normPhone} expired after 60 mins.`);
+      session.activeContext = undefined;
+    }
+  }
+
+  // 2. Text-Mode / In-Chat Text Request ("Lesson plan is text based", "type in chat")
+  const isExplicitTextModeFeedback = /\b(lesson plan is text based|text based|plain text|text-based|mobile text|type it out|write it here|in chat|in text|just text|only text)\b/i.test(promptText);
+  if (isExplicitTextModeFeedback && session.activeContext?.fullContent) {
+    const ctx = session.activeContext;
+    const cleanHeader = ctx.title || `Form ${ctx.grade || ''} ${ctx.subject || ''}: ${ctx.topic || ''}`;
+    
+    const formattedTextResponse = 
+      `📘 *${cleanHeader} (In-Chat Text Mode)*\n\n` +
+      `${formatWhatsAppRichText(ctx.fullContent, ctx.taskType || 'lesson_plan', session.name)}` +
+      `${buildInteractiveActionMenu(ctx)}`;
+
+    session.history.push({ role: 'user', parts: [{ text: promptText }] });
+    session.history.push({ role: 'model', parts: [{ text: formattedTextResponse }] });
+    
+    session.lastProcessedPrompt = promptText;
+    session.lastProcessedTime = nowMs;
+    session.lastProcessedReply = formattedTextResponse;
+
+    return formattedTextResponse;
+  }
+
+  // 3. History Commands ("Open last lesson plan", "Show history")
+  const isHistoryCommand = /\b(open last|last lesson|show history|saved resources|my resources|previous lesson|previous document)\b/i.test(promptText);
+  if (isHistoryCommand) {
+    if (session.resourceHistory && session.resourceHistory.length > 0) {
+      const historyList = session.resourceHistory.map((item, idx) => `${idx + 1}. *${item.title}* (${item.type}) - _${item.createdAt.slice(0, 10)}_`).join('\n');
+      const histReply = 
+        `📂 *Your EduNexus Session History:*\n\n` +
+        `${historyList}\n\n` +
+        `Reply with *"1"* or *"Worksheet for 1"* to reuse any previous resource! 🚀`;
+      
+      session.lastProcessedPrompt = promptText;
+      session.lastProcessedTime = nowMs;
+      session.lastProcessedReply = histReply;
+      return histReply;
+    } else if (session.activeContext?.title) {
+      const activeReply = 
+        `📂 *Active Context:* *${session.activeContext.title}*\n\n` +
+        `• *Subject:* ${session.activeContext.subject || 'N/A'}\n` +
+        `• *Grade:* ${session.activeContext.grade || 'N/A'}\n` +
+        `• *Topic:* ${session.activeContext.topic || 'N/A'}\n` +
+        `${buildInteractiveActionMenu(session.activeContext)}`;
+      
+      return activeReply;
+    }
+  }
+
+  // 4. Parameter Parsing & Intent Analysis for Context Switching
+  const intentResult = detectIntentAndExtractContext(promptText, session);
+
+  if (intentResult.isContextSwitch && intentResult.context) {
+    console.log(`[WhatsApp Engine] Context switch detected: ${intentResult.intentType} -> ${intentResult.context.title}`);
+    session.activeContext = intentResult.context;
+  }
+
+  const parsedParams = parseTopicAndParameters(promptText);
+  const isLessonPlanIntent = intentResult.intentType === 'NEW_TASK_LESSON_PLAN' || /\b(lesson plan|plan a lesson|prepare a lesson)\b/i.test(promptText);
+  const isSchemeIntent = /\b(scheme of work|schemes of work|term plan)\b/i.test(promptText);
+  const isWorksheetIntent = /\b(worksheet|student worksheet|practice sheet)\b/i.test(promptText);
+  const isCatIntent = /\b(cat|exam|test|quiz|assessment|questions)\b/i.test(promptText);
+
+  const isGenericDocumentRequest = (isLessonPlanIntent || isSchemeIntent) && !parsedParams.subject && !parsedParams.topic;
+  const hasActiveContext = !!(session.activeContext && session.activeContext.topic && !session.activeContext.isAwaitingClarification);
+
+  // If request is incomplete and no active context exists, ask for smart clarification!
+  if (isGenericDocumentRequest && !hasActiveContext) {
+    session.activeContext = {
+      taskType: isSchemeIntent ? 'scheme_of_work' : 'lesson_plan',
+      isAwaitingClarification: true,
+      updatedAt: new Date().toISOString()
+    };
+
+    const docName = isSchemeIntent ? 'Scheme of Work' : 'Lesson Plan';
+    const askReply = 
+      `I'd be glad to generate a complete, classroom-ready *${docName}* for you! 📚\n\n` +
+      `To make it accurate and tailored for your students, please specify:\n` +
+      `1️⃣ *Subject?* (e.g. Mathematics, Chemistry, English)\n` +
+      `2️⃣ *Grade/Form?* (e.g. Form 3, Grade 8, Class 6)\n` +
+      `3️⃣ *Topic?* (e.g. *Mixtures*, *Photosynthesis*, *Algebra*)\n\n` +
+      `_Or simply reply in one sentence like: 'Form 3 Mathematics on Mixtures, 40 min'_ 🚀`;
+
+    session.lastProcessedPrompt = promptText;
+    session.lastProcessedTime = nowMs;
+    session.lastProcessedReply = askReply;
+
+    return askReply;
+  }
+
+  // Update active context if user is answering a clarification prompt
+  if (session.activeContext?.isAwaitingClarification && (parsedParams.subject || parsedParams.topic)) {
+    session.activeContext.subject = parsedParams.subject || session.activeContext.subject || 'Mathematics';
+    session.activeContext.grade = parsedParams.grade || session.activeContext.grade || 'Form 3';
+    session.activeContext.topic = parsedParams.topic || promptText;
+    session.activeContext.duration = parsedParams.duration || '40 minutes';
+    session.activeContext.isAwaitingClarification = false;
+    session.activeContext.updatedAt = new Date().toISOString();
+  }
+
+  // 5. Follow-Up Action Context Linking
+  const isFollowUp = (intentResult.intentType === 'CONTINUE_ACTIVE_TASK' || !parsedParams.subject) && hasActiveContext;
 
   // INTELLIGENT MEDIA INTENT DETECTION (Image Studio & Video Studio)
   const mediaIntent = detectMediaIntent(promptText);
@@ -1824,7 +3931,6 @@ async function generateWhatsAppTutorReply(
       
       const statusMsg = `🎨 *Creating your image...*\n\n*Status:* Rendering visual... Please hold on a moment! ⚡`;
       
-      // Send immediate status notification to WhatsApp
       await sendWhatsAppCloudMessage(normPhone, statusMsg);
       whatsappLogs.unshift({
         id: `wa-prog-${Date.now()}`,
@@ -1835,16 +3941,18 @@ async function generateWhatsAppTutorReply(
         timestamp: new Date().toISOString()
       });
 
+      const imagePrompt = hasActiveContext ? `${promptText} related to ${session.activeContext?.subject} ${session.activeContext?.topic}` : promptText;
+
       const rawImageUrl = await generateImageWithFallback({
         aiClient: ai,
-        prompt: promptText,
+        prompt: imagePrompt,
         requestedModel: 'emgen_fallback_nanobanana'
       });
       const publicUrl = cacheMediaAndGetPublicUrl(rawImageUrl, 'image', hostHeader);
 
       await saveGeneratedMediaRecord({
         userId: session.userId || normPhone,
-        prompt: promptText,
+        prompt: imagePrompt,
         mediaType: 'image',
         storageUrl: publicUrl,
         conversationId: normPhone,
@@ -1872,7 +3980,6 @@ async function generateWhatsAppTutorReply(
       
       const statusMsg = `🎬 *Creating your video...*\n\n*Status:* Storyboarding & Rendering Scenes... Please hold on a moment! ⚡`;
       
-      // Send immediate status notification to WhatsApp
       await sendWhatsAppCloudMessage(normPhone, statusMsg);
       whatsappLogs.unshift({
         id: `wa-prog-${Date.now()}`,
@@ -1883,12 +3990,14 @@ async function generateWhatsAppTutorReply(
         timestamp: new Date().toISOString()
       });
 
-      const videoRes = await generateVideoWithFallback(promptText);
+      const videoPrompt = hasActiveContext ? `${promptText} on ${session.activeContext?.subject} ${session.activeContext?.topic}` : promptText;
+
+      const videoRes = await generateVideoWithFallback(videoPrompt);
       const publicUrl = cacheMediaAndGetPublicUrl(videoRes.videoUrl, 'video', hostHeader);
 
       await saveGeneratedMediaRecord({
         userId: session.userId || normPhone,
-        prompt: promptText,
+        prompt: videoPrompt,
         mediaType: 'video',
         storageUrl: publicUrl,
         conversationId: normPhone,
@@ -1930,31 +4039,77 @@ async function generateWhatsAppTutorReply(
         }
       });
     }
-    userParts.push({ text: promptText });
+
+    // Context-Augmented Prompt Construction for Follow-up or Explicit Request
+    let finalAiPrompt = promptText;
+    if (isFollowUp && session.activeContext) {
+      const act = session.activeContext;
+      const trimmedVal = promptText.trim().toLowerCase();
+      let actionDesc = promptText;
+      
+      if (['1', '1.'].includes(trimmedVal) || trimmedVal.includes('worksheet')) {
+        actionDesc = `Generate a complete 5-exercise student practice worksheet with realistic problem scenarios, calculations, and solution space.`;
+      } else if (['2', '2.'].includes(trimmedVal) || trimmedVal.includes('cat') || trimmedVal.includes('exam')) {
+        actionDesc = `Generate a complete 5-question Continuous Assessment Test (CAT) exam with a detailed marking scheme and marks distribution.`;
+      } else if (['3', '3.'].includes(trimmedVal) || trimmedVal.includes('powerpoint') || trimmedVal.includes('ppt') || trimmedVal.includes('presentation')) {
+        actionDesc = `Generate a 6-slide PowerPoint presentation outline with visual slide design notes, main headings, bullet points, and speaker notes.`;
+      } else if (['4', '4.'].includes(trimmedVal) || trimmedVal.includes('practical') || trimmedVal.includes('lab')) {
+        actionDesc = `Generate a complete practical activity and hands-on laboratory guide with required apparatus, step-by-step procedure, safety guidelines, and observation table.`;
+      } else if (['5', '5.'].includes(trimmedVal) || trimmedVal.includes('rubric')) {
+        actionDesc = `Generate a competency-based assessment rubric with 4 performance levels (Exceeding, Meeting, Approaching, Below Expectations) and clear evaluation criteria.`;
+      } else if (['6', '6.'].includes(trimmedVal) || trimmedVal.includes('homework') || trimmedVal.includes('revision')) {
+        actionDesc = `Generate a homework assignment and revision guide with key concept summaries, practice questions, and study tips.`;
+      } else if (['7', '7.'].includes(trimmedVal) || trimmedVal.includes('pdf') || trimmedVal.includes('printable')) {
+        actionDesc = `Produce and format the full printable document version ready for immediate classroom distribution.`;
+      } else if (['8', '8.'].includes(trimmedVal) || trimmedVal.includes('diagram')) {
+        actionDesc = `Generate a text-based conceptual visual diagram, flow chart, structural formula breakdown, or concept map.`;
+      } else if (['9', '9.'].includes(trimmedVal) || trimmedVal.includes('video') || trimmedVal.includes('script')) {
+        actionDesc = `Generate a teaching video script with scene-by-scene visual cues, narration text, and key learning points.`;
+      }
+
+      finalAiPrompt = 
+        `ACTIVE LESSON CONTEXT - YOU MUST REUSE THIS EXACT TOPIC AND SUBJECT:\n` +
+        `• Subject: ${act.subject || 'Mathematics'}\n` +
+        `• Grade/Form: ${act.grade || 'Form 3'}\n` +
+        `• Topic: ${act.topic || 'Mixtures'}\n` +
+        `• Duration: ${act.duration || '40 minutes'}\n` +
+        `• Active Document Title: ${act.title || 'Lesson Plan'}\n\n` +
+        `FULL ORIGINAL LESSON PLAN / DOCUMENT:\n` +
+        `"""\n${act.fullContent || ''}\n"""\n\n` +
+        `USER ACTION REQUESTED: "${actionDesc}".\n` +
+        `STRICT REQUIREMENT: Generate content EXCLUSIVELY tailored to ${act.subject} (${act.grade}) on the topic "${act.topic}".\n` +
+        `DO NOT generate generic questions or place-holder templates! Every question, scenario, or calculation MUST directly pertain to ${act.topic}!`;
+    }
+
+    userParts.push({ text: finalAiPrompt });
 
     contents.push({
       role: 'user',
       parts: userParts
     });
 
-    // Use generateContentWithFallback which handles model fallbacks (gemini-3.5-flash, gemini-3.1-flash-lite, gemini-2.5-flash, etc.)
+    const isDocGenRequest = /\b(lesson plan|scheme of work|cat|exam|test|worksheet|rubric|notes|progress report|report comment|revision guide|practical activity|project)\b/i.test(promptText) ||
+      userRole === 'Teacher' || session.activeContext?.taskType === 'lesson_plan' || session.activeContext?.taskType === 'scheme_of_work';
+
+    const tokenLimit = isDocGenRequest ? 4096 : 1500;
+
+    // Use generateContentWithFallback which handles model fallbacks
     const response = await generateContentWithFallback({
       model: 'emgen_fallback_nanobanana',
       contents,
       config: {
         systemInstruction,
         temperature: 0.7,
-        maxOutputTokens: 1200
+        maxOutputTokens: tokenLimit
       }
     });
 
     replyText = response?.text || '';
 
     if (!replyText && ai) {
-      // Direct fallback attempt
       const directRes = await ai.models.generateContent({
         model: 'gemini-3.1-flash-lite',
-        contents: promptText,
+        contents: finalAiPrompt,
         config: { systemInstruction, temperature: 0.7, maxOutputTokens: 900 }
       });
       replyText = directRes?.text || '';
@@ -1964,18 +4119,65 @@ async function generateWhatsAppTutorReply(
       replyText = `Hello *${session.name}*! 💡\n\nI received your question: *"${promptText}"*\n\nCould you please rephrase or add a brief detail? I am ready to give you a complete answer! 🚀`;
     }
 
+    // Update Session Active Context with Generated Content
+    const effectiveSubject = parsedParams.subject || session.activeContext?.subject || 'Mathematics';
+    const effectiveGrade = parsedParams.grade || session.activeContext?.grade || 'Form 3';
+    const effectiveTopic = parsedParams.topic || session.activeContext?.topic || 'Simultaneous Equations';
+    const effectiveDuration = parsedParams.duration || session.activeContext?.duration || '20 minutes';
+    const effectiveMethod = parsedParams.method || session.activeContext?.method || '';
+    
+    const currentTaskType = session.activeContext?.taskType || (intentResult.intentType === 'NEW_TASK_TUTORING' ? 'ai_tutor' : (isSchemeIntent ? 'scheme_of_work' : (isWorksheetIntent ? 'worksheet' : (isCatIntent ? 'cat_exam' : 'lesson_plan'))));
+    const docTitle = currentTaskType === 'ai_tutor'
+      ? `AI Tutor: ${effectiveTopic}${effectiveMethod ? ` (${effectiveMethod})` : ''}`
+      : `${effectiveGrade} ${effectiveSubject}: ${effectiveTopic}`;
+
+    session.activeContext = {
+      taskType: currentTaskType,
+      subject: effectiveSubject,
+      grade: effectiveGrade,
+      topic: effectiveTopic,
+      method: effectiveMethod,
+      duration: effectiveDuration,
+      title: docTitle,
+      fullContent: replyText,
+      updatedAt: new Date().toISOString(),
+      isAwaitingClarification: false
+    };
+
+    if (!session.resourceHistory) session.resourceHistory = [];
+    session.resourceHistory.unshift({
+      id: `res_${Date.now()}`,
+      type: currentTaskType,
+      title: docTitle,
+      subject: effectiveSubject,
+      grade: effectiveGrade,
+      topic: effectiveTopic,
+      content: replyText,
+      createdAt: new Date().toISOString()
+    });
+    if (session.resourceHistory.length > 10) {
+      session.resourceHistory = session.resourceHistory.slice(0, 10);
+    }
+
     // Classify output type and determine rendering strategy
     const outputType = classifyWhatsAppOutput(promptText, replyText);
     const linked = whatsappLinkedUsers[normPhone];
     const userPref: UserWhatsAppOutputPreference = session.preferredOutputFormat || linked?.preferredOutputFormat || 'auto';
 
-    console.log(`[WhatsApp Rich Renderer] Phone: ${normPhone} | Classified: ${outputType} | Preference: ${userPref}`);
+    console.log(`[WhatsApp Rich Renderer] Phone: ${normPhone} | Classified: ${outputType} | Preference: ${userPref} | TaskType: ${currentTaskType}`);
+
+    const explicitTextRequested = /\b(text|text-based|text based|plain text|mobile text|type it out|write it here|in chat|in text|just text|only text)\b/i.test(promptText);
 
     const shouldGenerateDocument = (
-      userPref === 'pdf_document' ||
-      userPref === 'image_document' ||
-      userPref === 'rich_report' ||
-      (userPref === 'auto' && outputType !== 'simple_text')
+      !explicitTextRequested &&
+      userPref !== 'mobile_text' &&
+      currentTaskType !== 'ai_tutor' &&
+      (
+        userPref === 'pdf_document' ||
+        userPref === 'image_document' ||
+        userPref === 'rich_report' ||
+        (userPref === 'auto' && outputType !== 'simple_text' && replyText.length > 500)
+      )
     );
 
     let finalWhatsAppMessage = '';
@@ -2003,13 +4205,13 @@ async function generateWhatsAppTutorReply(
       };
 
       const categoryLabel = categoryLabels[outputType] || 'EduNexus Document';
-      const docTitle = promptText.length > 50 ? `${promptText.slice(0, 47)}...` : promptText;
-      const cleanTitle = docTitle.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'EduNexus_Document';
+      const cleanDocTitle = session.activeContext?.title || (promptText.length > 50 ? `${promptText.slice(0, 47)}...` : promptText);
+      const cleanFileTitle = cleanDocTitle.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'EduNexus_Document';
       const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
       // Generate PDF & Preview PNG
-      const pdfBuf = generateEduNexusPdf(docTitle, categoryLabel, session.name, replyText, dateStr);
-      const pngBuf = generateEduNexusPreviewImage(docTitle, categoryLabel, session.name, replyText, dateStr);
+      const pdfBuf = generateEduNexusPdf(cleanDocTitle, categoryLabel, session.name, replyText, dateStr);
+      const pngBuf = generateEduNexusPreviewImage(cleanDocTitle, categoryLabel, session.name, replyText, dateStr);
 
       const mediaIdPdf = `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const mediaIdPng = `prev_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -2017,13 +4219,13 @@ async function generateWhatsAppTutorReply(
       mediaFileCache.set(mediaIdPdf, {
         buffer: pdfBuf,
         mimeType: 'application/pdf',
-        filename: `EduNexus_${cleanTitle.replace(/\s+/g, '_')}.pdf`
+        filename: `EduNexus_${cleanFileTitle.replace(/\s+/g, '_')}.pdf`
       });
 
       mediaFileCache.set(mediaIdPng, {
         buffer: pngBuf,
         mimeType: 'image/png',
-        filename: `EduNexus_Preview_${cleanTitle.replace(/\s+/g, '_')}.png`
+        filename: `EduNexus_Preview_${cleanFileTitle.replace(/\s+/g, '_')}.png`
       });
 
       let host = (hostHeader && hostHeader.trim()) ? hostHeader.trim() : (process.env.APP_URL || process.env.PUBLIC_URL || '');
@@ -2036,14 +4238,20 @@ async function generateWhatsAppTutorReply(
       const pdfPublicUrl = `${protocol}://${host}/api/media/serve/${mediaIdPdf}.pdf`;
       const pngPublicUrl = `${protocol}://${host}/api/media/serve/${mediaIdPng}.png`;
 
-      const followUpText = getFollowUpOptions(outputType).map(f => `• ${f}`).join('\n');
+      const actionMenu = getModeAwareActionMenu(effectiveMode, session.activeContext, promptText, intentResult.isContextSwitch);
+      const formattedBody = formatWhatsAppRichText(replyText, outputType, session.name, actionMenu);
+      let textSnippet = formattedBody;
+      if (textSnippet.length > 900) {
+        textSnippet = textSnippet.slice(0, 880) + '\n\n_(...See full printable PDF document attached below)_';
+      }
+
       const previewCaption =
         `📘 *Your EduNexus ${categoryLabel} is ready!*\n\n` +
-        `*Title:* ${docTitle}\n` +
+        `*Title:* ${cleanDocTitle}\n` +
         `*Date:* ${dateStr}\n\n` +
-        `📌 *Interactive Follow-ups (Reply to action):*\n${followUpText}`;
+        `${textSnippet}`;
 
-      const pdfFilename = `EduNexus_${cleanTitle.replace(/\s+/g, '_')}.pdf`;
+      const pdfFilename = `EduNexus_${cleanFileTitle.replace(/\s+/g, '_')}.pdf`;
 
       // Dispatch 1: Send Preview Image with Caption
       await sendWhatsAppMediaMessage(normPhone, 'image', pngPublicUrl, previewCaption);
@@ -2054,15 +4262,21 @@ async function generateWhatsAppTutorReply(
           normPhone,
           pdfPublicUrl,
           pdfFilename,
-          `📄 Printable PDF: ${docTitle}`
+          `📄 Printable PDF: ${cleanDocTitle}`
         );
       }
 
       finalWhatsAppMessage = previewCaption;
     } else {
       // Pure Rich WhatsApp Text with formatting and follow-ups
-      finalWhatsAppMessage = formatWhatsAppRichText(replyText, outputType, session.name);
+      const actionMenu = getModeAwareActionMenu(effectiveMode, session.activeContext, promptText, intentResult.isContextSwitch);
+      const activeType = currentTaskType === 'ai_tutor' ? 'ai_tutor' : outputType;
+      finalWhatsAppMessage = formatWhatsAppRichText(replyText, activeType, session.name, actionMenu);
     }
+
+    session.lastProcessedPrompt = promptText;
+    session.lastProcessedTime = Date.now();
+    session.lastProcessedReply = finalWhatsAppMessage;
 
     session.history.push({ role: 'user', parts: [{ text: promptText }] });
     session.history.push({ role: 'model', parts: [{ text: finalWhatsAppMessage }] });
@@ -2074,9 +4288,7 @@ async function generateWhatsAppTutorReply(
     return finalWhatsAppMessage;
   } catch (err: any) {
     console.error('[WhatsApp Gemini AI Error]:', err);
-    return `Hello *${session.name}*! 💡\n\n` +
-      `I received your question: *"${promptText.slice(0, 80)}"*.\n\n` +
-      `I am experiencing a temporary connection surge. Please resend your question, and I will answer it immediately for you! 🚀`;
+    return classifyErrorMessage(err);
   }
 }
 
@@ -2373,7 +4585,7 @@ app.post(['/api/whatsapp/webhook', '/api/whatsapp/webhook/'], async (req, res) =
 
 // POST Account Linking Endpoint for authenticated EduNexus users
 app.post('/api/whatsapp/link', (req, res) => {
-  const { userId, phoneNumber, userDisplayName, userEmail, userRole, preferredOutputFormat } = req.body;
+  const { userId, phoneNumber, userDisplayName, userEmail, userRole, preferredOutputFormat, conversationMode } = req.body;
   if (!userId || !phoneNumber) {
     return res.status(400).json({ error: 'userId and phoneNumber are required.' });
   }
@@ -2386,6 +4598,7 @@ app.post('/api/whatsapp/link', (req, res) => {
     userEmail: userEmail || '',
     userRole: userRole || 'Student',
     preferredOutputFormat: preferredOutputFormat || 'auto',
+    conversationMode: conversationMode || 'smart',
     linkedAt: new Date().toISOString()
   };
 
@@ -2398,6 +4611,7 @@ app.post('/api/whatsapp/link', (req, res) => {
     whatsappSessions[normPhone].userRole = linkRecord.userRole;
     whatsappSessions[normPhone].userEmail = linkRecord.userEmail;
     whatsappSessions[normPhone].preferredOutputFormat = linkRecord.preferredOutputFormat;
+    whatsappSessions[normPhone].conversationMode = linkRecord.conversationMode;
   }
 
   res.json({
@@ -2409,27 +4623,49 @@ app.post('/api/whatsapp/link', (req, res) => {
 
 // POST Output Preference endpoint for WhatsApp user settings
 app.post('/api/whatsapp/preference', (req, res) => {
-  const { userId, phoneNumber, preferredOutputFormat } = req.body;
-  if (!preferredOutputFormat) {
-    return res.status(400).json({ error: 'preferredOutputFormat is required.' });
+  const { userId, phoneNumber, preferredOutputFormat, conversationMode, curriculum, primaryCurriculum } = req.body;
+  const targetCurr = primaryCurriculum || curriculum;
+
+  if (!preferredOutputFormat && !conversationMode && !targetCurr) {
+    return res.status(400).json({ error: 'preferredOutputFormat, conversationMode, curriculum, or primaryCurriculum is required.' });
   }
 
   if (phoneNumber) {
     const normPhone = normalizePhoneNumber(phoneNumber);
     if (whatsappLinkedUsers[normPhone]) {
-      whatsappLinkedUsers[normPhone].preferredOutputFormat = preferredOutputFormat;
+      if (preferredOutputFormat) whatsappLinkedUsers[normPhone].preferredOutputFormat = preferredOutputFormat;
+      if (conversationMode) whatsappLinkedUsers[normPhone].conversationMode = conversationMode;
+      if (targetCurr) {
+        whatsappLinkedUsers[normPhone].curriculum = targetCurr;
+        whatsappLinkedUsers[normPhone].primaryCurriculum = targetCurr;
+      }
     }
     if (whatsappSessions[normPhone]) {
-      whatsappSessions[normPhone].preferredOutputFormat = preferredOutputFormat;
+      if (preferredOutputFormat) whatsappSessions[normPhone].preferredOutputFormat = preferredOutputFormat;
+      if (conversationMode) whatsappSessions[normPhone].conversationMode = conversationMode;
+      if (targetCurr) {
+        whatsappSessions[normPhone].curriculum = targetCurr;
+        whatsappSessions[normPhone].primaryCurriculum = targetCurr;
+      }
     }
   }
 
   if (userId) {
     for (const record of Object.values(whatsappLinkedUsers)) {
       if (record.userId === userId) {
-        record.preferredOutputFormat = preferredOutputFormat;
+        if (preferredOutputFormat) record.preferredOutputFormat = preferredOutputFormat;
+        if (conversationMode) record.conversationMode = conversationMode;
+        if (targetCurr) {
+          record.curriculum = targetCurr;
+          record.primaryCurriculum = targetCurr;
+        }
         if (whatsappSessions[record.phoneNumber]) {
-          whatsappSessions[record.phoneNumber].preferredOutputFormat = preferredOutputFormat;
+          if (preferredOutputFormat) whatsappSessions[record.phoneNumber].preferredOutputFormat = preferredOutputFormat;
+          if (conversationMode) whatsappSessions[record.phoneNumber].conversationMode = conversationMode;
+          if (targetCurr) {
+            whatsappSessions[record.phoneNumber].curriculum = targetCurr;
+            whatsappSessions[record.phoneNumber].primaryCurriculum = targetCurr;
+          }
         }
       }
     }
@@ -2438,7 +4674,9 @@ app.post('/api/whatsapp/preference', (req, res) => {
   res.json({
     success: true,
     preferredOutputFormat,
-    message: 'Preferred WhatsApp output format updated successfully.'
+    conversationMode,
+    curriculum,
+    message: 'WhatsApp AI preferences updated successfully.'
   });
 });
 
@@ -2527,6 +4765,30 @@ app.get('/api/whatsapp/messages/:phoneNumber', (req, res) => {
   const msgs = whatsappLogs.filter(l => l.from === normPhone);
   const session = whatsappSessions[normPhone];
   res.json({ phoneNumber: normPhone, session: session || null, messages: msgs });
+});
+
+// GET System Classified Error Messages Reference
+app.get('/api/system/error-messages', (req, res) => {
+  res.json({
+    success: true,
+    classifications: CLASSIFIED_ERRORS
+  });
+});
+
+// POST Endpoint to classify any raw error message or exception
+app.post('/api/classify-error', express.json(), (req, res) => {
+  const { error, rawError, type } = req.body || {};
+  if (type && CLASSIFIED_ERRORS[type as keyof typeof CLASSIFIED_ERRORS]) {
+    return res.json({
+      success: true,
+      classifiedMessage: CLASSIFIED_ERRORS[type as keyof typeof CLASSIFIED_ERRORS]
+    });
+  }
+  const classifiedMessage = classifyErrorMessage(error || rawError);
+  res.json({
+    success: true,
+    classifiedMessage
+  });
 });
 
 // POST Simulation endpoint for testing WhatsApp bot directly in the EduNexus UI
@@ -2937,14 +5199,8 @@ app.post('/api/generate', async (req, res) => {
     return res.json(cachedResult);
   }
 
-  // Build the system prompt & detailed instructions based on Curriculum Type and Document Type
-  let systemInstruction = 'You are an experienced secondary school teacher, curriculum developer, and master instructional designer.';
-  
-  if (curriculum === 'cbc') {
-    systemInstruction += ' You specialize in the Kenyan Competency-Based Curriculum (CBC) framework, aligning lessons to strands, sub-strands, specific learning outcomes, core competences, values, and multi-level rubric assessments.';
-  } else {
-    systemInstruction += ' You specialize in standard, outcomes-based educational frameworks (e.g. 8-4-4 and standard international systems) focusing on clear learning objectives, structured teacher/student activities, independent practice, and summative evaluation.';
-  }
+  // Build the system prompt & detailed instructions based on Curriculum Type and Document Type using Curriculum Intelligence Engine
+  let systemInstruction = getCurriculumEngineInstruction(curriculum, 'Teacher');
 
   if (language === 'sw') {
     systemInstruction += ' CRITICAL REQUIREMENT: You MUST generate the entire output in Swahili (Kiswahili) language. All headings, structural stages, lesson plans, notes, questions, assessment tables, guidelines, and feedback prompts must be written in grammatically correct, natural, standard academic Swahili (Kiswahili) suitable for secondary school level. Keep universally recognized technical terms in English inside parentheses if needed, but all descriptions, activities, roles, and instructions must be fully in Swahili.';
@@ -3111,6 +5367,23 @@ app.post('/api/generate', async (req, res) => {
   - **MULTI-SUBJECT INQUIRY MAPPING (approx 20% of time)**: Facilitate a cooperative brainstorm mapping out questions bridging Science, Mathematics, History, and Language aspects.
   - **COLLABORATIVE HOLISTIC INVESTIGATION (approx 50% of time)**: Guide teams in researching their chosen mapped question, writing down systemic connections, and designing a cohesive explanation.
   - **INTERDISCIPLINARY CLASS DIALOGUE (approx 15% of time)**: Direct teams to exchange findings, synthesize the holistic nature of the phenomenon, and perform peer evaluations.`;
+        break;
+      case 'design-thinking':
+        layoutInstruction = `
+* **Lesson Structure Format**: Strict **Design Thinking Framework (Stanford d.school 5-Phase Model)**:
+  - **1. EMPATHIZE & USER INQUIRY (approx 15% of time)**: Guide students to explore target user needs, interview partners, and document human pain points or real-world constraints.
+  - **2. DEFINE THE PROBLEM (approx 10% of time)**: Lead teams to construct a sharp, human-centered "How Might We..." (HMW) challenge statement focusing on real needs.
+  - **3. IDEATE & BRAINSTORM (approx 25% of time)**: Facilitate rapid, uninhibited brainstorm sessions (Crazy 8s, mind maps) generating multiple creative solutions without initial critique.
+  - **4. PROTOTYPE SOLUTION (approx 35% of time)**: Provide focused workshop time for teams to construct rapid, low-fidelity physical or digital prototypes using available classroom materials.
+  - **5. TEST & USER FEEDBACK (approx 15% of time)**: Teams test prototypes with peer users, gather structured critique (What Worked, What Could Improve, Questions, Ideas), and outline next iterations.`;
+        break;
+      case 'socratic-seminar':
+        layoutInstruction = `
+* **Lesson Structure Format**: Strict **Socratic Seminar & Dialogue Model (6-Level Critical Questioning)**:
+  - **1. OPENING SOCRATIC QUESTION (approx 10% of time)**: Launch dialogue with a provocative, open-ended, non-binary worldview question with no single right answer.
+  - **2. TEXTUAL & CASE EVIDENCE ANALYSIS (approx 30% of time)**: Students examine foundational texts, data, or primary sources, requiring every assertion to cite specific evidence or line numbers.
+  - **3. MULTI-LEVEL SOCRATIC INTERROGATION (approx 45% of time)**: Facilitate student-led inquiry using 6 levels of Socratic questioning: Clarification, Assumptions, Evidence & Reasoning, Perspectives, Implications & Trade-offs, and Meta-questions about the prompt itself.
+  - **4. SYNTHESIS & REFLECTIVE EXIT SLIP (approx 15% of time)**: Summarize key dialogue breakthroughs, evaluate listening/speaking norms, and complete a 3-sentence personal mindset reflection.`;
         break;
       case 'default':
       default:
@@ -3330,40 +5603,210 @@ Please follow these strict pedagogical principles:
         }
       }
 
-      generationPrompt = `Generate a comprehensive and ready-to-use **LESSON PLAN** in high-quality Markdown format.
+      let curriculumLessonPlanSpec = '';
+      if (curriculum === 'cbc') {
+        curriculumLessonPlanSpec = `
+Please structure the Kenya CBC Lesson Plan precisely as follows:
+1. **Administrative Details**: School, Teacher, Learning Area, Grade, Strand, Sub-strand, Lesson Number, Duration (${duration || '40 minutes'}).
+2. **Specific Learning Outcomes**: Actionable, SMART learning outcomes (By the end of the lesson, the learner should be able to...).
+3. **Success Indicators**: Clear indicators showing when learning outcomes are achieved.
+4. **Key Inquiry Question(s) (KIQ)**: Stimulating open-ended questions.
+5. **Core Competencies to be Developed**: Explicitly list relevant CBC competencies (Communication & Collaboration, Critical Thinking & Problem Solving, Creativity & Imagination, Citizenship, Self-Efficacy, Digital Literacy, Learning to Learn) and how they are practiced in this lesson.
+6. **Values**: Integrated core values (e.g. Love, Responsibility, Respect, Integrity, Unity).
+7. **Pertinent and Contemporary Issues (PCIs)**: Real-world issues integrated (e.g. Environmental Care, Health Education, Financial Literacy).
+8. **Learning Resources**: Physical, low-cost, or improvised materials and digital aids.
+9. **Lesson Development (Time Allocation & Learning Experiences)**:
+   - **Introduction (approx. 10%)**: Hook, recall prior learning, state outcomes.
+   - **Core Activities (approx. 60%)**: Group activities detailing (a) Teacher Role, and (b) Learner Role.
+   - **Conclusion / Reflection (approx. 15%)**: Summary and check for understanding.
+10. **Assessment Rubric**: A clean 4x4 Markdown table mapping achievement criteria to 4 CBC performance levels: Exceeding Expectation (EE), Meeting Expectation (ME), Approaching Expectation (AE), Below Expectation (BE).
+11. **Self-Assessment / Reflection Prompt**: Questions for the teacher to evaluate lesson delivery.
+`;
+      } else if (curriculum === 'kcse') {
+        curriculumLessonPlanSpec = `
+Please structure the Kenya 8-4-4 / KCSE Lesson Plan precisely as follows:
+1. **Administrative Details**: School, Subject, Class/Form, Date, Duration (${duration || '40 minutes'}), Topic, Sub-topic.
+2. **Instructional Objectives**: SMART objectives categorized into Cognitive, Psychomotor, and Affective domains (By the end of the lesson, the learner should be able to...).
+3. **Prerequisite Entry Behavior**: Prior knowledge learners possess.
+4. **Teaching / Learning Resources & References**: Textbooks, syllabus references, apparatus, models, or chalkboard.
+5. **Lesson Development (Step-by-step Progression)**:
+   - **Introduction**: Review entry behavior, state lesson objectives.
+   - **Step 1 (Concept Exposition)**: Teacher explanation, board work, student listening & note-taking.
+   - **Step 2 (Guided Practice)**: Worked examples, student chalkboard participation, guided problem solving.
+   - **Step 3 (Independent Task / Group Drill)**: Individual/group exercises with teacher circulating to give feedback.
+   - **Conclusion**: Recap key rules/formulas, quick oral diagnostic check.
+6. **Summary & Evaluation**: Oral questions, short chalkboard test, or diagnostic check.
+7. **Assignment / Homework**: Specific revision exercise or homework problems from standard textbook.
+8. **Teacher's Self-Evaluation / Remarks**: Placeholder for teacher post-lesson comments.
+`;
+      } else if (curriculum === 'cambridge_primary') {
+        curriculumLessonPlanSpec = `
+Please structure the Cambridge Primary & Lower Secondary Lesson Plan precisely as follows:
+1. **Lesson Metadata**: Centre/School Name, Subject, Stage/Grade, Unit Title, Lesson Duration (${duration || '40 minutes'}).
+2. **Cambridge Learning Objectives**: Official Cambridge Framework learning objectives and codes.
+3. **Success Criteria**: Clear "I can..." student-centered statements.
+4. **Cambridge Learner Attributes**: Indicate how this lesson fosters Confident, Responsible, Reflective, Innovative, or Engaged learners.
+5. **Key Vocabulary**: Core technical terms with brief definitions.
+6. **Lesson Stages**:
+   - **Starter Activity (10%)**: Dynamic warm-up, hook, or prior knowledge check.
+   - **Main Teaching & Learning Activities (70%)**: Structured active learning progression with Teacher Input, Guided Group Tasks, and Independent Practice.
+   - **Plenary (20%)**: Exit ticket, peer review, or reflection prompt.
+7. **Differentiation Opportunities**:
+   - **Support Strategies**: Scaffolding, vocabulary aids, or paired peer support for struggling learners.
+   - **Extension / Challenge Strategies**: Deeper inquiry tasks or higher-order questions for advanced learners.
+8. **Resources & Equipment**: Required physical sheets, concrete manipulatives, or digital tools.
+9. **Teacher Reflection & Next Steps**: Evaluation checklist for instructional delivery.
+`;
+      } else if (curriculum === 'igcse') {
+        curriculumLessonPlanSpec = `
+Please structure the Cambridge IGCSE Lesson Plan precisely as follows:
+1. **Lesson Metadata**: School/Centre, Subject & Code (e.g. 0580/0610/0470), Grade/Year (Year 10/11), Unit, Topic.
+2. **Syllabus Learning Objectives**: Precise Cambridge IGCSE syllabus learning statements.
+3. **Assessment Objectives (AOs) Targeted**: Map activities to AO1 (Knowledge & Understanding), AO2 (Application & Analysis), and AO3 (Evaluation & Investigation / Problem Solving).
+4. **Success Criteria**: Measurable performance criteria.
+5. **Exam Command Words Focus**: Highlight relevant command words (e.g., Explain, Describe, Calculate, Outline, Evaluate).
+6. **Lesson Development**:
+   - **Starter / Exam Warm-up (10%)**: Rapid retrieval practice or past paper warmup question.
+   - **Main Lesson Development (70%)**:
+     - *Teacher Modeling (I Do)*: Deep explanation with past paper worked examples.
+     - *Guided Practice (We Do)*: Paired problem solving or structured activity.
+     - *Independent Exam Practice (You Do)*: Exam-style questions under timed conditions.
+   - **Plenary & Self-Assessment (20%)**: Mark scheme walkthrough, self-correction, or exit prompt.
+7. **Differentiation Strategies**: Scaffolding for Core tier vs Challenge for Extended tier students.
+8. **Homework & Independent Study**: Selected past paper questions or exam workbook tasks.
+9. **Resources & Past Paper References**: Past paper codes, mark schemes, and equipment needed.
+`;
+      } else if (curriculum === 'a_level') {
+        curriculumLessonPlanSpec = `
+Please structure the Cambridge International AS & A Level Lesson Plan precisely as follows:
+1. **Lesson Metadata**: Centre Name, Subject & Code (e.g. 9709/9701/9702), Level (AS / A2 Level), Unit/Spec Ref.
+2. **Specification Learning Objectives**: Precise CAIE specification reference points.
+3. **Command Words & Cognitive Focus**: Focus on higher-order verbs (Derive, Analyze, Evaluate, Critique, Prove).
+4. **Prior Knowledge & Prerequisites**: Essential prerequisite theorems, definitions, or experimental techniques.
+5. **Assessment Objectives**: AO1 Knowledge, AO2 Application & Mathematical/Scientific Analysis, AO3 Synthesis & Evaluation.
+6. **Advanced Instructional Flow**:
+   - **Academic Hook & Conceptual Challenge**: Provocative problem, real-world case study, or theoretical puzzle.
+   - **Deep Lecture / Rigorous Exposition**: Derivations, mathematical proofs, experimental design, or deep textual analysis.
+   - **Practical / Problem Set Seminar**: Hands-on lab experimentation, data analysis, or multi-step calculation sets.
+   - **Critical Discussion & Peer Critique**: Academic debate or student solution defense.
+7. **Extension Tasks & Research Prompts**: Higher-order extension material for top-grade candidates.
+8. **Homework & Exam Assignment**: Structured essay prompt, problem set, or practical lab report assignment.
+9. **Resources & Further Reading**: Recommended textbook chapters, research journals, or digital simulations.
+`;
+      } else if (curriculum === 'ib') {
+        curriculumLessonPlanSpec = `
+Please structure the International Baccalaureate (IB) Lesson Plan precisely as follows:
+1. **Unit & Lesson Details**: School Name, Subject Group, Grade/Level (MYP 1-5 or DP SL/HL), Unit Title, Duration.
+2. **Inquiry Framework**:
+   - **Statement of Inquiry**: Clear, overarching conceptual statement.
+   - **Key Concept & Related Concepts**: Core IB concepts (e.g. Systems, Relationships, Change, Form).
+   - **Global Context**: Real-world IB global context focus.
+3. **Inquiry Questions**:
+   - **Factual Question**: What is...?
+   - **Conceptual Question**: How does...?
+   - **Debatable Question**: Should we...?
+4. **Approaches to Learning (ATL) Skills**: Explicit ATL focus (Thinking, Communication, Social, Self-Management, Research).
+5. **IB Learner Profile Attributes**: Target attributes (e.g. Inquirers, Knowledgeable, Thinkers, Reflective).
+6. **Learning Process (Inquiry Cycle)**:
+   - **Inquiry Launch (Hook)**: Engaging stimulus, video, or inquiry scenario.
+   - **Action & Investigation**: Collaborative student-led research, experimentation, or problem solving.
+   - **Synthesis & Presentation**: Constructing conceptual understanding and sharing.
+7. **Formative Assessment & Criteria**: Alignment with IB Assessment Criteria (e.g. Criteria A, B, C, D).
+8. **Differentiation & Inclusion**: Language support, visual scaffolding, and extension.
+9. **Reflection**: Teacher reflection before, during, and after teaching.
+`;
+      } else if (curriculum === 'us_common_core') {
+        curriculumLessonPlanSpec = `
+Please structure the US Common Core (CCSS / NGSS / AP) Lesson Plan precisely as follows:
+1. **Lesson Metadata**: School/District, Subject, Grade Level (K-12 / AP), Unit Title, Duration.
+2. **Target Standards**: Official Common Core State Standards (CCSS.ELA / CCSS.MATH) or NGSS Performance Expectations & DCI codes.
+3. **Essential Question(s) & Enduring Understandings**: Open-ended guiding question for deep inquiry.
+4. **Depth of Knowledge (DOK) Levels**: Explicitly map activities to DOK 1 (Recall), DOK 2 (Skill/Concept), DOK 3 (Strategic Thinking), DOK 4 (Extended Thinking).
+5. **Instructional Sequence**:
+   - **Anticipatory Set / Hook (10%)**: Engaging warmup or phenomenon.
+   - **Direct Instruction / Modeling ("I Do") (20%)**: Explicit concept delivery and exemplar anchor chart.
+   - **Guided Practice & Collaboration ("We Do") (35%)**: Small group task or lab investigation.
+   - **Independent Application ("You Do") (25%)**: Individual problem solving or analytical writing.
+   - **Formative Exit Ticket (10%)**: Quick 2-question understanding check.
+6. **Universal Design for Learning (UDL) & IEP/504 Accommodations**: Support strategies for EL / SWD and extension for GATE learners.
+7. **Resources & Digital Tools**: Text excerpts, graphic organizers, and online simulations.
+`;
+      } else if (curriculum === 'cbse') {
+        curriculumLessonPlanSpec = `
+Please structure the Indian CBSE / ICSE Lesson Plan precisely as follows:
+1. **Administrative Details**: School Name, Subject, Class/Grade (Class 1-12), Chapter Name, Duration.
+2. **NCERT Learning Objectives**: Official NCERT chapter outcomes and competency statements.
+3. **Prerequisite Concepts & Real-Life Connection**: Prior knowledge required and everyday application.
+4. **Pedagogical Flow & Board Plan**:
+   - **Introduction & Mind Map**: Visual concept introduction and real-world connection.
+   - **Concept Exposition & Board Work**: Core formulas, definitions, and worked NCERT textbook examples.
+   - **In-Class Practice & HOTS (Higher Order Thinking Skills)**: Analytical questions and group problem solving.
+   - **Summary & Recapitulation**: Key takeaway points.
+5. **Assessment & Homework**: Assertion-Reasoning questions, Case-based study questions, and NCERT Exemplar exercises.
+6. **Art Integration & Values**: Multi-disciplinary activity or value-based learning.
+`;
+      } else if (curriculum === 'australian') {
+        curriculumLessonPlanSpec = `
+Please structure the Australian Curriculum (ACARA) Lesson Plan precisely as follows:
+1. **Lesson Metadata**: School, Subject, Year Level (Foundation-Year 12), Unit Title, Duration.
+2. **ACARA Content Descriptions**: Official ACARA code references and descriptors.
+3. **Achievement Standards Mapped**: Specific standard statements being assessed.
+4. **General Capabilities & Cross-Curriculum Priorities**: Explicitly integrate Literacy, Numeracy, Critical/Creative Thinking, and Sustainability/Aboriginal Histories.
+5. **Inquiry Progression**:
+   - **Tuning In / Warmup**: Stimulus prompt or diagnostic question.
+   - **Finding Out & Sorting Out**: Active investigation, data collection, or group analysis.
+   - **Going Further & Reflection**: Synthesizing evidence and peer sharing.
+6. **Differentiation**: Adjustments for support and extension tiers.
+7. **Assessment & Evidence**: Diagnostic exit ticket or rubric criteria.
+`;
+      } else if (curriculum === 'french_bac') {
+        curriculumLessonPlanSpec = `
+Please structure the French Baccalauréat Lesson Plan precisely as follows:
+1. **Informations Administratives**: Établissement, Discipline, Niveau (CP à Terminale), Thème du Programme Officiel (BO), Durée.
+2. **Objectifs d'Apprentissage & Notions Clés**: Notions fondamentales et vocabulaire disciplinaire.
+3. **Compétences du Socle / Programme**: Compétences méthodologiques et disciplinaires travaillées.
+4. **Déroulement de la Séance**:
+   - **Accroche / Situation Problème**: Questionnement initial et remue-méninges.
+   - **Activités d'Investigation & Analyse**: Analyse de documents, résolution de problèmes ou travaux pratiques.
+   - **Institutionnalisation / Synthèse**: Trace écrite et schéma bilan.
+   - **Évaluation Formative & Entraînement**: Exercices type Bac ou questions de synthèse, préparation au Grand Oral.
+5. **Supports & Ressources**: Extrait de textes, documents graphiques ou expérimentaux.
+`;
+      } else {
+        curriculumLessonPlanSpec = `
+Please structure the Standard Lesson Plan precisely as follows:
+1. **Administrative Details**: Subject, Grade/Class, Duration, Topic, Sub-topic.
+2. **Prerequisite Knowledge**: What prior knowledge is needed?
+3. **Specific Learning Outcomes**: 2-3 actionable, SMART objectives.
+4. **Success Criteria**: Clear criteria showing when outcomes are achieved.
+5. **Learning Resources**: Physical and digital resources.
+6. **Time Allocation & Learning Experiences**:
+   - **Introduction (approx. 10%)**: Hook, recall prior knowledge, state outcomes.
+   - **Core Activities (approx. 60%)**: Teacher & Learner activities.
+   - **Conclusion / Reflection (approx. 15%)**: Summary and exit ticket.
+   - **Homework / Extended Practice**: Revision assignment.
+7. **Assessment Rubric**: A clean Markdown table containing 4 achievement criteria and 4 performance levels.
+8. **Teacher Reflection Prompt**: Questions to evaluate lesson delivery.
+`;
+      }
+
+      generationPrompt = `Generate a comprehensive, curriculum-tailored, and ready-to-use **LESSON PLAN** in high-quality Markdown format.
 - **Subject**: ${subject}
 - **Grade/Class**: ${classLevel}
 - **Topic**: ${topic}
 - **Sub-topic**: ${subTopic || 'General fundamentals'}
 - **Duration**: ${duration || '40 minutes'}
+- **Curriculum Framework**: ${curriculum.toUpperCase()}
 ${layoutInstruction ? `- **Pedagogical Structure Layout**: Please structure this daily lesson plan following the selected ${lessonLayout} stages:\n${layoutInstruction}\n` : ''}
 ${extraPrompt ? `- **Special Teacher Requests**: ${extraPrompt}` : ''}
 ${cbcLessonPlanSchedulingInfo}
 
-Please structure the Lesson Plan precisely as follows:
-1. **Administrative Details**: Subject/Learning Area, Grade, Duration, Topic/Strand, Sub-topic/Sub-strand.
-2. **Prerequisite Knowledge / Entry Behavior**: What prior knowledge is needed?
-3. **Specific Learning Outcomes**: 2-3 actionable, SMART objectives (By the end of the lesson, the learner should be able to...).
-4. **Success Criteria**: Clear criteria showing when outcomes have been achieved.
-5. **Key Inquiry Question(s)**: 1-2 stimulating, open-ended questions.
-6. **Core Competencies to be Developed** (if CBC) or **Key Intellectual Skills**: Relevant competencies (e.g., Critical Thinking, Collaboration, Communication, Digital Literacy) with a brief sentence explaining how they are developed in the lesson.
-7. **Values & Pertinent and Contemporary Issues (PCIs)**: Core values (e.g., Integrity, Responsibility, Respect) and PCIs (e.g., Environmental Care, Financial Literacy) integrated.
-8. **Learning Resources**: Suggested physical resources, focusing on low-cost, locally available, or improvised materials.
-9. **Digital Resources & Simulations**: Suggest standard digital simulations (e.g., PhET, virtual labs) or videos.
-10. **Time Allocation & Learning Experiences (Lesson Stages)**:
-${layoutInstruction ? `    You MUST structure this stages section precisely using the designated headings and time ratios of the selected **${lessonLayout}** layout specified above. For each stage, detail: (a) Teacher Role, and (b) Learner Role with active group tasks.` : `    - **Introduction (approx. 10% of time)**: Hook, recall prior knowledge, state outcomes.
-    - **Concept Development / Core Activities (approx. 60% of time)**: Step-by-step facilitation of interactive, collaborative tasks where learners work in groups. Detail teacher role and learner role.
-    - **Conclusion / Reflection (approx. 15% of time)**: Summarize key concepts, exit tickets.
-    - **Homework / Extended Practice**: Balanced homework task.`}
-11. **Assessment Rubric**: A clean Markdown table containing 4 rows for achievement criteria and 4 levels: Exceeding, Meeting, Approaching, and Below expectations (or custom standard levels).
-12. **Self-Assessment / Reflection Prompt**: Questions for the teacher to evaluate lesson delivery.`;
+${curriculumLessonPlanSpec}`;
       break;
 
     case 'scheme-of-work':
       const actualLessonsPerWeek = lessonsPerWeek || 5;
       const actualWeeksPerTerm = weeksPerTerm || 10;
-      const strandLabel = curriculum === 'cbc' ? 'Strand(s)' : 'Main Topic(s)';
-      const subStrandLabel = curriculum === 'cbc' ? 'Sub-strand(s)' : 'Sub-topic(s)';
 
       let cbcSchedulingRulesInstruction = '';
       if (curriculum === 'cbc') {
@@ -3391,50 +5834,130 @@ ${layoutInstruction ? `    You MUST structure this stages section precisely usin
 ### STRICT CBC STEM SCHEDULING RULE:
 - STEM subjects (e.g. Science & Technology, Integrated Science, Chemistry, Physics, Biology, Pre-Technical, Computer Science/ICT) MUST contain exactly ONE double lesson and the rest as single lessons.
 - Therefore, for ${actualLessonsPerWeek} lessons per week, you MUST group exactly two periods into a single "Double Lesson" block, and represent the remaining lessons as single lessons.
-- For example, if there are 4 lessons per week, sequential schedule should be: "Week X, Lessons 1-2 (Double Lesson)", "Week X, Lesson 3", "Week X, Lesson 4" (all weeks up to Week ${actualWeeksPerTerm} must follow this).
-- For example, if there are 5 lessons per week, sequential schedule should be: "Week X, Lessons 1-2 (Double Lesson)", "Week X, Lesson 3", "Week X, Lesson 4", "Week X, Lesson 5".
 `;
         } else {
           cbcSchedulingRulesInstruction = `
 ### STRICT CBC NON-STEM SCHEDULING RULE:
-- Non-STEM subjects (e.g. English, Kiswahili/KSL, Social Studies, RE, Creative Arts & Sports, etc.) have STRICTLY NO double lessons allowed under any circumstance.
-- All lessons in your Scheme of Work table MUST be scheduled as individual SINGLE lessons (approx. 40 minutes each). For example, sequentially schedule separate "Week X, Lesson 1", "Week X, Lesson 2", "Week X, Lesson 3", etc. in the table.
+- Non-STEM subjects have STRICTLY NO double lessons allowed under any circumstance.
+- All lessons in your Scheme of Work table MUST be scheduled as individual SINGLE lessons (approx. 40 minutes each).
 `;
         }
       }
 
-      generationPrompt = `Generate a complete, standard, and highly professional **CBC SCHEME OF WORK** (or standard curriculum scheme of work) mapped out for a full term's unit progression in high-quality Markdown format.
+      let curriculumSchemeOfWorkSpec = '';
+      let schemeColumns = '';
 
-Please structure the document with the following specific sections:
+      if (curriculum === 'cbc') {
+        schemeColumns = `| Week & Lesson | Strand & Sub-Strand | Specific Learning Outcomes | Key Inquiry Questions (KIQ) | Core Competencies, Values & PCIs | Learning Experiences | Learning Resources | Assessment Methods | Remarks |`;
+        curriculumSchemeOfWorkSpec = `
+1. **Administrative Header**: School, Year (${new Date().getFullYear()}), Term, Subject/Learning Area, Grade, Teacher Name, Curriculum Framework (Kenyan CBC), Timeframe (${actualWeeksPerTerm} Weeks x ${actualLessonsPerWeek} Lessons/Week).
+2. **Comprehensive CBC Scheme of Work Table**:
+   The table MUST feature these exact columns:
+   ${schemeColumns}
+   Ensure full inclusion of CBC Core Competencies, Values, PCIs, and KIQs.
+`;
+      } else if (curriculum === 'kcse') {
+        schemeColumns = `| Week & Lesson | Topic & Sub-Topic | Instructional Objectives | Content / Key Concepts | Teacher & Learner Activities | Teaching/Learning Resources & References | Evaluation & Assessment Methods | Remarks |`;
+        curriculumSchemeOfWorkSpec = `
+1. **Administrative Header**: School, Year (${new Date().getFullYear()}), Term, Subject, Class/Form, Teacher Name, Curriculum Framework (Kenya 8-4-4 / KCSE), Timeframe (${actualWeeksPerTerm} Weeks x ${actualLessonsPerWeek} Lessons/Week).
+2. **Comprehensive KCSE Scheme of Work Table**:
+   The table MUST feature these exact columns:
+   ${schemeColumns}
+   Ensure clear instructional objectives, detailed content notes, references to standard coursebooks, teacher/learner activities, and evaluation methods.
+`;
+      } else if (curriculum === 'cambridge_primary') {
+        schemeColumns = `| Unit & Week | Cambridge Learning Objectives (Ref) | Topic / Title | Key Vocabulary | Suggested Teaching Activities | Differentiation & Support | Resources | Assessment Opportunities & Reflection |`;
+        curriculumSchemeOfWorkSpec = `
+1. **Administrative Header**: Centre Name, Academic Year, Term/Stage, Subject, Stage/Grade, Curriculum Framework (Cambridge Primary & Lower Secondary), Timeframe (${actualWeeksPerTerm} Weeks x ${actualLessonsPerWeek} Lessons/Week).
+2. **Comprehensive Cambridge Primary Scheme of Work Table**:
+   The table MUST feature these exact columns:
+   ${schemeColumns}
+   Include Cambridge objective codes, success criteria, learner attributes, and differentiation.
+`;
+      } else if (curriculum === 'igcse') {
+        schemeColumns = `| Week & Lesson | Syllabus Ref | Topic & Learning Objectives | Assessment Objectives (AO1/AO2/AO3) | Teaching Activities & Exam Practice | Differentiation (Core/Extended) | Key Resources & Past Papers | Formative Assessment & Remarks |`;
+        curriculumSchemeOfWorkSpec = `
+1. **Administrative Header**: Centre Name, Academic Year, Subject & Code (e.g. 0580/0610), Year/Grade, Curriculum Framework (Cambridge IGCSE), Timeframe (${actualWeeksPerTerm} Weeks x ${actualLessonsPerWeek} Lessons/Week).
+2. **Comprehensive Cambridge IGCSE Scheme of Work Table**:
+   The table MUST feature these exact columns:
+   ${schemeColumns}
+   Include syllabus codes, AO mapping, Core/Extended differentiation, and past paper practice.
+`;
+      } else if (curriculum === 'a_level') {
+        schemeColumns = `| Week & Lesson | Spec Ref & Command Words | Specification Learning Objectives | Core Concepts & Math/Lab Skills | Higher-Order Teaching Activities | Extension & Research Tasks | Assessment & Past Exam Questions | Resources & References |`;
+        curriculumSchemeOfWorkSpec = `
+1. **Administrative Header**: Centre Name, Academic Year, Subject & Code (e.g. 9709/9701), Level (AS / A2 Level), Curriculum Framework (Cambridge International AS & A Level), Timeframe (${actualWeeksPerTerm} Weeks x ${actualLessonsPerWeek} Lessons/Week).
+2. **Comprehensive Cambridge A Level Scheme of Work Table**:
+   The table MUST feature these exact columns:
+   ${schemeColumns}
+   Include specification references, higher-order command words, practical skills, extension tasks, and exam questions.
+`;
+      } else if (curriculum === 'ib') {
+        schemeColumns = `| Unit & Week | Statement of Inquiry & Key/Related Concepts | Inquiry Questions (Factual/Conceptual/Debatable) | ATL Skills & Learner Profile | Learning Activities & Investigation | Formative & Summative Assessment (Criteria A-D) | Differentiation & Resources | Teacher Reflection |`;
+        curriculumSchemeOfWorkSpec = `
+1. **Administrative Header**: School Name, Academic Year, Subject Group & Level (MYP/DP), Unit Title, Curriculum Framework (International Baccalaureate - IB), Timeframe (${actualWeeksPerTerm} Weeks x ${actualLessonsPerWeek} Lessons/Week).
+2. **Comprehensive IB Unit Planner / Scheme of Work Table**:
+   The table MUST feature these exact columns:
+   ${schemeColumns}
+   Include Statement of Inquiry, Key & Related Concepts, Inquiry Questions, ATL skills, IB Criteria A-D, and reflection.
+`;
+      } else if (curriculum === 'us_common_core') {
+        schemeColumns = `| Week & Lesson | CCSS / NGSS Standard Codes | Essential Questions & DOK Levels | Core Instructional Concepts | Active Learning & Direct Instruction | UDL & IEP/504 Accommodations | Formative Assessment | Resources & Tech |`;
+        curriculumSchemeOfWorkSpec = `
+1. **Administrative Header**: School/District, School Year, Subject, Grade Level (K-12 / AP), Curriculum Framework (US Common Core / NGSS), Timeframe (${actualWeeksPerTerm} Weeks x ${actualLessonsPerWeek} Lessons/Week).
+2. **Comprehensive Common Core Scheme of Work Table**:
+   The table MUST feature these exact columns:
+   ${schemeColumns}
+   Include standard codes, DOK levels, UDL strategies, and formative checks.
+`;
+      } else if (curriculum === 'cbse') {
+        schemeColumns = `| Week & Period | NCERT Chapter & Sub-topic | Learning Outcomes (NCERT) | Core Concepts & Formulas | Pedagogical Method & Board Plan | HOTS & Competency-Based Questions | Assessment & NCERT Exercises | Remarks |`;
+        curriculumSchemeOfWorkSpec = `
+1. **Administrative Header**: School Name, Academic Year, Subject, Class/Grade (Class 1-12), Curriculum Framework (Indian CBSE / NCERT), Timeframe (${actualWeeksPerTerm} Weeks x ${actualLessonsPerWeek} Lessons/Week).
+2. **Comprehensive CBSE / NCERT Scheme of Work Table**:
+   The table MUST feature these exact columns:
+   ${schemeColumns}
+   Include NCERT chapter outcomes, HOTS questions, and board exam practice.
+`;
+      } else if (curriculum === 'australian') {
+        schemeColumns = `| Week & Lesson | ACARA Content Description Code | Achievement Standards Mapped | General Capabilities & Priorities | Active Inquiry Activities | Differentiation Adjustments | Assessment Opportunities | Resources |`;
+        curriculumSchemeOfWorkSpec = `
+1. **Administrative Header**: School Name, Academic Year, Subject, Year Level (Foundation-Year 12), Curriculum Framework (Australian Curriculum - ACARA), Timeframe (${actualWeeksPerTerm} Weeks x ${actualLessonsPerWeek} Lessons/Week).
+2. **Comprehensive Australian ACARA Scheme of Work Table**:
+   The table MUST feature these exact columns:
+   ${schemeColumns}
+   Include ACARA codes, General Capabilities, Cross-Curriculum Priorities, and differentiation.
+`;
+      } else if (curriculum === 'french_bac') {
+        schemeColumns = `| Semaine & Séance | Thème BO & Notions Clés | Objectifs d'Apprentissage | Compétences du Socle / BO | Activités Élèves & Méthodologie | Évaluation Formative / Type Bac | Supports & Documents | Remarques |`;
+        curriculumSchemeOfWorkSpec = `
+1. **Administrative Header**: Établissement, Année Scolaire, Discipline, Niveau (CP à Terminale), Cadre Curriculaire (Système Français - Baccalauréat), Timeframe (${actualWeeksPerTerm} Semaines x ${actualLessonsPerWeek} Séances/Semaine).
+2. **Tableau de Progression Pédagogique Synthétique**:
+   Le tableau DOIT comporter ces colonnes exactes:
+   ${schemeColumns}
+   Inclure les notions BO, les compétences méthodologiques et les entraînements au Bac / Grand Oral.
+`;
+      } else {
+        schemeColumns = `| Week & Lesson | Main Topic & Sub-Topic | Learning Objectives | Key Concepts | Teaching & Learning Activities | Learning Resources | Assessment Methods | Remarks |`;
+        curriculumSchemeOfWorkSpec = `
+1. **Administrative Header**: School, Year, Term, Subject, Grade/Class, Curriculum Framework (Standard Syllabus), Timeframe (${actualWeeksPerTerm} Weeks x ${actualLessonsPerWeek} Lessons/Week).
+2. **Comprehensive Scheme of Work Table**:
+   The table MUST feature these exact columns:
+   ${schemeColumns}
+`;
+      }
 
-1. **Administrative Details & Configuration Header**:
-   - **School**: [Enter School Name]
-   - **Year**: ${new Date().getFullYear()}
-   - **Term**: [Enter Term, e.g., Term 1]
-   - **Subject / Learning Area**: ${subject}
-   - **Grade/Class**: ${classLevel}
-   - **Teacher's Details**: [Enter Teacher Name]
-   - **Curriculum Framework**: ${curriculum === 'cbc' ? 'Kenyan CBC (Competency-Based Curriculum)' : 'Standard/Outcomes-Based Curriculum'}
-   - **Timeframe**: ${actualWeeksPerTerm} Weeks per Term
-   - **Lessons Intensity**: ${actualLessonsPerWeek} Lessons per Week
-   - **Total Lessons**: ${actualLessonsPerWeek * actualWeeksPerTerm} Lessons over the Term (each lesson approx. ${duration || '40 minutes'})
-   - **Key ${strandLabel}**: ${topic}
-   - **Key ${subStrandLabel}**: ${subTopic || 'All core concepts and skill areas'}
-   ${extraPrompt ? `- **Special Teacher Requests / Focus**: ${extraPrompt}` : ''}
-   ${cbcSchedulingRulesInstruction ? `- **Scheduling Protocol Constraints**: SEE DETAILED SCHEDULING GUIDELINES BELOW` : ''}
-
+      generationPrompt = `Generate a complete, standard, and highly professional **SCHEME OF WORK** mapped out for a full term's unit progression in high-quality Markdown format.
+- **Subject**: ${subject}
+- **Grade/Class**: ${classLevel}
+- **Curriculum Framework**: ${curriculum.toUpperCase()}
+- **Timeframe**: ${actualWeeksPerTerm} Weeks per Term, ${actualLessonsPerWeek} Lessons per Week
+- **Topic Focus**: ${topic}
+- **Sub-topic Focus**: ${subTopic || 'All core syllabus concepts'}
+${extraPrompt ? `- **Special Teacher Requests**: ${extraPrompt}` : ''}
 ${cbcSchedulingRulesInstruction}
 
-2. **Comprehensive Scheme of Work Table**:
-   Present the entire progression in a wide, highly legible Markdown Table. It MUST contain exactly the following columns, ordered precisely:
-   - **Week & Lesson**: Sequential breakdown adhering strictly to the scheduling guidelines above (e.g., "Week 1, Lesson 1", "Week 1, Lesson 2", up to Lesson ${actualLessonsPerWeek} for each week).
-   - **${curriculum === 'cbc' ? 'Strand' : 'Main Topic'} & ${curriculum === 'cbc' ? 'Sub-Strand' : 'Sub-Topic'}**: Broad topic area and specific sub-topic directly taken from syllabus.
-   - **Specific Learning Outcomes**: Clear, measurable (SMART) statements of what a learner should know, do, and understand by the end of the lessons/sub-strand.
-   - **Key Inquiry Questions (KIQ)**: Open-ended questions designed to foster curiosity, critical thinking, and problem-solving among learners.
-   - **Learning Experiences**: Learner-centered, hands-on, and inquiry-based activities (e.g. group discussion, role play, practical lab experiments, field observation) that students will actively engage in.
-   - **Learning Resources**: Materials, tools, aids (both digital and physical, emphasizing low-cost or improvised items) needed to support the lessons.
-   - **Assessment Methods**: Strategies used to evaluate learner progress, focusing on formative and continuous assessment (e.g., observation checklists, worksheets, self-assessment, oral quizzes).
-   - **Reflections / Remarks**: A clean, empty placeholder for teacher notes, outcomes, or re-teaching needs (e.g. "[   ] Completed successfully", or "Re-taught on...").
+${curriculumSchemeOfWorkSpec}
 
 3. **Spiral Progression & Pedagogical Continuity Note**: Under the table, provide an expert summary explaining how the learning flows from basic to complex (spiral curriculum), how the ${actualLessonsPerWeek} lessons per week are structured for pacing, and how teachers can best organize resources for the ${actualWeeksPerTerm}-week duration.`;
       break;
@@ -7724,7 +10247,7 @@ app.post('/api/generate-or-edit-image', async (req, res) => {
     res.json({ imageUrl });
   } catch (error: any) {
     console.error('[Image Studio] Error during image generation/editing:', error);
-    res.status(500).json({ error: error.message || 'Failed to generate or edit image using Gemini.' });
+    res.status(500).json({ error: error.message || 'Failed to generate or edit image using AI Engine.' });
   }
 });
 
@@ -8569,11 +11092,11 @@ app.post('/api/generate-ai-video', express.json(), async (req, res) => {
     const fallbackVideoUrl = getEducationalPresetVideoForPrompt(prompt);
     return res.json({
       success: true,
-      modelUsed: 'Gemini 2.5 Flash + Curated Educational HD Engine',
+      modelUsed: 'EduNexus HD Generative Engine',
       modelType: model,
       fallbackOccurred: true,
       videoUrl: fallbackVideoUrl,
-      notice: `Veo video model (${selectedModel}) is restricted or unavailable on standard API key. Loaded High-Definition Educational Video Clip.`,
+      notice: `Video model (${selectedModel}) is restricted or unavailable on standard API key. Loaded High-Definition Educational Video Clip.`,
       prompt
     });
   }

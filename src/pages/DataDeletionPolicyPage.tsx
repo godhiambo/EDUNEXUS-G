@@ -185,13 +185,16 @@ export const DataDeletionPolicyPage: React.FC = () => {
               <p className="text-[11px] text-slate-400">Subject: Account Deletion Assistance</p>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-950 border border-amber-500/30 bg-amber-500/5 space-y-1.5">
+            <div className="p-4 rounded-xl bg-slate-950 border border-amber-500/30 bg-amber-500/5 space-y-2">
               <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
                 <Phone className="w-3.5 h-3.5 text-amber-400" />
-                <span>Direct Phone Assistance</span>
+                <span>Direct Phone & WhatsApp Support</span>
               </span>
-              <a href="tel:+254740183394" className="text-amber-400 font-extrabold hover:underline block text-sm">
-                +254 740 183394
+              <a href="tel:+254704360522" className="text-amber-400 font-extrabold hover:underline block text-xs">
+                Direct Call: 0704 360 522 (+254 704 360522)
+              </a>
+              <a href="https://wa.me/254740183934" target="_blank" rel="noopener noreferrer" className="text-emerald-400 font-extrabold hover:underline block text-xs">
+                WhatsApp Bot: 0740 183 934 (+254 740 183934)
               </a>
               <p className="text-[11px] text-slate-400">Mon–Fri 8AM–5PM EAT Support Hotline</p>
             </div>

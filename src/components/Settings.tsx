@@ -4,7 +4,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useAccessibility, LearnerProfile, VOICE_PROFILES, VoiceProfile } from '../context/AccessibilityContext';
 import { db } from '../firebase';
-import { SavedDocument } from '../types';
+import { SavedDocument, UserSubscription, PlanLimits } from '../types';
 import {
   connectGoogleWorkspace,
   getGoogleWorkspaceToken,
@@ -44,12 +44,19 @@ import {
   Camera,
   CameraOff,
   Video,
-  KeyRound
+  KeyRound,
+  Crown,
+  Star,
+  Zap,
+  CreditCard,
+  ShieldCheck,
+  Coins
 } from 'lucide-react';
 import AboutModal from './AboutModal';
 import PublicFileUploader from './PublicFileUploader';
 import OAuthVerificationAssistant from './OAuthVerificationAssistant';
 import AppIconShowcaseModal from './AppIconShowcaseModal';
+import WhatsAppModeSettings from './WhatsAppModeSettings';
 
 interface ServerHealthMetrics {
   totalCalls: number;
@@ -70,9 +77,19 @@ interface ServerHealthMetrics {
 
 interface SettingsProps {
   documents?: SavedDocument[];
+  subscription?: UserSubscription | null;
+  limits?: PlanLimits | null;
+  onOpenPricingModal?: () => void;
+  onToggleAutoRenew?: () => void;
 }
 
-export default function Settings({ documents = [] }: SettingsProps) {
+export default function Settings({
+  documents = [],
+  subscription,
+  limits,
+  onOpenPricingModal,
+  onToggleAutoRenew
+}: SettingsProps) {
   const { user, profile, sendPasswordReset } = useAuth();
   const [resetStatus, setResetStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isResettingPassword, setIsResettingPassword] = useState(false);
@@ -97,15 +114,19 @@ export default function Settings({ documents = [] }: SettingsProps) {
   };
 
   const [whatsappFormatPref, setWhatsappFormatPref] = useState<'auto' | 'mobile_text' | 'pdf_document' | 'image_document' | 'rich_report'>('auto');
+  const [whatsappModePref, setWhatsappModePref] = useState<'structured' | 'flexible' | 'smart' | 'expert'>('smart');
   const [whatsappPrefSaved, setWhatsappPrefSaved] = useState(false);
 
-  const handleSaveWhatsappPref = async (pref: 'auto' | 'mobile_text' | 'pdf_document' | 'image_document' | 'rich_report') => {
-    setWhatsappFormatPref(pref);
+  const handleSaveWhatsappPref = async (pref?: 'auto' | 'mobile_text' | 'pdf_document' | 'image_document' | 'rich_report', mode?: 'structured' | 'flexible' | 'smart' | 'expert') => {
+    const targetFormat = pref || whatsappFormatPref;
+    const targetMode = mode || whatsappModePref;
+    if (pref) setWhatsappFormatPref(pref);
+    if (mode) setWhatsappModePref(mode);
     try {
       await fetch('/api/whatsapp/preference', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user?.uid, preferredOutputFormat: pref })
+        body: JSON.stringify({ userId: user?.uid, preferredOutputFormat: targetFormat, conversationMode: targetMode })
       });
       setWhatsappPrefSaved(true);
       setTimeout(() => setWhatsappPrefSaved(false), 2500);
@@ -146,7 +167,7 @@ export default function Settings({ documents = [] }: SettingsProps) {
 
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isAppIconModalOpen, setIsAppIconModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'general' | 'accessibility' | 'profiles' | 'health'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'accessibility' | 'profiles' | 'whatsapp' | 'health' | 'subscription'>('general');
   
   const [paperStyle, setPaperStyle] = useState<'classic' | 'modern'>(() => {
     return (localStorage.getItem('pedagogical_paper_style') as 'classic' | 'modern') || 'classic';
@@ -671,6 +692,17 @@ export default function Settings({ documents = [] }: SettingsProps) {
           <span>General Preferences</span>
         </button>
         <button
+          onClick={() => setActiveTab('whatsapp')}
+          className={`px-4 py-3 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+            activeTab === 'whatsapp'
+              ? 'border-[#25D366] text-emerald-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Smartphone className="w-4 h-4 text-[#25D366]" />
+          <span>WhatsApp AI Mode</span>
+        </button>
+        <button
           onClick={() => setActiveTab('accessibility')}
           className={`px-4 py-3 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
             activeTab === 'accessibility'
@@ -695,6 +727,20 @@ export default function Settings({ documents = [] }: SettingsProps) {
             {learnerProfiles.length}
           </span>
         </button>
+        <button
+          onClick={() => setActiveTab('subscription')}
+          className={`px-4 py-3 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+            activeTab === 'subscription'
+              ? 'border-[#5f6f52] text-[#5f6f52]'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Crown className="w-4 h-4 text-amber-500" />
+          <span>Subscription & Billing</span>
+          <span className="bg-amber-100 text-amber-800 text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
+            {subscription?.plan?.toUpperCase() || 'FREE'}
+          </span>
+        </button>
         {profile?.role === 'Administrator' && (
           <button
             onClick={() => setActiveTab('health')}
@@ -714,6 +760,14 @@ export default function Settings({ documents = [] }: SettingsProps) {
       </div>
 
       {/* Render Active Tab */}
+      {activeTab === 'whatsapp' && (
+        <div className="space-y-6">
+          <WhatsAppModeSettings
+            onModeSaved={(m) => setWhatsappModePref(m)}
+          />
+        </div>
+      )}
+
       {activeTab === 'general' && (
         <div className="space-y-6">
           {/* App Icons & PWA Integration Section */}
@@ -875,63 +929,10 @@ export default function Settings({ documents = [] }: SettingsProps) {
           {/* Dedicated Language Switcher Component */}
           <LanguageSwitcher />
 
-          {/* Preferred WhatsApp Output Format Settings Card */}
-          <div className="bg-gradient-to-br from-slate-900 via-emerald-950 to-slate-900 border-2 border-[#25D366]/40 rounded-2xl p-6 text-white shadow-md space-y-4">
-            <div className="flex items-center justify-between border-b border-[#25D366]/20 pb-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#25D366]/20 border border-[#25D366]/40 p-2 flex items-center justify-center shrink-0">
-                  <Smartphone className="w-5 h-5 text-[#25D366]" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
-                    <span>Preferred WhatsApp Output Format</span>
-                    {whatsappPrefSaved && (
-                      <span className="text-[10px] bg-[#25D366] text-slate-950 font-black px-2 py-0.5 rounded-full animate-pulse">
-                        Saved
-                      </span>
-                    )}
-                  </h3>
-                  <p className="text-[11px] text-slate-300">Choose how AI lesson plans, exams, reports, and formulas are delivered to your WhatsApp</p>
-                </div>
-              </div>
-              <span className="px-2.5 py-0.5 bg-[#25D366]/20 text-[#25D366] border border-[#25D366]/40 text-[10px] font-black uppercase tracking-wider rounded-full">
-                Active Integration
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 pt-1">
-              {[
-                { id: 'auto', title: '🤖 Auto-Select', subtitle: 'Recommended', desc: 'AI chooses best format dynamically' },
-                { id: 'mobile_text', title: '📱 Mobile Text', subtitle: 'Quick Reading', desc: 'Formatted WhatsApp text with emojis' },
-                { id: 'pdf_document', title: '📄 PDF Document', subtitle: 'Printable', desc: 'Branded EduNexus PDF + preview image' },
-                { id: 'image_document', title: '🖼️ Image Card', subtitle: 'Visual Card', desc: 'High-res document PNG image card' },
-                { id: 'rich_report', title: '📊 Rich Report', subtitle: 'Full Analytics', desc: 'Comprehensive multi-page PDF report' }
-              ].map((fmt) => (
-                <div
-                  key={fmt.id}
-                  onClick={() => handleSaveWhatsappPref(fmt.id as any)}
-                  className={`p-3.5 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
-                    whatsappFormatPref === fmt.id
-                      ? 'bg-[#25D366]/20 border-[#25D366] text-white shadow-md scale-[1.02]'
-                      : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-[#25D366]/50'
-                  }`}
-                >
-                  <div className="space-y-1">
-                    <span className="text-xs font-black text-[#25D366] block">{fmt.title}</span>
-                    <span className="text-[9px] font-bold uppercase text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 inline-block">
-                      {fmt.subtitle}
-                    </span>
-                    <p className="text-[10px] text-slate-300 leading-tight mt-1.5">{fmt.desc}</p>
-                  </div>
-                  {whatsappFormatPref === fmt.id && (
-                    <div className="mt-2 text-[10px] font-extrabold text-[#25D366] flex items-center gap-1">
-                      <Check className="w-3.5 h-3.5" /> Selected
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+          {/* WhatsApp Mode Settings Component */}
+          <WhatsAppModeSettings
+            onModeSaved={(m) => setWhatsappModePref(m)}
+          />
 
             {/* Sync Settings */}
           <div className="bg-white border border-[#e5e1da] rounded-2xl shadow-sm p-6 space-y-4">
@@ -1887,7 +1888,7 @@ export default function Settings({ documents = [] }: SettingsProps) {
               <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                 <Activity className="w-5 h-5 text-emerald-600" /> API Health Monitor & Fallback Registry
               </h3>
-              <p className="text-xs text-slate-500">View real-time operational diagnostics of Gemini API request routing, latency, and automated model fallback logs.</p>
+              <p className="text-xs text-slate-500">View real-time operational diagnostics of EduNexus AI API request routing, latency, and automated model fallback logs.</p>
             </div>
             <button
               onClick={fetchHealthMetrics}
@@ -1999,6 +2000,117 @@ export default function Settings({ documents = [] }: SettingsProps) {
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Subscription & Billing Tab */}
+      {activeTab === 'subscription' && (
+        <div className="space-y-6">
+          <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-950 to-emerald-950 text-white border border-emerald-500/30 shadow-md space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-emerald-500/20 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+                  <Crown className="w-6 h-6 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white flex items-center gap-2">
+                    <span>Active Subscription: {subscription?.plan?.toUpperCase() || 'FREE TIER'}</span>
+                    <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                      {subscription?.status?.toUpperCase() || 'ACTIVE'}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-300">
+                    Billing Cycle: <span className="font-bold capitalize">{subscription?.billingCycle || 'monthly'}</span> • Renewal Date: {subscription?.renewalDate ? new Date(subscription.renewalDate).toLocaleDateString() : 'N/A'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={onOpenPricingModal}
+                  className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-emerald-400 hover:from-emerald-400 hover:to-emerald-300 text-slate-950 font-black rounded-xl text-xs transition-all cursor-pointer shadow-md"
+                >
+                  {subscription?.plan === 'free' ? 'Upgrade Plan Now' : 'Change Plan / Buy Credits'}
+                </button>
+
+                {onToggleAutoRenew && subscription?.plan !== 'free' && (
+                  <button
+                    onClick={onToggleAutoRenew}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      subscription?.autoRenew
+                        ? 'bg-slate-800 text-slate-300 border-slate-700'
+                        : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    }`}
+                  >
+                    Auto-Renew: {subscription?.autoRenew ? 'ON' : 'OFF'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* QUOTA GAUGES GRID */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-2">
+              <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400">AI Tutor Questions Today</span>
+                <div className="text-xl font-black font-mono text-emerald-300">
+                  {limits?.aiQuestionsPerDay === -1 ? 'Unlimited' : `${subscription?.usageToday?.aiQuestions || 0} / ${limits?.aiQuestionsPerDay || 20}`}
+                </div>
+                <p className="text-[10px] text-slate-400">Resets daily at midnight</p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400">Image Studio Generations</span>
+                <div className="text-xl font-black font-mono text-cyan-300">
+                  {limits?.imagesPerDay === -1 ? 'Unlimited' : `${subscription?.usageToday?.images || 0} / ${limits?.imagesPerDay || 5}`}
+                </div>
+                <p className="text-[10px] text-slate-400">CBC diagrams & visual aids</p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400">Video Studio Clips</span>
+                <div className="text-xl font-black font-mono text-amber-300">
+                  {limits?.videosPerDay === -1 ? 'Unlimited' : `${subscription?.usageToday?.videos || 0} / ${limits?.videosPerDay || 2}`}
+                </div>
+                <p className="text-[10px] text-slate-400">Animated educational lessons</p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400">AI Credits Balance</span>
+                <div className="text-xl font-black font-mono text-amber-400 flex items-center gap-1">
+                  <Zap className="w-4 h-4 text-amber-400" /> {subscription?.aiCredits || 0}
+                </div>
+                <p className="text-[10px] text-slate-400">Usable for top-up generations</p>
+              </div>
+            </div>
+          </div>
+
+          {/* INVOICE & TRANSACTION LOGS */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+            <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-[#5f6f52]" />
+              <span>Subscription Invoices & Payment History</span>
+            </h4>
+            {(!subscription?.transactions || subscription.transactions.length === 0) ? (
+              <p className="text-xs text-slate-500 py-4 text-center border border-dashed border-slate-200 rounded-xl">
+                No billing transactions recorded yet.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+                {subscription.transactions.map((tx) => (
+                  <div key={tx.id} className="p-3.5 flex items-center justify-between text-xs hover:bg-slate-50">
+                    <div>
+                      <div className="font-bold text-slate-800">{tx.description}</div>
+                      <div className="text-[10px] text-slate-500">{new Date(tx.date).toLocaleString()} • {tx.paymentMethod}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-mono font-bold text-emerald-700">${tx.amountUSD.toFixed(2)}</div>
+                      <div className="text-[10px] text-slate-400 font-mono">{tx.receiptNo}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

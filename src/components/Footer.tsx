@@ -28,22 +28,18 @@ export const Footer: React.FC = () => {
             {/* Direct Contact Emails & Phone */}
             <div className="space-y-1.5 text-xs pt-1">
               <p className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Direct Contacts:</p>
-              <div className="flex flex-col gap-1 text-slate-400 text-[11px]">
-                <a href="tel:+254740183394" className="hover:text-emerald-400 transition flex items-center gap-1.5 font-bold text-amber-400">
+              <div className="flex flex-col gap-1.5 text-slate-400 text-[11px]">
+                <a href="tel:+254704360522" className="hover:text-amber-300 transition flex items-center gap-1.5 font-bold text-amber-400" title="Direct Phone Support">
                   <Phone className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>+254 740 183394</span>
+                  <span>Call Direct: 0704 360 522</span>
+                </a>
+                <a href="https://wa.me/254740183934" target="_blank" rel="noopener noreferrer" className="hover:text-emerald-300 transition flex items-center gap-1.5 font-bold text-emerald-400" title="WhatsApp Bot Socratic AI Assistant">
+                  <Globe className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>WhatsApp Bot: 0740 183 934</span>
                 </a>
                 <a href="mailto:support@joinedunexus.app" className="hover:text-emerald-400 transition flex items-center gap-1.5">
                   <Mail className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   <span>support@joinedunexus.app</span>
-                </a>
-                <a href="mailto:info@joinedunexus.app" className="hover:text-emerald-400 transition flex items-center gap-1.5">
-                  <Mail className="w-3.5 h-3.5 text-teal-400 shrink-0" />
-                  <span>info@joinedunexus.app</span>
-                </a>
-                <a href="mailto:help@joinedunexus.app" className="hover:text-emerald-400 transition flex items-center gap-1.5">
-                  <Mail className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                  <span>help@joinedunexus.app</span>
                 </a>
               </div>
             </div>

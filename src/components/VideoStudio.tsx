@@ -185,18 +185,18 @@ const SUGGESTED_TOPICS = [
 export const VIDEO_MODELS = [
   {
     id: 'veo',
-    name: 'Google Veo 2',
+    name: 'Studio Cinema HD',
     modelCode: 'veo-2.0-generate-001',
-    badge: 'Veo 2.0 (High Fidelity)',
+    badge: 'Studio HD (High Fidelity)',
     description: 'State-of-the-art cinematic generative video with photorealistic physics, temporal consistency, and 4K precision.',
     speed: 'Cinematic High-Fi (~1-2 mins)',
     tag: 'Best for Final Educational Courseware'
   },
   {
     id: 'omni',
-    name: 'Gemini Omni',
+    name: 'Studio Flash',
     modelCode: 'gemini-omni-flash-preview',
-    badge: 'Omni Flash (Native Multimodal)',
+    badge: 'Studio Flash (Native Multimodal)',
     description: 'Native multimodal video engine built for rapid storyboard animation, continuous visual reasoning, and fast iteration.',
     speed: 'Ultra Fast (~15-30s)',
     tag: 'Best for Rapid Previews & Storyboards'
@@ -3242,7 +3242,7 @@ export default function VideoStudio() {
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">AI Video Generation Model</span>
                 <span className="text-[9px] font-mono bg-[#5f6f52]/10 text-[#5f6f52] font-bold px-2 py-0.5 rounded-full">
-                  {selectedVideoModel === 'veo' ? 'Google Veo 2.0' : 'Gemini Omni'}
+                  {selectedVideoModel === 'veo' ? 'Studio Cinema HD' : 'Studio Flash'}
                 </span>
               </div>
 
@@ -3460,7 +3460,7 @@ export default function VideoStudio() {
                 
                 <h4 className="text-xl font-serif font-bold text-slate-800">Compiling Educational Storyboard</h4>
                 <p className="text-slate-400 text-xs mt-1.5 max-w-sm">
-                  Gemini is drafting scene descriptions, visual framing, timing codes, narrator teleprompter lines, and music pacing directives.
+                  EduNexus AI is drafting scene descriptions, visual framing, timing codes, narrator teleprompter lines, and music pacing directives.
                 </p>
 
                 <div className="mt-8 px-6 py-3.5 bg-slate-50 rounded-2xl max-w-md w-full border border-slate-150 relative">
@@ -4040,10 +4040,10 @@ export default function VideoStudio() {
                             <Sparkles className="w-4 h-4 text-[#5f6f52]" />
                             <div>
                               <span className="font-bold text-slate-800 block leading-tight">
-                                Video Model: {selectedVideoModel === 'veo' ? 'Google Veo 2' : 'Gemini Omni'}
+                                Video Model: {selectedVideoModel === 'veo' ? 'Studio Cinema HD' : 'Studio Flash'}
                               </span>
                               <span className="text-[9px] font-mono text-slate-400">
-                                {selectedVideoModel === 'veo' ? 'veo-2.0-generate-001 (High-Fi)' : 'gemini-omni-flash-preview (Omni Flash)'}
+                                {selectedVideoModel === 'veo' ? 'Cinema HD Engine (High-Fi)' : 'Flash Generative Engine'}
                               </span>
                             </div>
                           </div>
@@ -4059,7 +4059,7 @@ export default function VideoStudio() {
                                     : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'
                                 }`}
                               >
-                                {m.name.replace('Google ', '')}
+                                {m.name}
                               </button>
                             ))}
                           </div>
@@ -4077,7 +4077,7 @@ export default function VideoStudio() {
                             >
                               <Sparkles className="w-4 h-4 text-[#fefae0] animate-pulse" />
                               <span>
-                                Generate AI Clip ({selectedVideoModel === 'veo' ? 'Veo 2' : 'Omni'})
+                                Generate AI Clip ({selectedVideoModel === 'veo' ? 'Cinema HD' : 'Flash'})
                               </span>
                             </button>
 
@@ -6756,7 +6756,7 @@ export default function VideoStudio() {
                           <div className="space-y-1.5">
                             <p className="text-sm font-serif font-bold text-slate-800">Generate In-Depth Curriculum Summary</p>
                             <p className="text-slate-400 leading-relaxed">
-                              Use Gemini 3.5 Flash to automatically analyze the scenes, narration script, and learning checks to generate high-yield study guides, educational takeaways, and teacher discussion prompts.
+                              Use EduNexus AI to automatically analyze the scenes, narration script, and learning checks to generate high-yield study guides, educational takeaways, and teacher discussion prompts.
                             </p>
                           </div>
                           <button
@@ -6780,7 +6780,7 @@ export default function VideoStudio() {
                                   throw new Error(data.error);
                                 }
                                 setAiSummary(data.summary);
-                                setRenderLogs(prev => [...prev, `[Summary Engine] Successfully synthesized AI Lesson Summary utilizing Gemini.`]);
+                                setRenderLogs(prev => [...prev, `[Summary Engine] Successfully synthesized AI Lesson Summary utilizing EduNexus AI.`]);
                               } catch (err: any) {
                                 console.error(err);
                                 setSummaryError(err.message || 'Failed to connect to the summarization API.');
@@ -6799,7 +6799,7 @@ export default function VideoStudio() {
                           <Loader2 className="w-10 h-10 animate-spin text-[#5f6f52] mx-auto" />
                           <div className="space-y-1">
                             <p className="text-xs font-bold text-slate-700">Synthesizing Pedagogical Metadata Summary...</p>
-                            <p className="text-[10px] text-slate-400 italic">Gemini is compiling high-yield core academic objectives and teacher discussion scripts...</p>
+                            <p className="text-[10px] text-slate-400 italic">EduNexus AI is compiling high-yield core academic objectives and teacher discussion scripts...</p>
                           </div>
                         </div>
                       ) : (

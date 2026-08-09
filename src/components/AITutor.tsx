@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { classifyError } from '../utils/errorClassifier';
 import { 
   Sparkles, 
   Send, 
@@ -70,13 +71,13 @@ import {
   WifiOff,
   ShieldCheck
 } from 'lucide-react';
-import { SavedDocument, PersonalizedLearningPath, FlashcardDeck } from '../types';
+import { SavedDocument, PersonalizedLearningPath, FlashcardDeck, CurriculumType, ALL_CURRICULA_METADATA, getCurriculumMeta, getCurriculumLabel, getCurriculumTutorName } from '../types';
 import { LearningPathWorkspace } from './LearningPathWorkspace';
 import TutorDashboard from './TutorDashboard';
 import FlashcardDeckModal from './FlashcardDeckModal';
 import { cbcSubjectsData } from '../data/cbcData';
 import { EditableSelect } from './EditableSelect';
-import { db, auth, storage, handleFirestoreError, OperationType, cleanUndefined } from '../firebase';
+import { db, auth, storage, handleFirestoreError, OperationType, cleanUndefined, updateUserPrimaryCurriculum } from '../firebase';
 import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { useAuth } from '../context/AuthContext';
@@ -168,6 +169,41 @@ export default function AITutor({ documents, initialSelectedResourceId, onOpenIm
   const { aiLanguage } = useLanguage();
   const { user, profile } = useAuth();
   const isAdmin = profile?.role === 'Administrator';
+
+  // Dynamic Curriculum Selection (Syncs AI Tutor Name & System Prompts)
+  const [selectedCurriculum, setSelectedCurriculum] = useState<CurriculumType>(() => {
+    return (profile?.primaryCurriculum as CurriculumType) ||
+      (profile?.curriculum as CurriculumType) ||
+      (profile?.whatsappSettings?.curriculum as CurriculumType) ||
+      (typeof window !== 'undefined' ? (localStorage.getItem('edunexus_primary_curriculum') as CurriculumType) : null) ||
+      'cbc';
+  });
+
+  useEffect(() => {
+    const effectiveCurr = (profile?.primaryCurriculum as CurriculumType) ||
+      (profile?.curriculum as CurriculumType) ||
+      (profile?.whatsappSettings?.curriculum as CurriculumType);
+    if (effectiveCurr) {
+      setSelectedCurriculum(effectiveCurr);
+    }
+  }, [profile?.primaryCurriculum, profile?.curriculum, profile?.whatsappSettings?.curriculum]);
+
+  const handleCurriculumChange = async (nextCurr: CurriculumType) => {
+    setSelectedCurriculum(nextCurr);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('edunexus_primary_curriculum', nextCurr);
+    }
+    if (user?.uid) {
+      try {
+        await updateUserPrimaryCurriculum(user.uid, nextCurr);
+      } catch (err) {
+        console.error('Failed to sync curriculum selection:', err);
+      }
+    }
+  };
+
+  const activeTutorName = getCurriculumTutorName(selectedCurriculum);
+  const activeCurriculumMeta = getCurriculumMeta(selectedCurriculum);
 
   // Multi-Role AI Assistant State (Student, Teacher, Parent, Administrator)
   const [activeRole, setActiveRole] = useState<'Student' | 'Teacher' | 'Parent' | 'Administrator'>(() => {
@@ -1065,6 +1101,7 @@ export default function AITutor({ documents, initialSelectedResourceId, onOpenIm
         body: JSON.stringify({
           userRole: activeRole,
           userName: profile?.displayName || user?.displayName || 'EduNexus User',
+          curriculum: selectedCurriculum,
           subject: isCbcSession ? cbcSubject : subject,
           topic: isCbcSession ? `${cbcStrand} - ${cbcSubStrand}: ${cbcConcept}` : topic,
           persona,
@@ -1130,7 +1167,7 @@ export default function AITutor({ documents, initialSelectedResourceId, onOpenIm
       const errorMsg: Message = {
         id: `err_${Date.now()}`,
         role: 'model',
-        text: "I experienced a connection issue. Let's re-examine that last thought!",
+        text: classifyError(err),
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages(prev => [...prev, errorMsg]);
@@ -1354,8 +1391,12 @@ export default function AITutor({ documents, initialSelectedResourceId, onOpenIm
                 <span>Next-Gen Socratic Dialogue Engine</span>
               </div>
 
-              <h1 className="font-serif text-2xl sm:text-4xl font-bold tracking-tight leading-tight text-white">
-                EduNexus AI Tutor
+              <h1 className="font-serif text-2xl sm:text-4xl font-bold tracking-tight leading-tight text-white flex items-center gap-3 flex-wrap">
+                <span>{activeTutorName}</span>
+                <span className="text-xs font-sans px-3 py-1 rounded-full bg-white/20 text-emerald-100 border border-white/25 font-extrabold flex items-center gap-1.5 shadow-sm">
+                  <span>{activeCurriculumMeta.flag}</span>
+                  <span>{activeCurriculumMeta.shortLabel}</span>
+                </span>
               </h1>
 
               <p className="text-sm sm:text-base text-emerald-50 max-w-2xl font-normal leading-relaxed">
@@ -1429,7 +1470,7 @@ export default function AITutor({ documents, initialSelectedResourceId, onOpenIm
           {[
             { id: 'socratic', name: 'Socratic Dialogue', icon: Cpu, desc: 'Interactive AI Querying' },
             { id: 'dashboard', name: 'Tutor Dashboard', icon: Gauge, desc: 'Analytics & Metrics' },
-            { id: 'cbc-tutor', name: 'EduNexus CBC Tutor', icon: GraduationCap, desc: 'Kenyan Curriculum' },
+            { id: 'cbc-tutor', name: activeTutorName, icon: GraduationCap, desc: `${activeCurriculumMeta.flag} ${activeCurriculumMeta.shortLabel}` },
             { id: 'learning-path', name: 'Learning Path', icon: Compass, desc: 'Adaptive Pathways' },
             { id: 'diagnostics', name: 'Diagnostics', icon: Activity, desc: 'Gaps & Misconceptions' },
             { id: 'fullscreen', name: 'Full Screen', icon: Maximize2, desc: 'Immersive Focus' }
@@ -1535,6 +1576,30 @@ export default function AITutor({ documents, initialSelectedResourceId, onOpenIm
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
                     Tutor Parameters
                   </span>
+
+                  {/* Active Curriculum Selection */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                        <GraduationCap className="w-3.5 h-3.5 text-[#0E5E4B] dark:text-emerald-400" />
+                        <span>Curriculum Framework</span>
+                      </label>
+                      <span className="text-[10px] font-extrabold px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 rounded-md">
+                        {activeCurriculumMeta.flag} {activeCurriculumMeta.badge}
+                      </span>
+                    </div>
+                    <select
+                      value={selectedCurriculum}
+                      onChange={(e) => handleCurriculumChange(e.target.value as CurriculumType)}
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-[#0E5E4B] cursor-pointer"
+                    >
+                      {ALL_CURRICULA_METADATA.map((curr) => (
+                        <option key={curr.id} value={curr.id}>
+                          {curr.flag} {curr.label} ({curr.shortLabel})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
                   {/* Subject Dropdown */}
                   <div className="space-y-1">
@@ -2498,7 +2563,7 @@ export default function AITutor({ documents, initialSelectedResourceId, onOpenIm
         isOpen={isWhatsAppModalOpen}
         onClose={() => setIsWhatsAppModalOpen(false)}
         defaultPrompt={topic ? `Can you explain ${topic} in ${subject}?` : "Explain Newton's Second Law of Motion"}
-        userPhone="+254740183394"
+        userPhone="+254740183934"
       />
 
       {/* Lightbox Modal for Generated Media (Image & Video) */}

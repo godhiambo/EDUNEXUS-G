@@ -673,6 +673,10 @@
     "/generated_media/{mediaId}": {
       "schema": "generatedMedia",
       "description": "Log of image and video media generated across EduNexus studios and chat assistants."
+    },
+    "/documentBroadcastSessions/{sessionId}": {
+      "schema": "documentBroadcastSession",
+      "description": "Real-time synchronization state for teacher-led live document broadcasts to connected student screens."
     }
   }
 }

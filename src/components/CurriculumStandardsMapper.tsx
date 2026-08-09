@@ -22,7 +22,7 @@ import {
   Maximize2,
   Minimize2
 } from 'lucide-react';
-import { SavedDocument, StandardMapping } from '../types';
+import { SavedDocument, StandardMapping, getCurriculumMeta } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 import { handleResponseJson } from '../utils/api';
 
@@ -387,13 +387,15 @@ export default function CurriculumStandardsMapper({
             </span>
             <span className="text-slate-300">&bull;</span>
             <span className="text-slate-400">Curriculum Mode:</span>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
-              document.curriculum === 'cbc' 
-                ? 'bg-[#5f6f52]/10 text-[#5f6f52]' 
-                : 'bg-indigo-100 text-indigo-800'
-            }`}>
-              {document.curriculum === 'cbc' ? 'Kenyan CBC' : 'Standard (Intl)'}
-            </span>
+            {(() => {
+              const meta = getCurriculumMeta(document.curriculum);
+              return (
+                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold flex items-center gap-1 border ${meta.accentColor}`}>
+                  <span>{meta.flag}</span>
+                  <span>{meta.shortLabel}</span>
+                </span>
+              );
+            })()}
           </div>
 
           <div className="flex items-center gap-2">

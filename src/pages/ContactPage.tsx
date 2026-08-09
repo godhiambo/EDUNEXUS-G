@@ -85,53 +85,77 @@ export const ContactPage: React.FC = () => {
 
             <div className="grid grid-cols-1 gap-4">
               {/* Direct Phone & WhatsApp Helpline Card */}
-              <div className="p-5 rounded-2xl bg-gradient-to-br from-amber-500/15 via-slate-900 to-slate-900 border border-amber-500/40 shadow-lg space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-500/50 flex items-center justify-center text-amber-400 shrink-0 shadow-sm">
+              <div className="p-5 rounded-2xl bg-gradient-to-br from-amber-500/15 via-slate-900 to-slate-900 border border-amber-500/40 shadow-lg space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Direct Call Number */}
+                  <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-950/70 border border-amber-500/30">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/50 flex items-center justify-center text-amber-400 shrink-0 shadow-sm">
                       <Phone className="w-5 h-5" />
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-xs font-black uppercase tracking-wider text-amber-300">Direct Phone & WhatsApp Helpline</h3>
-                        <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full">
-                          Primary Contact
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="text-[11px] font-black uppercase tracking-wider text-amber-300">Direct Contact Phone</h3>
+                        <span className="px-1.5 py-0.5 text-[8px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full">
+                          Calls & Helpline
                         </span>
                       </div>
                       <a 
-                        href="tel:+254740183394" 
-                        className="text-lg font-black text-white hover:text-amber-300 transition block font-mono mt-0.5"
+                        href="tel:+254704360522" 
+                        className="text-base font-black text-white hover:text-amber-300 transition block font-mono mt-0.5"
                       >
-                        +254 740 183394
+                        0704 360 522 (+254 704 360522)
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* WhatsApp Bot Number */}
+                  <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-950/70 border border-emerald-500/30">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center text-emerald-400 shrink-0 shadow-sm">
+                      <MessageSquare className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="text-[11px] font-black uppercase tracking-wider text-emerald-300">WhatsApp Bot Number</h3>
+                        <span className="px-1.5 py-0.5 text-[8px] font-black uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full">
+                          Socratic AI
+                        </span>
+                      </div>
+                      <a 
+                        href="https://wa.me/254740183934" 
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-base font-black text-white hover:text-emerald-300 transition block font-mono mt-0.5"
+                      >
+                        0740 183 934 (+254 740 183934)
                       </a>
                     </div>
                   </div>
                 </div>
 
                 <p className="text-xs text-slate-300 leading-snug">
-                  Reach out directly via phone or WhatsApp for instant technical support, school onboarding, teacher assistance, and administrative consultations.
+                  Reach out directly via phone (<strong>0704360522</strong>) for technical support and consultations, or chat with our automated Socratic AI assistant on WhatsApp (<strong>0740183934</strong>).
                 </p>
 
                 {/* Quick Interactive Action Links */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                   <a
-                    href="tel:+254740183394"
+                    href="tel:+254704360522"
                     className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition flex items-center justify-center gap-2 shadow-md active:scale-95 text-center cursor-pointer"
-                    title="Call +254740183394 directly"
+                    title="Call 0704360522 directly"
                   >
                     <Phone className="w-4 h-4" />
-                    <span>Click-to-Call (+254 740 183394)</span>
+                    <span>Call Direct (0704 360 522)</span>
                   </a>
 
                   <a
-                    href="https://wa.me/254740183394"
+                    href="https://wa.me/254740183934"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs transition flex items-center justify-center gap-2 shadow-md active:scale-95 text-center cursor-pointer"
-                    title="Send a message to +254740183394 on WhatsApp"
+                    title="Send a message to 0740183934 on WhatsApp"
                   >
                     <MessageSquare className="w-4 h-4" />
-                    <span>Message on WhatsApp</span>
+                    <span>Chat on WhatsApp Bot (0740 183 934)</span>
                   </a>
                 </div>
               </div>

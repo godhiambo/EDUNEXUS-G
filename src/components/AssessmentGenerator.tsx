@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
+import { useAuth } from '../context/AuthContext';
 import { EditableSelect } from './EditableSelect';
 import { 
   Sparkles, 
@@ -33,6 +34,8 @@ import {
   SUBJECT_OPTIONS, 
   GRADE_OPTIONS_CBC, 
   GRADE_OPTIONS_STANDARD, 
+  getGradeOptionsForCurriculum,
+  ALL_CURRICULA_METADATA,
   CurriculumType,
   QuestionBankItem,
   QuizQuestion
@@ -52,11 +55,21 @@ const PEDAGOGICAL_TIPS = [
 ];
 
 export default function AssessmentGenerator({ onBackToDashboard }: AssessmentGeneratorProps) {
+  const { profile, updateUserProfile } = useAuth();
+
   // Form State
   const [subject, setSubject] = useState<string>('Science & Technology');
   const [customSubject, setCustomSubject] = useState<string>('');
   const [topic, setTopic] = useState<string>('');
   const [curriculum, setCurriculum] = useState<CurriculumType>('cbc');
+
+  // Auto-sync curriculum state with profile preference
+  useEffect(() => {
+    const prefCurr = profile?.primaryCurriculum || profile?.curriculum || profile?.whatsappSettings?.curriculum;
+    if (prefCurr && ['cbc', 'kcse', 'cambridge_primary', 'igcse', 'a_level', 'ib', 'standard'].includes(prefCurr)) {
+      setCurriculum(prefCurr as CurriculumType);
+    }
+  }, [profile?.primaryCurriculum, profile?.curriculum, profile?.whatsappSettings?.curriculum]);
   const [gradeLevel, setGradeLevel] = useState<string>('Grade 6');
   const [questionTypes, setQuestionTypes] = useState<string[]>(['multiple-choice', 'true-false', 'fill-in-blanks', 'short-answer']);
   const [numQuestions, setNumQuestions] = useState<number>(5);
@@ -97,7 +110,7 @@ export default function AssessmentGenerator({ onBackToDashboard }: AssessmentGen
   }, [questions]);
 
   // Grouped grade levels based on selected curriculum
-  const gradeOptions = curriculum === 'cbc' ? GRADE_OPTIONS_CBC : GRADE_OPTIONS_STANDARD;
+  const gradeOptions = getGradeOptionsForCurriculum(curriculum);
 
   // Sync gradeLevel if curriculum changes and gradeLevel is not in options
   useEffect(() => {
@@ -919,32 +932,28 @@ export default function AssessmentGenerator({ onBackToDashboard }: AssessmentGen
             {/* Curriculum standard */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Curriculum Standard
+                Curriculum Framework
               </label>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setCurriculum('cbc')}
-                  className={`py-2 px-3.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                    curriculum === 'cbc'
-                      ? 'bg-[#5f6f52]/10 border-[#5f6f52] text-[#5f6f52]'
-                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  Kenyan CBC
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCurriculum('standard')}
-                  className={`py-2 px-3.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                    curriculum === 'standard'
-                      ? 'bg-[#5f6f52]/10 border-[#5f6f52] text-[#5f6f52]'
-                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  Standard / KCSE Style
-                </button>
-              </div>
+              <select
+                value={curriculum}
+                onChange={(e) => {
+                  const nextCurr = e.target.value as CurriculumType;
+                  setCurriculum(nextCurr);
+                  if (updateUserProfile) {
+                    updateUserProfile({
+                      primaryCurriculum: nextCurr,
+                      curriculum: nextCurr
+                    });
+                  }
+                }}
+                className="w-full bg-white border border-slate-250 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:border-emerald-600 transition"
+              >
+                {ALL_CURRICULA_METADATA.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.flag} {c.label} ({c.badge})
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Grade Level Selector */}

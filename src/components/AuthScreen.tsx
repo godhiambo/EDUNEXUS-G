@@ -219,7 +219,7 @@ export default function AuthScreen() {
           <img src="/icon.svg" className="w-8 h-8 rounded-xl shadow-xs group-hover:scale-105 transition" alt="EduNexus" referrerPolicy="no-referrer" />
           <div>
             <span className="font-bold text-lg text-slate-900 tracking-tight block leading-none group-hover:text-[#5f6f52] transition">EduNexus</span>
-            <span className="text-[10px] text-amber-800 font-extrabold uppercase tracking-wider block mt-0.5">Competency-Based AI Platform</span>
+            <span className="text-[10px] text-amber-800 font-extrabold uppercase tracking-wider block mt-0.5">Unlimited Learning</span>
           </div>
         </div>
 
@@ -824,7 +824,7 @@ export default function AuthScreen() {
             disabled={loading}
             whileHover={{ scale: 1.015 }}
             whileTap={{ scale: 0.98 }}
-            className="w-full bg-slate-900 hover:bg-slate-800 text-white py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 mt-4 border border-slate-900 shadow-md shadow-slate-900/10"
+            className="w-full bg-[#5f6f52] hover:bg-[#4d5a42] text-white py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 mt-4 border border-[#5f6f52] shadow-md shadow-[#5f6f52]/20"
           >
             {loading ? (
               <span>Processing...</span>
@@ -836,6 +836,21 @@ export default function AuthScreen() {
             )}
           </motion.button>
         </form>
+
+        {/* Secure Authentication Badge Footer */}
+        <div className="pt-3 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-500 font-medium">
+          <div className="flex items-center gap-1.5 text-slate-600">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Encrypted Authentication</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleDemoLogin(role || 'Teacher')}
+            className="text-amber-800 hover:text-amber-950 font-bold transition cursor-pointer hover:underline"
+          >
+            Offline Sandbox Mode →
+          </button>
+        </div>
         </motion.div>
       </motion.div>
     </div>
@@ -865,7 +880,7 @@ export default function AuthScreen() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 {/* Teacher */}
                 <button
                   type="button"
@@ -878,7 +893,7 @@ export default function AuthScreen() {
                 >
                   <span className="text-2xl">🍎</span>
                   <span className="text-xs font-black">Teacher</span>
-                  <span className="text-[9px] text-slate-400 font-medium">Curriculums & Plans</span>
+                  <span className="text-[9px] text-slate-400 font-medium">Curriculums</span>
                 </button>
 
                 {/* Student */}
@@ -893,7 +908,7 @@ export default function AuthScreen() {
                 >
                   <span className="text-2xl">🎒</span>
                   <span className="text-xs font-black">Student</span>
-                  <span className="text-[9px] text-slate-400 font-medium">Socratic Tutor</span>
+                  <span className="text-[9px] text-slate-400 font-medium">AI Tutor</span>
                 </button>
 
                 {/* Parent */}
@@ -908,40 +923,9 @@ export default function AuthScreen() {
                 >
                   <span className="text-2xl">👪</span>
                   <span className="text-xs font-black">Parent</span>
-                  <span className="text-[9px] text-slate-400 font-medium">Performance Tracking</span>
-                </button>
-
-                {/* Administrator */}
-                <button
-                  type="button"
-                  onClick={() => setGoogleSelectedRole('Administrator')}
-                  className={`p-3 border-2 rounded-2xl flex flex-col items-center justify-center text-center gap-1.5 transition-all duration-200 cursor-pointer relative overflow-hidden ${
-                    googleSelectedRole === 'Administrator'
-                      ? 'border-rose-500 bg-rose-50/20 text-rose-700 ring-2 ring-rose-300'
-                      : 'border-slate-100 hover:border-rose-200 bg-slate-50/40 hover:bg-slate-50 text-slate-600'
-                  }`}
-                >
-                  <div className="absolute top-1 right-1 bg-rose-600 text-[8px] text-white font-extrabold px-1 py-0.5 rounded-md scale-90 uppercase">
-                    Lock
-                  </div>
-                  <span className="text-2xl">🛡️</span>
-                  <span className="text-xs font-black">Admin</span>
-                  <span className="text-[9px] text-slate-400 font-medium">Global Control</span>
+                  <span className="text-[9px] text-slate-400 font-medium">Tracking</span>
                 </button>
               </div>
-
-              {/* Admin Verification Disclaimer message */}
-              {googleSelectedRole === 'Administrator' && (
-                <div className="bg-rose-50/70 border border-rose-200 rounded-2xl p-3.5 text-center space-y-1.5 animate-slideUp">
-                  <span className="text-[10px] font-black uppercase text-rose-800 tracking-wider flex items-center justify-center gap-1">
-                    <Shield className="w-3.5 h-3.5 text-rose-600 animate-pulse" />
-                    <span>Authorized Personnel Only</span>
-                  </span>
-                  <p className="text-[10px] text-rose-950 font-semibold leading-normal">
-                    Administrator privileges are strictly locked to <span className="font-extrabold text-rose-700 text-[10.5px]">ojiambo.godfry@gmail.com</span> and <span className="font-extrabold text-rose-700 text-[10.5px]">godfreynexused@gmail.com</span>. Any other account will be automatically registered with a Teacher profile.
-                  </p>
-                </div>
-              )}
 
               {/* Action buttons */}
               <div className="flex gap-2 pt-2">

@@ -316,7 +316,7 @@ export default function AIActivityAutoGrader({
                   <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mb-4" />
                   <h5 className="text-sm font-bold text-slate-700">Analyzing Classroom Submissions</h5>
                   <p className="text-xs text-slate-400 mt-1 max-w-sm leading-relaxed">
-                    Gemini is processing objectives, comparing responses, evaluating correct answers, and diagnosing class struggles...
+                    EduNexus AI is processing objectives, comparing responses, evaluating correct answers, and diagnosing class struggles...
                   </p>
                 </div>
               ) : error ? (

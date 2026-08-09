@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { getBrandingConfig, subscribeBrandingConfig, BrandingConfig } from '../services/brandingService';
 
 interface WatermarkProps {
   opacity?: number;
@@ -9,27 +10,39 @@ interface WatermarkProps {
 }
 
 /**
- * A highly reusable and configurable EduNexus Watermark component.
- * It injects a subtle repeating diagonal text watermark, plus an elegant bottom-corner logo badge.
- * Designed to work seamlessly on-screen (with dark/light responsiveness) and in high-fidelity prints.
+ * Reusable and configurable EduNexus Watermark component.
+ * It injects a repeating diagonal text watermark, plus an adaptive corner logo badge based on the central Branding Service.
  */
 export const NexusWatermark: React.FC<WatermarkProps> = ({
-  opacity = 0.035,
+  opacity: customOpacity,
   showLogo = true,
-  text = 'EduNexus Curriculum',
+  text: customText,
   className = '',
   style = {},
 }) => {
-  // SVG background for a beautiful, repeating, tiled diagonal text watermark
-  // Using low opacity to prevent interfering with reading, but clearly present
-  const svgDataUrl = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180"><text fill="rgba(95, 111, 82, ${opacity})" font-family="sans-serif" font-weight="900" font-size="12" dy="25" dx="-20" transform="rotate(-30 90 90)" text-anchor="middle">${text}</text></svg>`;
+  const [config, setConfig] = useState<BrandingConfig>(getBrandingConfig());
 
-  // A dark-mode specific version with slightly lower opacity and white text for high legibility and contrast
-  const darkSvgDataUrl = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180"><text fill="rgba(255, 255, 255, ${opacity * 0.55})" font-family="sans-serif" font-weight="900" font-size="12" dy="25" dx="-20" transform="rotate(-30 90 90)" text-anchor="middle">${text}</text></svg>`;
+  useEffect(() => {
+    return subscribeBrandingConfig((newCfg) => setConfig(newCfg));
+  }, []);
+
+  if (!config.enabled) {
+    return null;
+  }
+
+  const activeOpacity = customOpacity ?? 0.035;
+  const activeText = customText ?? `${config.wordmark} ${config.slogan}`;
+
+  const svgDataUrl = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180"><text fill="rgba(95, 111, 82, ${activeOpacity})" font-family="sans-serif" font-weight="900" font-size="12" dy="25" dx="-20" transform="rotate(-30 90 90)" text-anchor="middle">${activeText}</text></svg>`;
+  const darkSvgDataUrl = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180"><text fill="rgba(255, 255, 255, ${activeOpacity * 0.55})" font-family="sans-serif" font-weight="900" font-size="12" dy="25" dx="-20" transform="rotate(-30 90 90)" text-anchor="middle">${activeText}</text></svg>`;
+
+  const positionClass = 
+    config.position === 'bottom-left' ? 'bottom-4 left-4' :
+    config.position === 'top-right' ? 'top-4 right-4' :
+    config.position === 'top-left' ? 'top-4 left-4' : 'bottom-4 right-4';
 
   return (
     <>
-      {/* Inline styles to handle repeating tile and print optimization */}
       <style>{`
         .nexus-watermark-overlay {
           position: absolute;
@@ -51,14 +64,14 @@ export const NexusWatermark: React.FC<WatermarkProps> = ({
           .nexus-watermark-overlay {
             display: block !important;
             opacity: 1 !important;
-            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'><text fill='rgba(0, 0, 0, 0.025)' font-family='sans-serif' font-weight='900' font-size='12' dy='25' dx='-20' transform='rotate(-30 90 90)' text-anchor='middle'>${text}</text></svg>") !important;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'><text fill='rgba(0, 0, 0, 0.025)' font-family='sans-serif' font-weight='900' font-size='12' dy='25' dx='-20' transform='rotate(-30 90 90)' text-anchor='middle'>${activeText}</text></svg>") !important;
             background-repeat: repeat !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
           .nexus-watermark-corner {
             display: flex !important;
-            opacity: 0.25 !important;
+            opacity: 0.35 !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
@@ -75,18 +88,21 @@ export const NexusWatermark: React.FC<WatermarkProps> = ({
       {/* Corner Branding Emblem Overlay */}
       {showLogo && (
         <div 
-          className="nexus-watermark-corner absolute bottom-4 right-4 pointer-events-none select-none flex items-center gap-1.5 opacity-[0.08] dark:opacity-[0.04] transition hover:opacity-20 z-10"
+          className={`nexus-watermark-corner absolute ${positionClass} pointer-events-none select-none flex items-center gap-2 p-1.5 rounded-xl bg-slate-900/60 backdrop-blur-sm border border-slate-700/50 shadow-md transition hover:opacity-100 z-10`}
+          style={{ opacity: Math.max(0.1, config.opacity * 0.8) }}
           aria-hidden="true"
         >
           <img 
-            src="/icon.svg" 
-            alt="EduNexus Emblem Logo" 
-            className="w-5 h-5 rounded-md grayscale" 
+            src={config.logoUrl || "/icon.svg"} 
+            alt={`${config.wordmark} Logo`} 
+            className="w-4 h-4 rounded-md object-contain" 
             referrerPolicy="no-referrer"
           />
           <div className="flex flex-col">
-            <span className="text-[9px] font-black tracking-widest text-[#5f6f52] dark:text-slate-300 uppercase font-sans leading-none">EduNexus</span>
-            <span className="text-[7px] text-slate-500 dark:text-slate-400 font-mono tracking-tight uppercase leading-none">Certified</span>
+            <span className="text-[9px] font-black tracking-widest text-white uppercase font-sans leading-none">{config.wordmark}</span>
+            {config.showWebsite && (
+              <span className="text-[7px] text-slate-300 font-mono tracking-tight uppercase leading-none mt-0.5">{config.website}</span>
+            )}
           </div>
         </div>
       )}
@@ -94,12 +110,10 @@ export const NexusWatermark: React.FC<WatermarkProps> = ({
   );
 };
 
-/**
- * A direct functional injector that returns an inline background style or SVG definition
- * if custom JS injection is needed for canvases or external rendering engines.
- */
 export function getNexusWatermarkStyle(opacity = 0.03): React.CSSProperties {
-  const svgDataUrl = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180"><text fill="rgba(95, 111, 82, ${opacity})" font-family="sans-serif" font-weight="900" font-size="12" dy="25" dx="-20" transform="rotate(-30 90 90)" text-anchor="middle">EduNexus Curriculum</text></svg>`;
+  const cfg = getBrandingConfig();
+  const text = `${cfg.wordmark} ${cfg.slogan}`;
+  const svgDataUrl = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180"><text fill="rgba(95, 111, 82, ${opacity})" font-family="sans-serif" font-weight="900" font-size="12" dy="25" dx="-20" transform="rotate(-30 90 90)" text-anchor="middle">${text}</text></svg>`;
   return {
     backgroundImage: `url('${svgDataUrl}')`,
     backgroundRepeat: 'repeat',

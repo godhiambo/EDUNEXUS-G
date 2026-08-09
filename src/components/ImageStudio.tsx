@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, doc, setDoc } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
+import { applyImageWatermark } from '../services/brandingService';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Sparkles,
@@ -96,7 +97,7 @@ export default function ImageStudio() {
 
   // Rotation messages for the loading screen
   const loadingMessages = [
-    'Initializing Gemini Image Synthesis engine...',
+    'Initializing Studio Image Synthesis engine...',
     'Analyzing semantic parameters & aesthetic mood...',
     'Stitching base vectors and color gradients...',
     'Refining contrasts, edges, and visual clarity...',
@@ -217,13 +218,15 @@ export default function ImageStudio() {
 
       const data = await res.json();
       if (data.imageUrl) {
-        setOutputImageUrl(data.imageUrl);
+        // Automatically apply EduNexus Branding Watermark post-processing
+        const brandedUrl = await applyImageWatermark(data.imageUrl);
+        setOutputImageUrl(brandedUrl);
         setOutputPrompt(prompt);
         
         // Add to session history
         const historyItem: HistoryItem = {
           id: `hist-${Date.now()}`,
-          imageUrl: data.imageUrl,
+          imageUrl: brandedUrl,
           prompt,
           model: selectedModel,
           aspectRatio,
@@ -307,7 +310,7 @@ export default function ImageStudio() {
             <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">Creative Image Studio</h1>
           </div>
           <p className="text-xs text-slate-500 mt-1 max-w-2xl leading-relaxed">
-            Harness the power of {isAdmin ? <strong>gemini-3.1-flash-image / emgen</strong> : <strong>AI Visual Synthesis</strong>} to create beautiful visual aids, textbook illustrations, and step-by-step custom diagrams directly inside your portal.
+            Harness the power of <strong>Studio Visual Synthesis</strong> to create beautiful visual aids, textbook illustrations, and step-by-step custom diagrams directly inside your portal.
           </p>
         </div>
 

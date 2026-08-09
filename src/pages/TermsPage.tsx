@@ -2,7 +2,7 @@ import React from 'react';
 import { SEO } from '../components/SEO';
 import PublicNavbar from '../components/PublicNavbar';
 import Footer from '../components/Footer';
-import { Mail, Scale, Building, Wrench, Phone } from 'lucide-react';
+import { Mail, Scale, Building, Wrench, Phone, MessageSquare } from 'lucide-react';
 
 export const TermsPage: React.FC = () => {
   return (
@@ -179,10 +179,20 @@ export const TermsPage: React.FC = () => {
             <div className="p-3 rounded-xl bg-slate-950 border border-amber-500/30 bg-amber-500/5 space-y-1">
               <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
                 <Phone className="w-3.5 h-3.5 text-amber-400" />
-                <span>Phone Helpline</span>
+                <span>Direct Call Helpline</span>
               </span>
-              <a href="tel:+254740183394" className="text-amber-400 font-extrabold hover:underline block truncate">
-                +254 740 183394
+              <a href="tel:+254704360522" className="text-amber-400 font-extrabold hover:underline block truncate">
+                0704 360 522
+              </a>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-950 border border-emerald-500/30 bg-emerald-500/5 space-y-1">
+              <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+                <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                <span>WhatsApp Bot</span>
+              </span>
+              <a href="https://wa.me/254740183934" target="_blank" rel="noopener noreferrer" className="text-emerald-400 font-extrabold hover:underline block truncate">
+                0740 183 934
               </a>
             </div>
 

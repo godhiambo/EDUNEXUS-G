@@ -35,6 +35,15 @@ export const PRESET_FIELD_TRIPS: VirtualFieldTripRoute[] = [
         mapType: 'satellite',
         streetViewPov: { heading: 270, pitch: 10 },
         readingPassage: 'Welcome to Brussels! Standing at the gates of the Palais Royal, observe the grand Neoclassical façade constructed during King Leopold II’s reign. In European diplomacy, public architecture is designed to project stability and cultural heritage.',
+        phenomenonHook: {
+          title: 'The Neoclassical Acoustic Symmetry Anomaly',
+          mysteryQuestion: 'Why does a voice spoken softly at the central royal gates resonate distinctly across the entire plaza, while ambient city street noise is muffled?',
+          observableFacts: [
+            'Concave limestone façade geometry forms a natural parabolic acoustic focuser.',
+            'Precision pillar spacing creates destructive acoustic interference nodes for low-frequency urban carriage traffic.'
+          ],
+          inquiryChallenge: 'Examine how 19th-century royal architects engineered physical acoustics and geometric symmetry to project authority without electronic amplification.'
+        },
         foreignLanguageCues: [
           {
             phrase: 'Tournez à gauche sur la Rue Royale',
@@ -162,6 +171,15 @@ export const PRESET_FIELD_TRIPS: VirtualFieldTripRoute[] = [
         streetViewPov: { heading: 110, pitch: 15 },
         panoramaUrl: 'https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?auto=format&fit=crop&w=1200&q=80',
         readingPassage: 'Vous êtes arrivés à la Grand-Place! Surrounded by opulent 17th-century merchant guildhalls and the towering Gothic Town Hall (Hôtel de Ville), this square served as the commercial heartbeat of Brabant.',
+        phenomenonHook: {
+          title: 'The Guildhall Gold-Foil Competition Mystery',
+          mysteryQuestion: 'Why did 17th-century baker, brewer, and archer trade guilds spend more gold leaf decorating exterior rooflines than interior administrative chambers?',
+          observableFacts: [
+            'Exterior guildhall façades face public street angles to capture direct sunlight reflections.',
+            'Gold leaf foil layer thickness is only 0.1 micrometers yet survives 350+ years of rainfall.'
+          ],
+          inquiryChallenge: 'Analyze how competitive visual status signals in guild economics drove craftsmanship standards across early modern European trade markets.'
+        },
         foreignLanguageCues: [
           {
             phrase: 'Suivez le chemin jusqu’à la Maison du Roi',
@@ -230,6 +248,15 @@ export const PRESET_FIELD_TRIPS: VirtualFieldTripRoute[] = [
         zoom: 17,
         mapType: 'satellite',
         readingPassage: 'Constructed for the 1958 Brussels World’s Fair (Expo 58), the Atomium represents an iron crystal cell magnified 165 billion times! It stands as a monument to post-WWII scientific optimism and European atomic energy collaboration.',
+        phenomenonHook: {
+          title: 'The 165-Billion-Times Iron Crystal Scaling Mystery',
+          mysteryQuestion: 'How does a body-centered cubic (BCC) iron crystal structure remain structurally stable when scaled up 165 billion times into a 102-meter tall steel building?',
+          observableFacts: [
+            'BCC crystal unit cell has atoms at 8 corners plus 1 central atom.',
+            'Connecting escalator tubes act as load-bearing atomic bond struts maintaining structural equilibrium.'
+          ],
+          inquiryChallenge: 'Investigate structural engineering parallels between subatomic electromagnetic force bonds and macroscopic steel truss tension systems.'
+        },
         foreignLanguageCues: [
           {
             phrase: 'Avancez vers les sphères en acier inoxydable',

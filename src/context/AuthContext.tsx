@@ -14,7 +14,7 @@ import { doc, getDoc, setDoc, onSnapshot, collection, deleteDoc, disableNetwork,
 import { auth, db, handleFirestoreError, OperationType, cleanUndefined } from '../firebase';
 import { logActivity } from '../lib/activityLogger';
 import { triggerAdminNotification } from '../lib/adminNotifications';
-import { UserAccount, UserRole, AllowedAction, SystemPolicies, UserOverride } from '../types';
+import { UserAccount, UserRole, AllowedAction, SystemPolicies, UserOverride, CurriculumType } from '../types';
 
 export function extractNameFromEmail(email?: string | null): string {
   if (!email || typeof email !== 'string' || !email.includes('@')) {
@@ -71,6 +71,8 @@ interface AuthContextType {
   user: FirebaseUser | null;
   profile: UserAccount | null;
   loading: boolean;
+  hasDeveloperClaim: boolean;
+  isDeveloper: boolean;
   loginWithEmail: (email: string, pass: string) => Promise<void>;
   registerWithEmail: (email: string, pass: string, name: string, role: UserRole) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
@@ -89,6 +91,7 @@ interface AuthContextType {
   adminAddUser: (email: string, displayName: string, role: UserRole) => Promise<void>;
   incrementUserWarnings: (uid: string) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
+  updateUserProfile: (updates: Partial<UserAccount>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -97,7 +100,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserAccount | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasDeveloperClaim, setHasDeveloperClaim] = useState<boolean>(false);
   const [allUsers, setAllUsers] = useState<UserAccount[]>([]);
+
+  const ALLOWED_DEVELOPER_EMAILS = [
+    'ojiambo.godfrey@gmail.com',
+    'ojiambo.godfry@gmail.com',
+    'godfreynexused@gmail.com'
+  ];
+  const userEmailLower = (user?.email || profile?.email || '').toLowerCase().trim();
+  const isDeveloper = hasDeveloperClaim || profile?.role === 'developer' || ALLOWED_DEVELOPER_EMAILS.includes(userEmailLower);
 
   // Listen to Auth changes
   useEffect(() => {
@@ -127,6 +139,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(firebaseUser);
       
       if (firebaseUser) {
+        try {
+          const tokenResult = await firebaseUser.getIdTokenResult();
+          setHasDeveloperClaim(tokenResult?.claims?.developer === true);
+        } catch (err) {
+          console.warn("Could not retrieve custom claims from Firebase ID token:", err);
+          setHasDeveloperClaim(false);
+        }
+
         const userRef = doc(db, 'users', firebaseUser.uid);
         
         try {
@@ -140,12 +160,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           
           if (userSnap.exists()) {
             const existingData = userSnap.data() as UserAccount;
-            const isBootstrappedAdmin = emailLower === 'ojiambo.godfry@gmail.com' || emailLower === 'godfreynexused@gmail.com';
+            const isDeveloper = emailLower === 'ojiambo.godfrey@gmail.com' || emailLower === 'ojiambo.godfry@gmail.com' || emailLower === 'godfreynexused@gmail.com';
             
             let updatedRole = existingData.role;
-            if (isBootstrappedAdmin) {
-              updatedRole = 'Administrator';
-            } else if (existingData.role === 'Administrator' && !isBootstrappedAdmin) {
+            if (isDeveloper) {
+              updatedRole = 'developer';
+            } else if ((existingData.role === 'Administrator' || existingData.role === 'developer') && !isDeveloper) {
               // Strictly demote if not a developer email
               updatedRole = 'Teacher';
             }
@@ -154,11 +174,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const nameNeedsUpdate = existingData.displayName !== resolvedName;
 
             if (
-              pendingRole === 'Administrator' &&
-              !isBootstrappedAdmin &&
-              existingData.role !== 'Administrator'
+              (pendingRole === 'Administrator' || pendingRole === 'developer') &&
+              !isDeveloper &&
+              existingData.role !== 'developer'
             ) {
-              sessionStorage.setItem('auth_error_msg', 'Access denied: The Administrator role is restricted to authorized emails.');
+              sessionStorage.setItem('auth_error_msg', 'Access denied: The Developer Console is restricted to authorized platform owners.');
             }
 
             if (updatedRole !== existingData.role || nameNeedsUpdate) {
@@ -199,19 +219,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const googleRegRole = sessionStorage.getItem('pending_google_reg_role') as UserRole | null;
             const emailRegName = sessionStorage.getItem('pending_email_reg_name');
             const emailRegRole = sessionStorage.getItem('pending_email_reg_role') as UserRole | null;
-            const isBootstrappedAdmin = emailLower === 'ojiambo.godfry@gmail.com' || emailLower === 'godfreynexused@gmail.com';
+            const isDeveloper = emailLower === 'ojiambo.godfrey@gmail.com' || emailLower === 'ojiambo.godfry@gmail.com' || emailLower === 'godfreynexused@gmail.com';
             const isDemoStudent = emailLower === 'student.demo@edunexus.test';
             const hasPasswordProvider = firebaseUser.providerData?.some((provider) => provider.providerId === 'password');
             const hasGoogleProvider = firebaseUser.providerData?.some((provider) => provider.providerId === 'google.com');
 
-            if (pendingRole || googleRegRole || emailRegRole || hasPasswordProvider || hasGoogleProvider || isBootstrappedAdmin || isDemoStudent) {
+            if (pendingRole || googleRegRole || emailRegRole || hasPasswordProvider || hasGoogleProvider || isDeveloper || isDemoStudent) {
               let defaultRole: UserRole = pendingRole || googleRegRole || emailRegRole || 'Teacher';
-              if (isBootstrappedAdmin) {
-                defaultRole = 'Administrator';
-              } else if (defaultRole === 'Administrator') {
-                // Prevent non-admin emails from registering as Administrator!
+              if (isDeveloper) {
+                defaultRole = 'developer';
+              } else if (defaultRole === 'Administrator' || defaultRole === 'developer') {
+                // Prevent non-developer emails from registering as developer or Administrator!
                 defaultRole = 'Teacher';
-                sessionStorage.setItem('auth_error_msg', 'Access denied: The Administrator role is restricted to authorized emails. Configured with Teacher role instead.');
+                sessionStorage.setItem('auth_error_msg', 'Access denied: The Developer Console is restricted to authorized platform owners. Configured with Teacher role instead.');
               } else if (isDemoStudent) {
                 defaultRole = 'Student';
               }
@@ -273,6 +293,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           });
         }
       } else {
+        setHasDeveloperClaim(false);
         setProfile(null);
       }
       setLoading(false);
@@ -292,16 +313,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (docSnap.exists()) {
         const prof = docSnap.data() as UserAccount;
         const resolvedName = resolveDisplayName(prof.displayName, user.email, user.displayName);
+        const effectiveCurriculum = prof.primaryCurriculum || prof.curriculum || prof.whatsappSettings?.curriculum || (localStorage.getItem('edunexus_primary_curriculum') as CurriculumType) || 'cbc';
         
-        let finalProf = prof;
+        let finalProf = {
+          ...prof,
+          curriculum: effectiveCurriculum,
+          primaryCurriculum: effectiveCurriculum,
+          whatsappSettings: {
+            ...(prof.whatsappSettings || {}),
+            curriculum: effectiveCurriculum
+          }
+        };
+
         if (prof.displayName !== resolvedName) {
-          finalProf = { ...prof, displayName: resolvedName };
+          finalProf.displayName = resolvedName;
           try {
             await setDoc(userRef, { displayName: resolvedName }, { merge: true });
           } catch (err) {
             console.warn("Could not auto-sync updated displayName to Firestore:", err);
           }
         }
+
+        localStorage.setItem('edunexus_primary_curriculum', effectiveCurriculum);
+        localStorage.setItem('edunexus_whatsapp_curriculum_pref', effectiveCurriculum);
 
         setProfile(finalProf);
         
@@ -347,9 +381,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, [user]);
 
-  // If user is Administrator, listen to ALL users in the system to enable user management
+  // If user is Developer or Administrator, listen to ALL users in the system to enable user management
   useEffect(() => {
-    if (!profile || profile.role !== 'Administrator') {
+    if (!profile || (profile.role !== 'developer' && profile.role !== 'Administrator')) {
       setAllUsers([]);
       return;
     }
@@ -793,11 +827,82 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const updateUserProfile = async (updates: Partial<UserAccount>) => {
+    const activeUid = user?.uid || profile?.uid;
+    if (!activeUid && !profile) return;
+
+    const curr = updates.primaryCurriculum || updates.curriculum;
+
+    const mergedUpdates: Partial<UserAccount> = {
+      ...updates,
+      ...(curr ? {
+        primaryCurriculum: curr,
+        curriculum: curr,
+        whatsappSettings: {
+          ...(profile?.whatsappSettings || {}),
+          curriculum: curr,
+          updatedAt: new Date().toISOString()
+        }
+      } : {})
+    };
+
+    if (curr) {
+      localStorage.setItem('edunexus_primary_curriculum', curr);
+      localStorage.setItem('edunexus_whatsapp_curriculum_pref', curr);
+    }
+
+    setProfile((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        ...mergedUpdates,
+        whatsappSettings: {
+          ...(prev.whatsappSettings || {}),
+          ...(mergedUpdates.whatsappSettings || {})
+        }
+      };
+    });
+
+    if (activeUid?.startsWith('offline-sandbox-') || localStorage.getItem('nexus_offline_profile')) {
+      if (profile) {
+        const updatedLocal = { ...profile, ...mergedUpdates };
+        localStorage.setItem('nexus_offline_profile', JSON.stringify(updatedLocal));
+      }
+    }
+
+    if (activeUid && !activeUid.startsWith('offline-sandbox-')) {
+      try {
+        const userRef = doc(db, 'users', activeUid);
+        await setDoc(userRef, cleanUndefined(mergedUpdates), { merge: true });
+      } catch (err) {
+        console.error('Error updating user profile in Firestore:', err);
+        handleFirestoreError(err, OperationType.UPDATE, `users/${activeUid}`);
+      }
+    }
+
+    if (curr) {
+      try {
+        await fetch('/api/whatsapp/preference', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: activeUid,
+            curriculum: curr
+          })
+        });
+      } catch (apiErr) {
+        console.warn('Backend curriculum preference sync failed:', apiErr);
+      }
+    }
+  };
+
   return (
     <AuthContext.Provider value={{
       user,
       profile,
       loading,
+      hasDeveloperClaim,
+      isDeveloper,
       loginWithEmail,
       registerWithEmail,
       loginWithGoogle,
@@ -815,7 +920,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isActionAllowed,
       adminAddUser,
       incrementUserWarnings,
-      sendPasswordReset
+      sendPasswordReset,
+      updateUserProfile
     }}>
       {children}
     </AuthContext.Provider>

@@ -383,7 +383,7 @@ export default function RealtimeSpellcheckEditor({
                 onClick={() => handleSimplifySentence()}
                 disabled={isSimplifyingSentence || isSimplifyingParagraph}
                 className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-800 text-[10px] font-bold shadow-2xs transition cursor-pointer disabled:opacity-50"
-                title="Rephrase highlighted selection to a simpler reading complexity using Gemini API"
+                title="Rephrase highlighted selection to a simpler reading complexity using AI Engine"
               >
                 {isSimplifyingSentence ? (
                   <Sparkles className="w-3 h-3 text-purple-600 animate-spin" />
@@ -401,7 +401,7 @@ export default function RealtimeSpellcheckEditor({
                 onClick={handleSimplifyParagraph}
                 disabled={isSimplifyingSentence || isSimplifyingParagraph}
                 className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-900 text-[10px] font-bold shadow-2xs transition cursor-pointer disabled:opacity-50"
-                title="Batch simplify entire highlighted paragraph(s) or surrounding lines at once using Gemini API"
+                title="Batch simplify entire highlighted paragraph(s) or surrounding lines at once using AI Engine"
               >
                 {isSimplifyingParagraph ? (
                   <Sparkles className="w-3 h-3 text-indigo-600 animate-spin" />

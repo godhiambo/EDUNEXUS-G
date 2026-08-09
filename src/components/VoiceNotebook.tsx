@@ -1490,7 +1490,7 @@ export default function VoiceNotebook({ currentProfile }: VoiceNotebookProps) {
                     <Loader2 className="w-8 h-8 text-[#5f6f52] animate-spin" />
                     <div>
                       <p className="text-sm font-bold text-slate-800">Summarizing Classroom Audio Notes...</p>
-                      <p className="text-xs text-slate-400 mt-1">Gemini is extracting pedagogy objectives, key vocabulary, and mapping the concepts.</p>
+                      <p className="text-xs text-slate-400 mt-1">EduNexus AI is extracting pedagogy objectives, key vocabulary, and mapping the concepts.</p>
                     </div>
                   </div>
                 ) : !aiSummary ? (

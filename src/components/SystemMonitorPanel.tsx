@@ -79,10 +79,14 @@ export interface QuotaMetricsData {
 
 export default function SystemMonitorPanel() {
   const [metrics, setMetrics] = useState<QuotaMetricsData | null>(null);
+  const [gatewayStats, setGatewayStats] = useState<any>(null);
+  const [subStats, setSubStats] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [probing, setProbing] = useState<boolean>(false);
   const [probeResult, setProbeResult] = useState<{ status: string; message: string; latencyMs?: number } | null>(null);
   const [clearingLogs, setClearingLogs] = useState<boolean>(false);
+  const [clearingCache, setClearingCache] = useState<boolean>(false);
+  const [updatingBudget, setUpdatingBudget] = useState<boolean>(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
   
   // Proactive mitigation toggle states
@@ -92,16 +96,60 @@ export default function SystemMonitorPanel() {
 
   const fetchQuotaMetrics = async () => {
     try {
-      const res = await fetch('/api/gemini-quota');
-      if (res.ok) {
-        const data = await res.json();
+      const [resQuota, resGw, resSub] = await Promise.all([
+        fetch('/api/gemini-quota'),
+        fetch('/api/admin/ai-gateway/stats'),
+        fetch('/api/admin/subscription/stats')
+      ]);
+
+      if (resQuota.ok) {
+        const data = await resQuota.json();
         setMetrics(data);
-        setLastRefreshed(new Date());
       }
+      if (resGw.ok) {
+        const dataGw = await resGw.json();
+        setGatewayStats(dataGw);
+      }
+      if (resSub.ok) {
+        const dataSub = await resSub.json();
+        setSubStats(dataSub.stats);
+      }
+      setLastRefreshed(new Date());
     } catch (err) {
       console.error('Failed to fetch Gemini API quota metrics:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleToggleCostSaving = async (enable: boolean) => {
+    setUpdatingBudget(true);
+    try {
+      const res = await fetch('/api/admin/ai-gateway/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ costSavingMode: enable })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setGatewayStats(data.stats);
+      }
+    } catch (err) {
+      console.error('Failed to update cost saving mode:', err);
+    } finally {
+      setUpdatingBudget(false);
+    }
+  };
+
+  const handleClearCache = async () => {
+    setClearingCache(true);
+    try {
+      await fetch('/api/admin/ai-gateway/clear-cache', { method: 'POST' });
+      await fetchQuotaMetrics();
+    } catch (err) {
+      console.error('Failed to clear cache:', err);
+    } finally {
+      setClearingCache(false);
     }
   };
 
@@ -432,6 +480,143 @@ export default function SystemMonitorPanel() {
         </div>
 
       </div>
+
+      {/* CENTRALIZED AI GATEWAY & BUDGET MANAGER FINOPS DASHBOARD */}
+      {gatewayStats && (
+        <div className="bg-gradient-to-br from-slate-900 via-slate-950 to-emerald-950 rounded-2xl border-2 border-emerald-500/40 p-6 text-white space-y-6 shadow-md">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-emerald-500/20 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 p-2 flex items-center justify-center text-emerald-400 shrink-0">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-white flex items-center gap-2">
+                  <span>Centralized AI Gateway & Budget Manager</span>
+                  <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                    gatewayStats.budget.budgetStatusLevel === 'EXHAUSTED'
+                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/50 animate-pulse'
+                      : gatewayStats.budget.budgetStatusLevel === 'RESTRICTED'
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+                      : gatewayStats.budget.budgetStatusLevel === 'HIGH_SPEND'
+                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  }`}>
+                    {gatewayStats.budget.budgetStatusLevel} STATUS
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-300">Intelligent model routing, spending thresholds, failover cascade, and prompt response caching</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleToggleCostSaving(!gatewayStats.budget.isCostSavingActive)}
+                disabled={updatingBudget}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer border flex items-center gap-1.5 ${
+                  gatewayStats.budget.isCostSavingActive
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 hover:bg-amber-500/30'
+                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                <span>Cost Saving Mode: {gatewayStats.budget.isCostSavingActive ? 'ACTIVE' : 'OFF'}</span>
+              </button>
+
+              <button
+                onClick={handleClearCache}
+                disabled={clearingCache}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-slate-400" />
+                <span>Clear Cache ({gatewayStats.cache.totalEntries})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* BUDGET & SPENDING THRESHOLD GAUGES */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="p-4 rounded-xl bg-slate-900/80 border border-emerald-500/30 space-y-2">
+              <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider flex items-center gap-1">
+                <BarChart3 className="w-3.5 h-3.5 text-emerald-400" /> Daily AI Budget
+              </span>
+              <div className="flex items-baseline justify-between">
+                <span className="text-xl font-black text-white font-mono">${gatewayStats.budget.dailySpendUSD.toFixed(3)}</span>
+                <span className="text-xs font-mono text-slate-400">/ ${gatewayStats.budget.dailyBudgetUSD} USD</span>
+              </div>
+              <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                <div
+                  className={`h-full transition-all duration-500 ${
+                    gatewayStats.budget.percentSpent >= 90
+                      ? 'bg-rose-500'
+                      : gatewayStats.budget.percentSpent >= 75
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-400'
+                  }`}
+                  style={{ width: `${Math.max(3, gatewayStats.budget.percentSpent)}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-slate-400 font-medium">{gatewayStats.budget.percentSpent}% of daily budget used</p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-900/80 border border-emerald-500/30 space-y-2">
+              <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider flex items-center gap-1">
+                <Database className="w-3.5 h-3.5 text-cyan-400" /> AI Response Cache Hit Rate
+              </span>
+              <div className="flex items-baseline justify-between">
+                <span className="text-xl font-black text-cyan-300 font-mono">{gatewayStats.cache.cacheHitRatePercent}%</span>
+                <span className="text-xs text-slate-400 font-mono">{gatewayStats.cache.cacheHits} Hits / {gatewayStats.cache.cacheMisses} Misses</span>
+              </div>
+              <p className="text-[10px] text-slate-400 font-medium">{gatewayStats.cache.totalEntries} cached prompts in memory (TTL 2h)</p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-900/80 border border-emerald-500/30 space-y-2">
+              <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider flex items-center gap-1">
+                <Activity className="w-3.5 h-3.5 text-amber-400" /> Total Processed Requests
+              </span>
+              <div className="flex items-baseline justify-between">
+                <span className="text-xl font-black text-white font-mono">{gatewayStats.metrics.totalRequests}</span>
+                <span className="text-xs text-amber-400 font-extrabold">{gatewayStats.metrics.fallbackActivations} Fallbacks</span>
+              </div>
+              <p className="text-[10px] text-slate-400 font-medium">Automatic failover cascade across Gemini models</p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-900/80 border border-emerald-500/30 space-y-2">
+              <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider flex items-center gap-1">
+                <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Projected Monthly Cost
+              </span>
+              <div className="flex items-baseline justify-between">
+                <span className="text-xl font-black text-emerald-300 font-mono">${(gatewayStats.budget.dailySpendUSD * 30).toFixed(2)}</span>
+                <span className="text-xs text-slate-400 font-mono">Limit: ${gatewayStats.config.monthlyBudgetUSD}</span>
+              </div>
+              <p className="text-[10px] text-slate-400 font-medium">Monthly budget limit & FinOps threshold protection</p>
+            </div>
+          </div>
+
+          {/* SPENDING THRESHOLD CONTROLS INDICATOR */}
+          <div className="p-3.5 rounded-xl bg-slate-900/90 border border-emerald-500/20 space-y-2">
+            <span className="text-[11px] font-black uppercase text-emerald-400 tracking-wider flex items-center gap-1.5">
+              <Info className="w-3.5 h-3.5" /> Spending Threshold Policy States
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[10px]">
+              <div className={`p-2 rounded-lg border font-bold text-center ${gatewayStats.budget.percentSpent >= 50 ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
+                50% - Developer Alert
+              </div>
+              <div className={`p-2 rounded-lg border font-bold text-center ${gatewayStats.budget.percentSpent >= 75 ? 'bg-amber-500/30 border-amber-500/60 text-amber-200' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
+                75% - Cost Saving Mode
+              </div>
+              <div className={`p-2 rounded-lg border font-bold text-center ${gatewayStats.budget.percentSpent >= 90 ? 'bg-rose-500/20 border-rose-500/50 text-rose-300' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
+                90% - Restrict Analytics
+              </div>
+              <div className={`p-2 rounded-lg border font-bold text-center ${gatewayStats.budget.percentSpent >= 95 ? 'bg-rose-500/30 border-rose-500/60 text-rose-200' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
+                95% - Educational Only
+              </div>
+              <div className={`p-2 rounded-lg border font-bold text-center ${gatewayStats.budget.percentSpent >= 100 ? 'bg-rose-600 text-white border-rose-400 animate-pulse' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
+                100% - Emergency Fallback
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* RATE LIMIT GAUGES & PROGRESS BARS ROW */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">

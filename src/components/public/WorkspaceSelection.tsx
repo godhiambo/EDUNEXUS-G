@@ -11,7 +11,7 @@ import {
   GraduationCap
 } from 'lucide-react';
 
-export type UserRole = 'Teacher' | 'Student' | 'Parent' | 'Administrator';
+export type UserRole = 'Teacher' | 'Student' | 'Parent';
 
 interface WorkspaceSelectionProps {
   onSelectRole: (role: UserRole) => void;
@@ -23,15 +23,15 @@ export default function WorkspaceSelection({ onSelectRole, onBackToHome }: Works
     {
       role: 'Teacher' as UserRole,
       title: 'Teacher Workspace',
-      badge: 'Lesson Architect & Assessment Studio',
-      description: 'Generate 5E KICD lesson plans, auto-grade assessments, print QR scavenger hunts, and track learner performance.',
+      badge: 'Lesson Architect, Playbook & Assessment Studio',
+      description: 'Generate 5E KICD lesson plans, access school management guides, auto-grade assessments, print QR scavenger hunts, and track learner performance.',
       color: 'from-amber-500 to-amber-600',
       bgColor: 'bg-amber-50/80 hover:bg-amber-100/80 border-amber-200/80',
       badgeColor: 'bg-amber-100 text-amber-900 border-amber-300',
       btnColor: 'bg-amber-600 hover:bg-amber-700 text-white',
       icon: BookOpen,
       iconColor: 'text-amber-600',
-      highlights: ['KICD 5E Lesson Architect', 'AI Assessment Diagnostic', 'QR Scavenger Hunt Studio']
+      highlights: ['KICD 5E Lesson Architect', 'Teacher Playbook & Management', 'QR Scavenger Hunt Studio']
     },
     {
       role: 'Student' as UserRole,
@@ -58,19 +58,6 @@ export default function WorkspaceSelection({ onSelectRole, onBackToHome }: Works
       icon: Users,
       iconColor: 'text-purple-600',
       highlights: ['Competency Progress Digest', 'Teacher Messaging & Alerts', 'Multilingual Home Activities']
-    },
-    {
-      role: 'Administrator' as UserRole,
-      title: 'Administrator Workspace',
-      badge: 'Institutional Governance & System Audit',
-      description: 'Monitor school-wide curriculum alignment, track resource utilization, audit teacher logs, and review system compliance.',
-      color: 'from-rose-500 to-pink-600',
-      bgColor: 'bg-rose-50/80 hover:bg-rose-100/80 border-rose-200/80',
-      badgeColor: 'bg-rose-100 text-rose-900 border-rose-300',
-      btnColor: 'bg-rose-600 hover:bg-rose-700 text-white',
-      icon: ShieldCheck,
-      iconColor: 'text-rose-600',
-      highlights: ['Curriculum Coverage Audit', 'School Resource Analytics', 'UDL Compliance Export']
     }
   ];
 
@@ -90,12 +77,12 @@ export default function WorkspaceSelection({ onSelectRole, onBackToHome }: Works
           </h1>
           
           <p className="text-sm sm:text-base text-slate-600 font-medium">
-            Select your role in the EduNexus educational ecosystem to open your dedicated login portal.
+            Select your role in the EduNexus educational ecosystem to open your dedicated portal.
           </p>
         </div>
 
-        {/* 4 Workspace Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* 3 Workspace Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {workspaces.map((ws) => {
             const Icon = ws.icon;
             return (

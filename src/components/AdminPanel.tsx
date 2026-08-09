@@ -39,6 +39,7 @@ import TeacherActivityHeatmap from './TeacherActivityHeatmap';
 import SystemMonitorPanel from './SystemMonitorPanel';
 import SEODashboardTab from './SEODashboardTab';
 import AISystemAnalyzer from './AISystemAnalyzer';
+import DeveloperBrandingSettings from './DeveloperBrandingSettings';
 
 export default function AdminPanel() {
   const { 
@@ -57,7 +58,7 @@ export default function AdminPanel() {
   const [roleFilter, setRoleFilter] = useState<'all' | 'Teacher' | 'Student' | 'Parent' | 'Administrator' | 'AuthorizedStaff'>('all');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [adminTab, setAdminTab] = useState<'users' | 'notifications' | 'feedback' | 'logs' | 'pilot' | 'policies' | 'monitor' | 'seo' | 'analyzer'>('users');
+  const [adminTab, setAdminTab] = useState<'users' | 'notifications' | 'feedback' | 'logs' | 'pilot' | 'policies' | 'monitor' | 'seo' | 'analyzer' | 'branding'>('users');
   const [logsVisualTab, setLogsVisualTab] = useState<'overall' | 'teacher30'>('teacher30');
 
   // Live Platform Telemetry & Load Monitor states
@@ -544,6 +545,30 @@ export default function AdminPanel() {
 
   return (
     <div className="space-y-6">
+      {/* Developer Console Title Banner */}
+      <div className="bg-gradient-to-r from-slate-900 via-rose-950 to-slate-900 border border-rose-500/30 rounded-3xl p-6 text-white shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/30 text-rose-300 text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5">
+              <Shield className="w-3 h-3 text-rose-400" />
+              <span>Developer Role Validated</span>
+            </span>
+            <span className="text-xs text-slate-400 font-mono">Platform Owner Access</span>
+          </div>
+          <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
+            Developer Console
+          </h2>
+          <p className="text-xs text-slate-300 font-medium max-w-xl">
+            Live infrastructure monitoring, platform user management, Gemini AI system metrics, SEO configuration, and audit security center.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800">
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
+          <span className="text-xs font-mono text-emerald-400 font-bold">Node Runtime: Healthy</span>
+        </div>
+      </div>
+
       {/* Admin Panel Sub-tabs */}
       <div className="flex flex-wrap border-b border-[#e5e1da] gap-1 pb-px">
         <button
@@ -650,6 +675,21 @@ export default function AdminPanel() {
         >
           <Globe className="w-4 h-4" />
           <span>SEO & Search Visibility</span>
+        </button>
+
+        <button
+          onClick={() => setAdminTab('branding')}
+          className={`flex items-center gap-2 px-5 py-3 text-xs font-bold transition-all border-b-2 rounded-t-xl cursor-pointer ${
+            adminTab === 'branding'
+              ? 'border-rose-600 text-rose-700 bg-rose-50/20 font-extrabold shadow-2xs'
+              : 'border-transparent text-slate-500 hover:text-rose-700 hover:bg-slate-50'
+          }`}
+        >
+          <Shield className="w-4 h-4 text-rose-600" />
+          <span>Branding & Media Watermark</span>
+          <span className="px-1.5 py-0.5 text-[9px] font-black bg-rose-600 text-white rounded-full uppercase tracking-wider">
+            Engine
+          </span>
         </button>
 
         <button
@@ -2368,6 +2408,10 @@ export default function AdminPanel() {
 
       {adminTab === 'seo' && (
         <SEODashboardTab />
+      )}
+
+      {adminTab === 'branding' && (
+        <DeveloperBrandingSettings />
       )}
 
       {adminTab === 'analyzer' && (

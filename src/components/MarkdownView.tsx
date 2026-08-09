@@ -21,6 +21,8 @@ import { ParagraphReaction } from '../types';
 import { useAccessibility } from '../context/AccessibilityContext';
 import { useAuth } from '../context/AuthContext';
 import QuickEmbedCard from './QuickEmbedCard';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../firebase';
 
 const staggerContainerVariants = {
   hidden: { opacity: 0 },
@@ -732,14 +734,14 @@ function MarkdownView({
                       disabled={isGenerating}
                       className="bg-white border border-emerald-250 rounded-xl px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 outline-none focus:border-[#5f6f52] transition-all cursor-pointer disabled:bg-slate-100 disabled:text-slate-400"
                     >
-                      <option value="emgen_fallback_nanobanana">🍌 Nano Banana Fallback for Emgen</option>
-                      <option value="emgen">🎨 Emgen Only</option>
-                      <option value="nano banana">🍌 Nano Banana Only</option>
+                      <option value="emgen_fallback_nanobanana">⚡ Auto Dual-Engine Mode</option>
+                      <option value="emgen">🎨 High-Quality Studio</option>
+                      <option value="nano banana">⚡ Ultra-Fast Studio</option>
                     </select>
                   </div>
                 ) : (
                   <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-1 rounded-lg">
-                    ⚡ Emgen (Nano Banana Fallback)
+                    ⚡ Auto Dual-Engine Mode
                   </span>
                 )}
                 <button
@@ -1548,8 +1550,6 @@ function DbImageRefLoader({ url, alt, className }: { url: string; alt: string; c
     setLoading(true);
     const fetchChunks = async () => {
       try {
-        const { collection, getDocs } = await import('firebase/firestore');
-        const { db } = await import('../firebase');
         const chunksColRef = collection(db, 'documents', docId, 'imageChunks');
         const snap = await getDocs(chunksColRef);
 

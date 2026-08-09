@@ -68,6 +68,13 @@ export interface MediaGalleryItem {
   credit?: string;
 }
 
+export interface PhenomenonHook {
+  title: string;
+  mysteryQuestion: string;
+  observableFacts?: string[];
+  inquiryChallenge: string;
+}
+
 export interface VirtualFieldTripStop {
   stopNumber: number;
   title: string;
@@ -80,6 +87,7 @@ export interface VirtualFieldTripStop {
   panoramaUrl?: string; // High-res 360 panoramic photo URL
   videoUrl?: string; // Documentary video embed URL
   readingPassage: string;
+  phenomenonHook?: PhenomenonHook;
   foreignLanguageCues: ForeignLanguageCue[];
   navigationInstruction: string;
   socraticGuidePrompts: string[];
