@@ -10,7 +10,7 @@
       {
         "source": "/api/**",
         "run": {
-          "serviceId": "EduNexus",
+          "serviceId": "edunexus",
           "region": "europe-west3"
         }
       },
