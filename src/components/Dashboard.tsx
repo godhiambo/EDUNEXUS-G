@@ -7,6 +7,7 @@ import { DemoVideoModal } from './public/DemoVideoModal';
 import { WhatsAppDashboardWidget } from './WhatsAppDashboardWidget';
 import {
   Plus,
+  MessageCircle,
   Search,
   BookOpen,
   FileText,
@@ -301,7 +302,7 @@ interface DashboardProps {
   onLoadDraft?: (draft: DocumentDraft) => void;
   onOpenFlashcards?: () => void;
   onOpenAssessmentGenerator?: () => void;
-  onOpenAITutor?: () => void;
+  onOpenAITutor?: (prompt?: string) => void;
   onOpenImageStudio?: () => void;
   onOpenVideoStudio?: () => void;
   onOpenQRMapping?: () => void;
@@ -378,6 +379,7 @@ export default function Dashboard({
     setIsMounted(true);
   }, []);
   const [showDemoModal, setShowDemoModal] = useState<boolean>(false);
+  const [showWhatsAppPanel, setShowWhatsAppPanel] = useState<boolean>(false);
   const [demoVideoType, setDemoVideoType] = useState<'overview' | 'howto'>('overview');
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [search, setSearch] = useState('');
@@ -1573,588 +1575,218 @@ export default function Dashboard({
 
   return (
     <div className="space-y-8 animate-fadeIn text-slate-800 dark:text-slate-100">
-      {/* Top Header & Greeting Row matching Right Side Image */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-200/80 dark:border-slate-800 pb-4">
+      {/* Greeting + primary actions */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-            <span>{greeting.text}, {resolveDisplayName(profile?.displayName, profile?.email || user?.email, user?.displayName || 'Godfrey')}!</span>
-            <span className="text-2xl">👋</span>
+          <h1 className="text-2xl font-bold tracking-tight text-ink">
+            {greeting.text}, {resolveDisplayName(profile?.displayName, profile?.email || user?.email, user?.displayName || 'there')}
           </h1>
-          <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 font-medium mt-1">
-            Here's what's happening in your teaching workspace today.
-          </p>
+          <p className="text-sm text-ink-muted mt-1">Here's what's happening in your teaching workspace today.</p>
         </div>
 
-        <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
-          {/* Home Screen Dark / Light Mode Toggle Button */}
-          <button
-            onClick={handleToggleDark}
-            className="px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer flex items-center gap-2 active:scale-95"
-            title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
-            aria-label="Toggle Dark Mode"
-          >
-            {isDark ? (
-              <>
-                <Sun className="w-4 h-4 text-amber-400" />
-                <span>Light Mode</span>
-              </>
-            ) : (
-              <>
-                <Moon className="w-4 h-4 text-indigo-600 dark:text-cyan-400" />
-                <span>Dark Mode</span>
-              </>
-            )}
-          </button>
-
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <button
             onClick={() => setIsQuickScannerOpen(true)}
-            className="px-4 py-2.5 rounded-xl text-xs font-extrabold text-amber-900 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/80 hover:bg-amber-100 dark:hover:bg-amber-900/80 border border-amber-300/80 dark:border-amber-700/80 shadow-xs transition cursor-pointer flex items-center gap-2 group active:scale-95"
-            title="Scan QR tag from camera feed"
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg text-sm font-semibold text-ink border border-line hover:bg-raised"
+            title="Scan a QR code with your camera"
           >
-            <div className="relative">
-              <Camera className="w-4 h-4 text-amber-700 dark:text-amber-400 group-hover:scale-110 transition" />
-              <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full animate-ping" />
-              <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full" />
-            </div>
-            <span>Quick Scan QR</span>
+            <Camera className="w-4 h-4 text-brand" aria-hidden="true" />
+            Scan QR
           </button>
 
           {isAdmin && onOpenAdminPlaybook && (
             <button
               onClick={onOpenAdminPlaybook}
-              className="px-4 py-2.5 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 shadow-sm transition cursor-pointer flex items-center gap-2 active:scale-95"
-              title="Open Admin Playbook & System Directory"
+              className="inline-flex items-center gap-2 h-10 px-4 rounded-lg text-sm font-semibold text-ink border border-line hover:bg-raised"
             >
-              <Shield className="w-4 h-4 text-white" />
-              <span>Admin Playbook</span>
+              <Shield className="w-4 h-4 text-rose-300" aria-hidden="true" />
+              Admin Playbook
             </button>
           )}
 
-          <button
-            onClick={() => alert("Customize Dashboard Home layout options.")}
-            className="px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer flex items-center gap-1.5"
-          >
-            <SettingsIcon className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-            <span>Customize Home</span>
-          </button>
-        </div>
-      </div>
-
-      {/* EDU NEXUS DEMO & HOW-TO VIDEO HUB BANNER */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-emerald-950/90 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl relative overflow-hidden text-white flex flex-col md:flex-row items-center justify-between gap-6">
-        <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-        
-        <div className="space-y-2 z-10 max-w-xl text-center md:text-left">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-extrabold uppercase tracking-wider">
-            <Play className="w-3.5 h-3.5 fill-emerald-400" />
-            <span>Interactive Video Walkthroughs</span>
-          </div>
-          
-          <h2 className="text-xl sm:text-2xl font-serif font-black text-white">
-            See EduNexus Platform & Pedagogical Features in Action
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-            Watch our platform demo to explore automated lesson planning and assessments, or click 'How-To' to dive deep into CBC alignment, 5E inquiry models, Socratic tutoring, and UDL accommodations.
-          </p>
-
-          <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 pt-1 text-[11px] text-slate-300 font-medium">
-            <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> CBC Mapping</span>
-            <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> 5E Inquiry Models</span>
-            <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> Socratic AI Tutors</span>
-            <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> UDL Accommodations</span>
-          </div>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-center gap-3 z-10 w-full md:w-auto shrink-0">
-          {/* Watch Main Demo Video Button */}
-          <button
-            onClick={() => {
-              setDemoVideoType('overview');
-              setShowDemoModal(true);
-            }}
-            className="w-full sm:w-auto px-5 py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs sm:text-sm rounded-2xl shadow-[0_0_20px_rgba(16,185,129,0.3)] transition cursor-pointer flex items-center justify-center gap-2 group"
-          >
-            <Play className="w-4 h-4 fill-slate-950 group-hover:scale-110 transition" />
-            <span>Watch Demo Video</span>
-          </button>
-
-          {/* Watch Additional How-To Video Button */}
-          <button
-            onClick={() => {
-              setDemoVideoType('howto');
-              setShowDemoModal(true);
-            }}
-            className="w-full sm:w-auto px-5 py-3.5 bg-slate-800/90 hover:bg-slate-700/90 text-white font-bold text-xs sm:text-sm rounded-2xl border border-emerald-500/40 shadow-md transition cursor-pointer flex items-center justify-center gap-2 group"
-          >
-            <BookOpen className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition" />
-            <span>Watch How-To Pedagogical Video</span>
-          </button>
-        </div>
-      </div>
-
-      {/* QUICK ACTION CARDS (8 Cards Grid) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 sm:gap-4">
-        
-        {/* Card 0: Lower Primary Magic Objects */}
-        <div 
-          onClick={onOpenMagicStudio}
-          className="bg-gradient-to-br from-amber-500/10 via-rose-500/10 to-purple-500/10 hover:from-amber-500/20 hover:to-purple-500/20 border border-amber-300/80 hover:border-amber-400 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-md flex flex-col justify-between group space-y-3 relative overflow-hidden"
-        >
-          <div className="flex items-center justify-between">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
-              <Sparkles className="w-5 h-5 text-yellow-300 animate-spin" />
-            </div>
-            <span className="px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 rounded-full shadow-2xs">
-              Lower School
-            </span>
-          </div>
-          <div>
-            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white group-hover:text-purple-700 transition">
-              Magic Objects ✨
-            </h3>
-            <p className="text-[10px] text-slate-600 dark:text-slate-300 leading-tight mt-1 font-semibold">
-              Click objects to generate • Zero prompt typing!
-            </p>
-          </div>
-        </div>
-
-        {/* Card 1: Create Lesson Plan */}
-        <div 
-          onClick={onCreateNew}
-          className="bg-emerald-50/60 hover:bg-emerald-50 border border-emerald-100/80 hover:border-emerald-300 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-sm flex flex-col justify-between group space-y-3"
-        >
-          <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
-            <BookOpen className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-emerald-700 transition">Create Lesson Plan</h3>
-            <p className="text-[11px] text-slate-500 leading-tight mt-1">Use AI to create lesson in seconds</p>
-          </div>
-        </div>
-
-        {/* Card 2: Quick QR Scanner */}
-        <div 
-          onClick={() => setIsQuickScannerOpen(true)}
-          className="bg-amber-50/80 hover:bg-amber-100/80 border border-amber-200 hover:border-amber-400 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-sm flex flex-col justify-between group space-y-3 relative overflow-hidden"
-        >
-          <div className="flex items-center justify-between">
-            <div className="w-10 h-10 rounded-xl bg-amber-600 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
-              <Camera className="w-5 h-5" />
-            </div>
-            <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider bg-emerald-500 text-slate-950 rounded-full">
-              Live
-            </span>
-          </div>
-          <div>
-            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-amber-800 transition">Quick QR Scanner</h3>
-            <p className="text-[11px] text-slate-500 leading-tight mt-1">Scan code to launch doc or hunt</p>
-          </div>
-        </div>
-
-        {/* Card 3: Generate Assessment */}
-        <div 
-          onClick={onOpenAssessmentGenerator}
-          className="bg-purple-50/60 hover:bg-purple-50 border border-purple-100/80 hover:border-purple-300 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-sm flex flex-col justify-between group space-y-3"
-        >
-          <div className="w-10 h-10 rounded-xl bg-purple-500 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
-            <ClipboardCheck className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-purple-700 transition">Generate Assessment</h3>
-            <p className="text-[11px] text-slate-500 leading-tight mt-1">Create quizzes, exams & more</p>
-          </div>
-        </div>
-
-        {/* Card 3: Build AI Tutor */}
-        <div 
-          onClick={onOpenAITutor}
-          className="bg-blue-50/60 hover:bg-blue-50 border border-blue-100/80 hover:border-blue-300 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-sm flex flex-col justify-between group space-y-3"
-        >
-          <div className="w-10 h-10 rounded-xl bg-blue-500 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
-            <Sparkles className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-blue-700 transition">Build AI Tutor</h3>
-            <p className="text-[11px] text-slate-500 leading-tight mt-1">Create your own tutoring assistant</p>
-          </div>
-        </div>
-
-        {/* Card 4: Image Studio */}
-        <div 
-          onClick={onOpenImageStudio}
-          className="bg-amber-50/60 hover:bg-amber-50 border border-amber-100/80 hover:border-amber-300 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-sm flex flex-col justify-between group space-y-3"
-        >
-          <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
-            <ImageIcon className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-amber-700 transition">Image Studio</h3>
-            <p className="text-[11px] text-slate-500 leading-tight mt-1">Generate educational images</p>
-          </div>
-        </div>
-
-        {/* Card 5: Video Studio */}
-        <div 
-          onClick={onOpenVideoStudio}
-          className="bg-rose-50/60 hover:bg-rose-50 border border-rose-100/80 hover:border-rose-300 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-sm flex flex-col justify-between group space-y-3"
-        >
-          <div className="w-10 h-10 rounded-xl bg-rose-500 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
-            <Video className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-rose-700 transition">Video Studio</h3>
-            <p className="text-[11px] text-slate-500 leading-tight mt-1">Create videos for your lessons</p>
-          </div>
-        </div>
-
-        {/* Card 6: Study Notes */}
-        <div 
-          onClick={onCreateNew}
-          className="bg-teal-50/60 hover:bg-teal-50 border border-teal-100/80 hover:border-teal-300 rounded-2xl p-4 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-sm flex flex-col justify-between group space-y-3"
-        >
-          <div className="w-10 h-10 rounded-xl bg-teal-500 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
-            <FileText className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-teal-700 transition">Study Notes</h3>
-            <p className="text-[11px] text-slate-500 leading-tight mt-1">Generate notes & handwritten style</p>
-          </div>
-        </div>
-
-      </div>
-
-      {/* DEDICATED WHATSAPP AI ASSISTANT & SCANNABLE QR CODE SECTION */}
-      <WhatsAppDashboardWidget userRole={userRole} />
-
-      {/* MIDDLE ROW (Continue Working & AI Teaching Assistant) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* Continue Working Progress List */}
-        <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200/80 p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h2 className="font-extrabold text-sm text-slate-900">Continue Working</h2>
-            <button onClick={() => setArchiveFilter('active')} className="text-xs font-bold text-[#5f6f52] hover:underline flex items-center gap-1 cursor-pointer">
-              <span>View all</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div className="space-y-3.5">
-            {[
-              { id: '1', title: 'Form 3 Physics – Motion', type: 'Lesson Plan', color: 'bg-emerald-500', progress: 66, icon: BookOpen },
-              { id: '2', title: 'Mathematics End-Term Assessment', type: 'Assessment', color: 'bg-purple-500', progress: 90, icon: ClipboardCheck },
-              { id: '3', title: 'Biology – Photosynthesis', type: 'Study Notes', color: 'bg-teal-500', progress: 40, icon: FileText },
-              { id: '4', title: 'Chemistry – Acids & Bases', type: 'Video Project', color: 'bg-rose-500', progress: 20, icon: Video }
-            ].map((item) => {
-              const ItemIcon = item.icon;
-              return (
-                <div key={item.id} className="p-3 bg-slate-50/60 hover:bg-slate-100/80 border border-slate-100 rounded-2xl transition flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-9 h-9 rounded-xl ${item.color} text-white flex items-center justify-center shrink-0 shadow-2xs`}>
-                      <ItemIcon className="w-4.5 h-4.5" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-xs text-slate-800">{item.title}</h4>
-                      <p className="text-[10px] text-slate-400 font-medium">{item.type}</p>
-                    </div>
-                  </div>
-
-                  <div className="w-32 sm:w-40 space-y-1 shrink-0">
-                    <div className="flex justify-end text-[10px] font-bold text-slate-500">
-                      <span>{item.progress}%</span>
-                    </div>
-                    <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
-                      <div className={`${item.color} h-1.5 rounded-full`} style={{ width: `${item.progress}%` }} />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* AI Teaching Assistant Box */}
-        <div className="lg:col-span-5 bg-gradient-to-b from-emerald-50/30 to-white dark:from-slate-800/80 dark:to-slate-800 rounded-3xl border border-emerald-100/80 dark:border-slate-700 p-5 shadow-xs flex flex-col justify-between space-y-4">
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-emerald-500 text-white flex items-center justify-center shadow-xs">
-                <Sparkles className="w-4 h-4 animate-pulse" />
-              </div>
-              <div>
-                <h2 className="font-extrabold text-sm text-slate-900 dark:text-slate-100">AI Teaching Assistant</h2>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">Ask anything about your lessons, students or resources.</p>
-              </div>
-            </div>
-
-            <div className="space-y-2 pt-1">
-              {[
-                'Generate a lesson plan for Form 3 Physics',
-                'Create an assessment on Algebra',
-                'Explain photosynthesis in simple terms'
-              ].map((chip, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => onOpenAITutor && onOpenAITutor()}
-                  className="w-full text-left px-3 py-2 rounded-xl bg-white dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600 text-xs text-slate-700 dark:text-slate-200 hover:border-emerald-400 dark:hover:border-emerald-500 hover:text-emerald-800 dark:hover:text-emerald-300 transition cursor-pointer shadow-2xs"
-                >
-                  {chip}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="pt-2 flex items-center gap-2">
-            <input
-              type="text"
-              placeholder="Ask me anything..."
-              className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-hidden focus:border-emerald-500 shadow-2xs"
-            />
+          {onCreateNew && profile?.role !== 'Student' && profile?.role !== 'Parent' && (
             <button
-              onClick={() => onOpenAITutor && onOpenAITutor()}
-              className="w-10 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center transition cursor-pointer shrink-0 shadow-xs"
+              onClick={onCreateNew}
+              className="inline-flex items-center gap-2 h-10 px-4 rounded-lg text-sm font-bold bg-brand-strong text-brand-ink hover:bg-brand"
             >
-              <Sparkles className="w-4 h-4" />
+              <Plus className="w-4 h-4" aria-hidden="true" />
+              New lesson plan
             </button>
-          </div>
+          )}
         </div>
-
       </div>
 
-      {/* THIRD ROW (Today's Classes, Class Overview, Recent Resources) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
-        {/* Today's Classes */}
-        <div className="bg-white rounded-3xl border border-slate-200/80 p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="font-extrabold text-sm text-slate-900">Today's Classes</h3>
-            <span className="text-xs font-bold text-emerald-700 cursor-pointer hover:underline">View schedule →</span>
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between p-2.5 rounded-2xl bg-emerald-50/50 border border-emerald-100">
-              <div>
-                <span className="text-[10px] font-bold text-slate-400">08:00 AM</span>
-                <h4 className="font-extrabold text-xs text-slate-800">Form 3 Physics</h4>
-                <p className="text-[10px] text-slate-500">Motion and Forces</p>
-              </div>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[9px] font-extrabold uppercase">Live</span>
-            </div>
-
-            <div className="flex items-center justify-between p-2.5 rounded-2xl bg-slate-50 border border-slate-100">
-              <div>
-                <span className="text-[10px] font-bold text-slate-400">10:00 AM</span>
-                <h4 className="font-extrabold text-xs text-slate-800">Form 2 Mathematics</h4>
-                <p className="text-[10px] text-slate-500">Linear Equations</p>
-              </div>
-              <span className="px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 text-[9px] font-extrabold uppercase">Upcoming</span>
-            </div>
-
-            <div className="flex items-center justify-between p-2.5 rounded-2xl bg-slate-50 border border-slate-100">
-              <div>
-                <span className="text-[10px] font-bold text-slate-400">12:00 PM</span>
-                <h4 className="font-extrabold text-xs text-slate-800">Form 4 Chemistry</h4>
-                <p className="text-[10px] text-slate-500">Organic Compounds</p>
-              </div>
-              <span className="px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 text-[9px] font-extrabold uppercase">Upcoming</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Workspace & Curriculum Overview Stats */}
-        <div className="bg-white rounded-3xl border border-slate-200/80 p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="font-extrabold text-sm text-slate-900">Workspace & Curriculum Overview</h3>
-            <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-              Pre-Launch Active
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center shrink-0">
-                <FileText className="w-4.5 h-4.5" />
-              </div>
-              <div>
-                <span className="text-lg font-black text-slate-900">{totalDocs}</span>
-                <p className="text-[10px] font-medium text-slate-500">Saved Documents</p>
-              </div>
-            </div>
-
-            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
-                <BookOpen className="w-4.5 h-4.5" />
-              </div>
-              <div>
-                <span className="text-lg font-black text-slate-900">{plansCount}</span>
-                <p className="text-[10px] font-medium text-slate-500">Lesson Plans</p>
-              </div>
-            </div>
-
-            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-teal-500/10 text-teal-600 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-4.5 h-4.5" />
-              </div>
-              <div>
-                <span className="text-lg font-black text-slate-900">{cbcCount}</span>
-                <p className="text-[10px] font-medium text-slate-500">CBC Schemes</p>
-              </div>
-            </div>
-
-            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center shrink-0">
-                <Sparkles className="w-4.5 h-4.5" />
-              </div>
-              <div>
-                <span className="text-lg font-black text-slate-900">100%</span>
-                <p className="text-[10px] font-medium text-slate-500">Launch Ready</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Recent Resources */}
-        <div className="bg-white rounded-3xl border border-slate-200/80 p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="font-extrabold text-sm text-slate-900">Recent Resources</h3>
-            <span className="text-xs font-bold text-slate-500 cursor-pointer hover:underline">View all →</span>
-          </div>
-
-          <div className="space-y-2.5">
-            {[
-              { name: 'Motion Lesson Notes', meta: 'PDF • 2.4 MB • Today', color: 'text-red-500' },
-              { name: 'Algebra Assessment', meta: 'DOCX • 1.1 MB • Yesterday', color: 'text-blue-500' },
-              { name: 'Photosynthesis Slides', meta: 'PPTX • 5.2 MB • 2 days ago', color: 'text-emerald-500' },
-              { name: 'Acids & Bases Video', meta: 'MP4 • 12.4 MB • 3 days ago', color: 'text-purple-500' },
-            ].map((res, i) => (
-              <div key={i} className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 transition cursor-pointer">
-                <div className="flex items-center gap-2.5">
-                  <FileText className={`w-4 h-4 ${res.color}`} />
-                  <div>
-                    <h4 className="font-extrabold text-xs text-slate-800">{res.name}</h4>
-                    <p className="text-[10px] text-slate-400">{res.meta}</p>
-                  </div>
-                </div>
-              </div>
+      {/* Quick actions — one button per tool, dark surface tokens */}
+      <section aria-labelledby="quick-actions-title">
+        <h2 id="quick-actions-title" className="sr-only">Quick actions</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+          {([
+            ...(profile?.role !== 'Student' && profile?.role !== 'Parent'
+              ? [
+                  { label: 'Lesson plan', desc: 'CBC 5E plan, notes or scheme of work', icon: BookOpen, tint: 'text-emerald-300 bg-emerald-400/10', onClick: onCreateNew },
+                  { label: 'Assessment', desc: 'Quiz, CAT or exam with marking key', icon: ClipboardCheck, tint: 'text-violet-300 bg-violet-400/10', onClick: onOpenAssessmentGenerator },
+                ]
+              : []),
+            { label: 'AI Tutor', desc: 'Socratic help, step by step', icon: Sparkles, tint: 'text-sky-300 bg-sky-400/10', onClick: onOpenAITutor },
+            { label: 'Image Studio', desc: 'Diagrams and illustrations', icon: ImageIcon, tint: 'text-amber-300 bg-amber-400/10', onClick: onOpenImageStudio },
+            { label: 'Video Studio', desc: 'Scripts, storyboards and clips', icon: Video, tint: 'text-rose-300 bg-rose-400/10', onClick: onOpenVideoStudio },
+            { label: 'Magic Objects', desc: 'Tap-to-learn for lower primary', icon: Sparkles, tint: 'text-fuchsia-300 bg-fuchsia-400/10', onClick: onOpenMagicStudio },
+            { label: 'Scan QR', desc: 'Open a lesson or hunt from a code', icon: Camera, tint: 'text-teal-300 bg-teal-400/10', onClick: () => setIsQuickScannerOpen(true) },
+          ] as { label: string; desc: string; icon: React.ElementType; tint: string; onClick?: () => void }[])
+            .filter((t) => t.onClick)
+            .map(({ label, desc, icon: Icon, tint, onClick }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={onClick}
+                className="text-left rounded-xl border border-line bg-surface hover:bg-raised hover:border-ink-muted/40 p-4 transition-colors flex items-start gap-3"
+              >
+                <span className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${tint}`}>
+                  <Icon className="w-5 h-5" aria-hidden="true" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-ink">{label}</span>
+                  <span className="block text-xs text-ink-muted mt-0.5">{desc}</span>
+                </span>
+              </button>
             ))}
-          </div>
         </div>
+      </section>
 
-      </div>
-
-      {/* FOURTH ROW (Learner Performance Overview Charts) */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 p-6 shadow-xs space-y-6">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-          <div>
-            <h3 className="font-extrabold text-base text-slate-900">Learner Performance Overview</h3>
-            <p className="text-xs text-slate-500">Class average competency trajectory over time</p>
-          </div>
-          <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-xl">This week →</span>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-          
-          {/* Weekly Performance Line Chart */}
-          <div className="lg:col-span-8 h-56 w-full">
-            {isMounted ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={[
-                  { day: 'Mon', score: 62 },
-                  { day: 'Tue', score: 78 },
-                  { day: 'Wed', score: 71 },
-                  { day: 'Thu', score: 85 },
-                  { day: 'Fri', score: 82 },
-                  { day: 'Sat', score: 88 },
-                  { day: 'Sun', score: 87 },
-                ]}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="day" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <YAxis domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <Tooltip />
-                  <Bar dataKey="score" fill="#10b981" radius={[8, 8, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full w-full bg-slate-50 animate-pulse rounded-xl" />
+      {/* Recent documents (real data) + ask the AI tutor */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <section aria-labelledby="recent-docs-title" className="lg:col-span-7 rounded-xl border border-line bg-surface p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 id="recent-docs-title" className="text-base font-semibold text-ink">Continue where you left off</h2>
+            {documents.length > 5 && (
+              <a href="#my-library" className="text-sm font-semibold text-brand hover:underline">View all {documents.length}</a>
             )}
           </div>
-
-          {/* Average Progress Donut & Legend */}
-          <div className="lg:col-span-4 border-l border-slate-100 pl-6 flex flex-col items-center space-y-4">
-            <div className="relative w-32 h-32 flex items-center justify-center rounded-full border-8 border-emerald-500/20 border-t-emerald-500">
-              <div className="text-center">
-                <span className="text-2xl font-black text-slate-900 block">87%</span>
-                <span className="text-[10px] text-slate-400 font-bold uppercase block">Avg Class Progress</span>
-              </div>
+          {isLoading ? (
+            <p className="text-sm text-ink-muted">Loading your documents…</p>
+          ) : documents.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-line p-6 text-center">
+              <p className="text-sm font-semibold text-ink">No documents yet</p>
+              <p className="mt-1 text-sm text-ink-muted">Your lesson plans, notes and assessments will appear here.</p>
+              {profile?.role !== 'Student' && profile?.role !== 'Parent' && (
+                <button
+                  type="button"
+                  onClick={onCreateNew}
+                  className="mt-4 inline-flex items-center gap-2 h-10 px-4 rounded-lg text-sm font-bold bg-brand-strong text-brand-ink hover:bg-brand"
+                >
+                  <Plus className="w-4 h-4" aria-hidden="true" /> Create your first lesson plan
+                </button>
+              )}
             </div>
+          ) : (
+            <ul className="divide-y divide-line">
+              {[...documents]
+                .sort((x, y) => (y.lastModified || y.createdAt || '').localeCompare(x.lastModified || x.createdAt || ''))
+                .slice(0, 5)
+                .map((doc) => (
+                  <li key={doc.id}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenDoc(doc)}
+                      className="w-full flex items-center gap-3 py-3 text-left rounded-lg hover:bg-raised px-2 -mx-2"
+                    >
+                      <span className="w-9 h-9 rounded-lg bg-brand/10 text-brand flex items-center justify-center shrink-0">
+                        <FileText className="w-4 h-4" aria-hidden="true" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-ink truncate">{doc.title}</span>
+                        <span className="block text-xs text-ink-muted truncate">
+                          {[doc.subject, doc.classLevel].filter(Boolean).join(' · ')}
+                        </span>
+                      </span>
+                      <span className="text-xs text-ink-muted shrink-0">
+                        {new Date(doc.lastModified || doc.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          )}
+        </section>
 
-            <div className="w-full space-y-1.5 text-xs font-medium">
-              <div className="flex justify-between items-center">
-                <span className="flex items-center gap-1.5 text-slate-600"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Excellent (80–100%)</span>
-                <span className="font-bold text-slate-800">22</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="flex items-center gap-1.5 text-slate-600"><span className="w-2 h-2 rounded-full bg-teal-500" /> Good (60–79%)</span>
-                <span className="font-bold text-slate-800">15</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="flex items-center gap-1.5 text-slate-600"><span className="w-2 h-2 rounded-full bg-amber-500" /> Average (40–59%)</span>
-                <span className="font-bold text-slate-800">4</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="flex items-center gap-1.5 text-slate-600"><span className="w-2 h-2 rounded-full bg-rose-500" /> Needs Improvement (0–39%)</span>
-                <span className="font-bold text-slate-800">1</span>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      {/* FIFTH ROW (Smart Recommendations) */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 p-6 shadow-xs space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <section aria-labelledby="ask-tutor-title" className="lg:col-span-5 rounded-xl border border-line bg-surface p-5 flex flex-col gap-4">
           <div>
-            <h3 className="font-extrabold text-base text-slate-900">Smart Recommendations</h3>
-            <p className="text-xs text-slate-500">Based on your classes and students</p>
+            <h2 id="ask-tutor-title" className="text-base font-semibold text-ink">Ask the AI tutor</h2>
+            <p className="text-sm text-ink-muted mt-1">Opens the tutor with your question ready to send.</p>
           </div>
-          <span className="text-xs font-bold text-emerald-700 cursor-pointer hover:underline">View all recommendations →</span>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="p-4 rounded-2xl bg-blue-50/50 border border-blue-100 space-y-2">
-            <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
-              <BookOpen className="w-4 h-4" />
-            </div>
-            <h4 className="font-extrabold text-xs text-slate-900">Revise Motion Lesson</h4>
-            <p className="text-[11px] text-slate-500 leading-relaxed">Students are struggling with Newton's Laws</p>
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const q = new FormData(e.currentTarget).get('q');
+              onOpenAITutor?.(typeof q === 'string' ? q.trim() : '');
+            }}
+          >
+            <label htmlFor="home-tutor-q" className="sr-only">Your question</label>
+            <input
+              id="home-tutor-q"
+              name="q"
+              type="text"
+              placeholder="e.g. Explain photosynthesis for Grade 7"
+              className="flex-1 h-11 px-3 rounded-lg border border-line bg-canvas text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:border-brand"
+            />
+            <button
+              type="submit"
+              className="h-11 px-4 rounded-lg bg-brand-strong hover:bg-brand text-brand-ink text-sm font-bold"
+            >
+              Ask
+            </button>
+          </form>
+          <div className="flex flex-wrap gap-2">
+            {['Explain photosynthesis simply', 'Quiz me on fractions', 'Help me plan a Grade 6 science lesson'].map((chip) => (
+              <button
+                key={chip}
+                type="button"
+                onClick={() => onOpenAITutor?.(chip)}
+                className="px-3 py-1.5 rounded-full border border-line text-xs text-ink-soft hover:bg-raised hover:text-ink"
+              >
+                {chip}
+              </button>
+            ))}
           </div>
-
-          <div className="p-4 rounded-2xl bg-purple-50/50 border border-purple-100 space-y-2">
-            <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center">
-              <ClipboardCheck className="w-4 h-4" />
-            </div>
-            <h4 className="font-extrabold text-xs text-slate-900">Generate Quiz</h4>
-            <p className="text-[11px] text-slate-500 leading-relaxed">Create a quick quiz for Form 3 Physics</p>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-amber-50/50 border border-amber-100 space-y-2">
-            <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
-              <Sparkles className="w-4 h-4" />
-            </div>
-            <h4 className="font-extrabold text-xs text-slate-900">Send Reminder</h4>
-            <p className="text-[11px] text-slate-500 leading-relaxed">3 assignments are due within 3 days</p>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-emerald-50/50 border border-emerald-100 space-y-2">
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-              <FileText className="w-4 h-4" />
-            </div>
-            <h4 className="font-extrabold text-xs text-slate-900">New Resource</h4>
-            <p className="text-[11px] text-slate-500 leading-relaxed">AI generated notes on Electricity and Circuits</p>
-          </div>
-        </div>
+        </section>
       </div>
 
+      {/* Help & channels — compact; full WhatsApp setup on demand */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <button
+          type="button"
+          onClick={() => {
+            setDemoVideoType('overview');
+            setShowDemoModal(true);
+          }}
+          className="text-left rounded-xl border border-line bg-surface hover:bg-raised p-5 flex items-center gap-4"
+        >
+          <span className="w-11 h-11 rounded-full bg-brand/15 text-brand flex items-center justify-center shrink-0">
+            <Play className="w-5 h-5" aria-hidden="true" />
+          </span>
+          <span>
+            <span className="block text-sm font-semibold text-ink">Watch the product tour</span>
+            <span className="block text-xs text-ink-muted mt-0.5">See lesson planning, assessments and the tutor in a few minutes.</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowWhatsAppPanel((v) => !v)}
+          aria-expanded={showWhatsAppPanel}
+          className="text-left rounded-xl border border-line bg-surface hover:bg-raised p-5 flex items-center gap-4"
+        >
+          <span className="w-11 h-11 rounded-full bg-emerald-400/15 text-emerald-300 flex items-center justify-center shrink-0">
+            <MessageCircle className="w-5 h-5" aria-hidden="true" />
+          </span>
+          <span className="flex-1">
+            <span className="block text-sm font-semibold text-ink">EduNexus on WhatsApp</span>
+            <span className="block text-xs text-ink-muted mt-0.5">Plan lessons and tutor learners from WhatsApp.</span>
+          </span>
+          <span className="text-xs font-semibold text-brand">{showWhatsAppPanel ? 'Hide' : 'Set up'}</span>
+        </button>
+      </div>
+      {showWhatsAppPanel && <WhatsAppDashboardWidget userRole={userRole} />}
 
       {/* Admin Document Usage Chart */}
       {isAdmin && (

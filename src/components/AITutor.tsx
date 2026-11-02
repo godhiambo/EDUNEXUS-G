@@ -163,9 +163,11 @@ interface AITutorProps {
   initialSelectedResourceId?: string;
   onOpenImageStudio?: (prompt?: string) => void;
   onOpenVideoStudio?: (prompt?: string) => void;
+  /** A question typed on the Home screen; pre-fills the chat box. */
+  initialPrompt?: string;
 }
 
-export default function AITutor({ documents, initialSelectedResourceId, onOpenImageStudio, onOpenVideoStudio }: AITutorProps) {
+export default function AITutor({ documents, initialSelectedResourceId, onOpenImageStudio, onOpenVideoStudio, initialPrompt }: AITutorProps) {
   const { aiLanguage } = useLanguage();
   const { user, profile } = useAuth();
   const isAdmin = profile?.role === 'Administrator';
@@ -431,7 +433,10 @@ export default function AITutor({ documents, initialSelectedResourceId, onOpenIm
   // Conversation State
   const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
   const [messages, setMessages] = useState<Message[]>(activeSession ? activeSession.messages : []);
-  const [inputMessage, setInputMessage] = useState('');
+  const [inputMessage, setInputMessage] = useState(initialPrompt || '');
+  useEffect(() => {
+    if (initialPrompt) setInputMessage(initialPrompt);
+  }, [initialPrompt]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [activeStep, setActiveStep] = useState<string>(activeSession ? activeSession.activeStep : 'Exploratory onboarding');
   const [misconceptions, setMisconceptions] = useState<string[]>(activeSession ? activeSession.misconceptions : []);
@@ -555,8 +560,18 @@ export default function AITutor({ documents, initialSelectedResourceId, onOpenIm
     }
   }, [sessions]);
 
+  // Keep the newest message in view by scrolling only the chat panel —
+  // scrollIntoView also scrolled the whole page, so the tutor opened halfway down.
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    let el = chatBottomRef.current?.parentElement || null;
+    while (el && el !== document.body) {
+      const oy = getComputedStyle(el).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight) {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        return;
+      }
+      el = el.parentElement;
+    }
   }, [messages, isProcessing]);
 
   // Load SpeechSynthesis voices
