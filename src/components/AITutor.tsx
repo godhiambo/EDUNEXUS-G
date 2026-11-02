@@ -1281,8 +1281,7 @@ export default function AITutor({ documents, initialSelectedResourceId, onOpenIm
                 ) : (
                   <span className="text-[10px] font-bold uppercase bg-emerald-100 dark:bg-emerald-950/60 text-[#0E5E4B] dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded-full flex items-center gap-1">
                     <span>Socratic AI</span>
-                    <span className="text-[9px] opacity-80">(Emgen + Nano Banana Fallback)</span>
-                  </span>
+                                      </span>
                 )}
               </div>
               <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">

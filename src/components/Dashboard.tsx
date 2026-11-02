@@ -1499,7 +1499,7 @@ export default function Dashboard({
       console.error('Error reading tasks:', e);
     }
     return [
-      { id: 'task-1', text: 'Grade Grade 7 Mathematics Assessments', completed: false },
+      { id: 'task-1', text: 'Grade 7 Mathematics assessments', completed: false },
       { id: 'task-2', text: 'Generate lesson notes for Science tomorrow', completed: false },
       { id: 'task-3', text: 'Align curriculum mapping for PP1 Agriculture', completed: true },
       { id: 'task-4', text: 'Prepare worksheets and grading keys for English', completed: false },

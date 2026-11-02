@@ -1,4 +1,7 @@
 import { useState, FormEvent, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import PublicHeader from './brand/PublicHeader';
+import { BRAND } from './brand/Brand';
 import { useAuth, extractNameFromEmail } from '../context/AuthContext';
 import { firebaseAuthDomain, firebaseProjectId } from '../firebase';
 import { UserRole } from '../types';
@@ -29,15 +32,24 @@ import {
 } from 'lucide-react';
 
 export default function AuthScreen() {
-  const [publicPage, setPublicPage] = useState<'home' | 'workspaces' | 'showcase' | 'login'>(() => {
-    if (typeof window !== 'undefined') {
-      const hash = window.location.hash;
-      if (hash.includes('showcase')) return 'showcase';
-      if (hash.includes('workspaces') || hash.includes('roles')) return 'workspaces';
-      if (hash.includes('login') || hash.includes('auth')) return 'login';
-    }
+  // Public sections live at /#workspaces, /#showcase and /#login so that
+  // Back, refresh and shared links work (previously everything sat at "/").
+  type PublicPage = 'home' | 'workspaces' | 'showcase' | 'login';
+  const location = useLocation();
+  const navigate = useNavigate();
+  const pageFromHash = (hash: string): PublicPage => {
+    if (hash.includes('showcase')) return 'showcase';
+    if (hash.includes('workspaces') || hash.includes('roles')) return 'workspaces';
+    if (hash.includes('login') || hash.includes('auth')) return 'login';
     return 'home';
-  });
+  };
+  const publicPage = pageFromHash(location.hash);
+  const setPublicPage = (page: PublicPage) => {
+    navigate(page === 'home' ? '/' : `/#${page}`);
+  };
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [publicPage]);
   const { 
     loginWithEmail, 
     registerWithEmail, 
@@ -208,72 +220,10 @@ export default function AuthScreen() {
   };
 
   return (
-    <div className="min-h-screen bg-[#fdfbf7] flex flex-col font-sans select-none">
+    <div className="min-h-screen bg-canvas flex flex-col font-sans">
       
-      {/* PUBLIC PERSISTENT TOP NAVIGATION BAR */}
-      <nav className="h-16 border-b border-slate-200/90 bg-white/95 backdrop-blur-md sticky top-0 z-40 px-4 sm:px-8 flex items-center justify-between shadow-xs">
-        <div 
-          onClick={() => setPublicPage('home')}
-          className="flex items-center gap-2.5 cursor-pointer group"
-        >
-          <img src="/icon.svg" className="w-8 h-8 rounded-xl shadow-xs group-hover:scale-105 transition" alt="EduNexus" referrerPolicy="no-referrer" />
-          <div>
-            <span className="font-bold text-lg text-slate-900 tracking-tight block leading-none group-hover:text-[#5f6f52] transition">EduNexus</span>
-            <span className="text-[10px] text-amber-800 font-extrabold uppercase tracking-wider block mt-0.5">Unlimited Learning</span>
-          </div>
-        </div>
-
-        {/* Public Page Links */}
-        <div className="flex items-center gap-1.5 sm:gap-3">
-          <button
-            onClick={() => setPublicPage('home')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-              publicPage === 'home' 
-                ? 'bg-[#5f6f52]/10 text-[#5f6f52]' 
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <Home className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Home & Overview</span>
-          </button>
-
-          <button
-            onClick={() => setPublicPage('workspaces')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-              publicPage === 'workspaces' 
-                ? 'bg-[#5f6f52]/10 text-[#5f6f52]' 
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5 text-amber-700" />
-            <span>Choose Workspace</span>
-          </button>
-
-          <button
-            onClick={() => setPublicPage('showcase')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-              publicPage === 'showcase' 
-                ? 'bg-[#5f6f52]/10 text-[#5f6f52]' 
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <BookOpen className="w-3.5 h-3.5 text-amber-600" />
-            <span className="hidden md:inline">OER Showcase</span>
-          </button>
-
-          <button
-            onClick={() => setPublicPage('login')}
-            className={`px-4 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-1.5 ${
-              publicPage === 'login' 
-                ? 'bg-[#5f6f52] text-white shadow-xs' 
-                : 'bg-slate-900 text-white hover:bg-slate-800'
-            }`}
-          >
-            <LogIn className="w-3.5 h-3.5" />
-            <span>Portal Sign In</span>
-          </button>
-        </div>
-      </nav>
+      {/* One shared public header (see components/brand/PublicHeader) */}
+      <PublicHeader />
 
       {/* PUBLIC PAGE CONTENT ROUTING */}
       {publicPage === 'home' && (
@@ -366,7 +316,7 @@ export default function AuthScreen() {
               transition={{ delay: 0.12, duration: 0.2, ease: 'easeOut' }}
               className="text-xs text-slate-500 font-semibold tracking-wide"
             >
-              Smart teaching workspace for modern classrooms
+              {BRAND.tagline}
             </motion.p>
           </div>
         </div>

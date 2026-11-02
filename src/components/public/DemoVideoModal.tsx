@@ -37,6 +37,8 @@ interface DemoVideoModalProps {
   initialTab?: 'video' | 'sandbox';
   initialVideoType?: 'overview' | 'howto' | 'custom';
   youtubeUrl?: string;
+  /** Show the "Upload demo video" control. Admin-only; never on public pages. */
+  allowUpload?: boolean;
 }
 
 interface VideoScene {
@@ -228,7 +230,8 @@ export const DemoVideoModal: React.FC<DemoVideoModalProps> = ({
   onOpenSandbox,
   initialTab = 'video',
   initialVideoType = 'overview',
-  youtubeUrl = 'https://www.youtube.com/embed/D7cpYYgr-6E'
+  youtubeUrl = 'https://www.youtube.com/embed/D7cpYYgr-6E',
+  allowUpload = false
 }) => {
   const [activeTab, setActiveTab] = useState<'video' | 'sandbox'>(initialTab);
   const [videoType, setVideoType] = useState<'overview' | 'howto' | 'custom'>(initialVideoType);
@@ -403,18 +406,50 @@ export const DemoVideoModal: React.FC<DemoVideoModalProps> = ({
     }
   };
 
+  const handleClose = () => {
+    setIsPlaying(false);
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    onClose();
+  };
+
+  // Escape closes the dialog; background page doesn't scroll while open.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleClose();
+    };
+    window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/90 backdrop-blur-md overflow-y-auto">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="demo-modal-title"
+      onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/90 backdrop-blur-md overflow-y-auto"
+    >
       {/* Hidden File Input for Custom Demo Video Upload */}
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleVideoUpload} 
-        accept="video/mp4,video/webm,video/ogg,video/quicktime" 
-        className="hidden" 
-      />
+      {allowUpload && (
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleVideoUpload}
+          accept="video/mp4,video/webm,video/ogg,video/quicktime"
+          className="hidden"
+        />
+      )}
 
       <motion.div 
         initial={{ opacity: 0, scale: 0.96, y: 10 }}
@@ -424,17 +459,9 @@ export const DemoVideoModal: React.FC<DemoVideoModalProps> = ({
       >
         {/* Top Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-extrabold uppercase tracking-wider">
-                EduNexus Video Showcase
-              </span>
-              <span className="text-xs text-slate-400">Interactive & Uploaded Demo Media</span>
-            </div>
-            <h2 className="text-lg sm:text-xl font-serif font-black text-white mt-0.5">
-              Platform Walkthrough & Smooth Interactive Demo
-            </h2>
-          </div>
+          <h2 id="demo-modal-title" className="text-lg sm:text-xl font-serif font-bold text-white">
+            See EduNexus in action
+          </h2>
 
           <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
             {/* Mode Switcher Tabs */}
@@ -463,19 +490,15 @@ export const DemoVideoModal: React.FC<DemoVideoModalProps> = ({
                 }`}
               >
                 <Gamepad2 className="w-3.5 h-3.5" />
-                <span>Interactive Sandbox</span>
+                <span>Try the demo</span>
               </button>
             </div>
 
             <button
-              onClick={() => {
-                setIsPlaying(false);
-                if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-                  window.speechSynthesis.cancel();
-                }
-                onClose();
-              }}
-              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/80 transition cursor-pointer"
+              onClick={handleClose}
+              aria-label="Close"
+              autoFocus
+              className="w-11 h-11 flex items-center justify-center rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -489,10 +512,7 @@ export const DemoVideoModal: React.FC<DemoVideoModalProps> = ({
             {/* Video Selector & Upload Bar */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-900/90 p-2.5 rounded-2xl border border-slate-800">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-300 px-1 flex items-center gap-1.5">
-                  <Tv className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Lesson Mode:</span>
-                </span>
+                <span className="text-xs font-bold text-slate-300 px-1">Choose a video</span>
               </div>
 
               <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
@@ -512,7 +532,7 @@ export const DemoVideoModal: React.FC<DemoVideoModalProps> = ({
                   }`}
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>YouTube Demo Video</span>
+                  <span>Product tour</span>
                 </button>
 
                 <button
@@ -531,11 +551,11 @@ export const DemoVideoModal: React.FC<DemoVideoModalProps> = ({
                   }`}
                 >
                   <BookOpen className="w-3.5 h-3.5" />
-                  <span>How-To Pedagogical Guide</span>
+                  <span>Teaching guide</span>
                 </button>
 
-                {/* Upload Custom Demo Video Button */}
-                <button
+                {/* Upload Custom Demo Video Button (admin only) */}
+                {allowUpload && <button
                   onClick={() => fileInputRef.current?.click()}
                   className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer ${
                     videoType === 'custom'
@@ -546,7 +566,7 @@ export const DemoVideoModal: React.FC<DemoVideoModalProps> = ({
                 >
                   <UploadCloud className="w-3.5 h-3.5" />
                   <span>{customVideoName ? `Custom Video` : `Upload Demo Video`}</span>
-                </button>
+                </button>}
               </div>
             </div>
 
@@ -844,7 +864,7 @@ export const DemoVideoModal: React.FC<DemoVideoModalProps> = ({
               </div>
 
               <div className="space-y-2 max-w-md mx-auto">
-                <h3 className="text-xl font-bold font-serif text-white">EduNexus Live Offline Sandbox</h3>
+                <h3 className="text-xl font-bold font-serif text-white">Try the demo — no sign-up</h3>
                 <p className="text-xs text-slate-300 leading-relaxed">
                   Test out CBC Lesson Planning, Schemes of Work, Assessment Generation, and Socratic AI Tutors directly without registering an account first.
                 </p>
@@ -858,8 +878,7 @@ export const DemoVideoModal: React.FC<DemoVideoModalProps> = ({
                   }}
                   className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-extrabold text-xs sm:text-sm rounded-xl shadow-lg transition cursor-pointer flex items-center gap-2"
                 >
-                  <span>Launch Live Sandbox Mode</span>
-                  <ExternalLink className="w-4 h-4" />
+                  <span>Open the demo</span>
                 </button>
 
                 <button

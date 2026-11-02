@@ -2177,7 +2177,7 @@ Safety rules: Clean hands, safe food handling.
                         {uploadStage === 'uploading' && (
                           <span className="text-emerald-700 font-semibold flex items-center gap-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            Uploading to Storage Mount (/mnt/storage)...
+                            Uploading…
                           </span>
                         )}
                         {uploadStage === 'parsing' && (
@@ -2225,7 +2225,7 @@ Safety rules: Clean hands, safe food handling.
                 </div>
 
                 <div className="flex items-center justify-between text-[9.5px] text-slate-400 font-mono">
-                  <span>Target: /mnt/storage</span>
+                  <span>Saving to your library</span>
                   <span>{uploadStage === 'complete' ? 'Sync Complete' : 'Active Transfer'}</span>
                 </div>
               </div>
@@ -2236,7 +2236,7 @@ Safety rules: Clean hands, safe food handling.
                 </div>
                 <div className="space-y-0.5">
                   <p className="text-xs font-bold text-slate-600">Drag & drop or click to upload</p>
-                  <p className="text-[10px] text-slate-400">PDF, DOCX, and images sync directly to /mnt/storage (Max 100MB)</p>
+                  <p className="text-[10px] text-slate-400">PDF, DOCX and images, up to 100 MB</p>
                 </div>
               </>
             )}
