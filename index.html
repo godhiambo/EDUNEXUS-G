@@ -2,6 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Apply dark mode before first paint (mirrors src/lib/theme.ts) -->
+    <script>
+      try {
+        var s = localStorage.getItem('pedagogical_dark_mode');
+        var dark = s === 'true' || (s === null && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        if (dark) document.documentElement.classList.add('dark');
+      } catch (e) {}
+    </script>
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EduNexus | AI Learning Platform for Students, Teachers & Schools</title>
     

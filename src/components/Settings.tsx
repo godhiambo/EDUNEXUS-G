@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { getStoredDarkMode } from '../lib/theme';
 import { useAuth, resolveDisplayName } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { LanguageSwitcher } from './LanguageSwitcher';
@@ -178,7 +179,7 @@ export default function Settings({
   });
 
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    return localStorage.getItem('pedagogical_dark_mode') === 'true';
+    return getStoredDarkMode();
   });
 
   const [autoBackup, setAutoBackup] = useState<boolean>(() => {
@@ -482,7 +483,7 @@ export default function Settings({
 
   useEffect(() => {
     const handleDarkModeChange = () => {
-      setDarkMode(localStorage.getItem('pedagogical_dark_mode') === 'true');
+      setDarkMode(getStoredDarkMode());
     };
     window.addEventListener('dark_mode_changed', handleDarkModeChange);
     return () => window.removeEventListener('dark_mode_changed', handleDarkModeChange);

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { getStoredDarkMode } from '../lib/theme';
 import { motion } from 'motion/react';
 import StudentXpWidget from './StudentXpWidget';
 import { SavedDocument, DocumentType, DocumentDraft, AppNotification } from '../types';
@@ -340,7 +341,7 @@ export default function Dashboard({
   
   const [isDark, setIsDark] = useState<boolean>(() => {
     if (typeof darkMode === 'boolean') return darkMode;
-    return localStorage.getItem('pedagogical_dark_mode') === 'true';
+    return getStoredDarkMode();
   });
 
   useEffect(() => {
@@ -351,7 +352,7 @@ export default function Dashboard({
 
   useEffect(() => {
     const handleDarkChange = () => {
-      setIsDark(localStorage.getItem('pedagogical_dark_mode') === 'true');
+      setIsDark(getStoredDarkMode());
     };
     window.addEventListener('dark_mode_changed', handleDarkChange);
     return () => window.removeEventListener('dark_mode_changed', handleDarkChange);

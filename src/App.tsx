@@ -1,4 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
+import { getStoredDarkMode } from './lib/theme';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import AboutPage from './pages/AboutPage';
 import PrivacyPage from './pages/PrivacyPage';
@@ -444,7 +445,7 @@ function AppContent({ initialTab }: { initialTab?: 'dashboard' | 'create' | 'vie
 
   // Global Dark Mode Preference
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    return localStorage.getItem('pedagogical_dark_mode') === 'true';
+    return getStoredDarkMode();
   });
 
   useEffect(() => {
@@ -457,7 +458,7 @@ function AppContent({ initialTab }: { initialTab?: 'dashboard' | 'create' | 'vie
 
   useEffect(() => {
     const handleDarkModeChange = () => {
-      setDarkMode(localStorage.getItem('pedagogical_dark_mode') === 'true');
+      setDarkMode(getStoredDarkMode());
     };
     window.addEventListener('dark_mode_changed', handleDarkModeChange);
     return () => window.removeEventListener('dark_mode_changed', handleDarkModeChange);
