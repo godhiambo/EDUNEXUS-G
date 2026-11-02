@@ -1,6 +1,12 @@
 @import url('https://fonts.googleapis.com/css2?family=Architects+Daughter&family=Kalam:wght@300;400;700&family=Patrick+Hand&family=Schoolbell&family=Inter:wght@400;500;600;700&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300&family=JetBrains+Mono:wght@400;500;700&display=swap');
 @import "tailwindcss";
 
+/* The app toggles dark mode with a `.dark` class on <html> (App.tsx).
+   Tailwind v4's `dark:` variant defaults to the OS colour-scheme media query,
+   so `dark:text-*` didn't follow the in-app toggle — e.g. AI Tutor replies
+   rendered dark text on a dark bubble. Bind `dark:` to the class instead. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-handwritten: "Kalam", "Schoolbell", "Patrick Hand", cursive;
   --font-sketch: "Architects Daughter", cursive;
@@ -32,6 +38,21 @@
   --font-semibold: var(--font-weight-semibold);
   --font-bold: var(--font-weight-bold);
   --font-extrabold: var(--font-weight-extrabold);
+
+  /* ── EduNexus brand tokens (dark theme) ──────────────────────────
+     Use these instead of raw hex/slate values on public + app shells.
+     Contrast on --color-surface: ink 16.5:1, ink-soft 12.2:1,
+     ink-muted 8.2:1, brand 9.4:1 — all pass WCAG AA (4.5:1). */
+  --color-canvas: #070d12;      /* page background */
+  --color-surface: #0c1720;     /* cards, header */
+  --color-raised: #112230;      /* hover / nested cards */
+  --color-line: #1e3342;        /* borders, dividers */
+  --color-ink: #f1f5f9;         /* headings, primary text */
+  --color-ink-soft: #cbd5e1;    /* body text */
+  --color-ink-muted: #9fb0c3;   /* secondary text — never go darker on dark bg */
+  --color-brand: #34d399;       /* links, icons, accents */
+  --color-brand-strong: #10b981;/* primary button fill */
+  --color-brand-ink: #04211a;   /* text on brand-filled buttons (8.8:1) */
 }
 
 :root {
@@ -1417,9 +1438,17 @@ code, pre {
   max-width: 100%;
 }
 
-img, video, iframe, svg, canvas {
-  max-width: 100%;
-  height: auto;
+/* In @layer base so Tailwind utilities (h-full, h-8 …) still win.
+   iframes are excluded from height:auto — they have no intrinsic ratio, so
+   height:auto collapsed every embed (e.g. the YouTube demo) to 150px. */
+@layer base {
+  img, video, svg, canvas {
+    max-width: 100%;
+    height: auto;
+  }
+  iframe {
+    max-width: 100%;
+  }
 }
 
 /* Scrollable tables on mobile screens */
@@ -1671,3 +1700,13 @@ body, #root, .app-root-container {
 
 
 
+
+/* ── Brand pages (landing, public site) ────────────────────────────
+   The global mobile rules above shrink every h1 to ~22px and hyphenate
+   body text. Public marketing pages opt out with .brand-page. */
+@media (max-width: 640px) {
+  .brand-page h1 { font-size: 2.125rem !important; line-height: 1.15 !important; }
+  .brand-page h2 { font-size: 1.75rem !important; line-height: 1.2 !important; }
+  .brand-page h3 { font-size: 1.125rem !important; line-height: 1.35 !important; }
+  .brand-page p, .brand-page li, .brand-page span { hyphens: manual !important; }
+}
